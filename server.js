@@ -48,6 +48,9 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.mp3': 'audio/mpeg',
   '.ico': 'image/x-icon',
   '.webmanifest': 'application/manifest+json; charset=utf-8'
 };
