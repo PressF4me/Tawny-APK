@@ -391,9 +391,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* capture paused: steady amber, deliberately not the breathing "live" dot */
 .dot.warn { background: #e0a63c; box-shadow: 0 0 8px #e0a63c; }
 
-/* Shown to a Viewer over the last frame when the Monitor loses its camera, so a
-   frozen picture is never mistaken for a live one. */
-.paused-note {
+/* The one centred message over the video: a paused monitor, or a connection
+   that never came up. A frozen picture must never be mistaken for a live one. */
+.stage-note {
   position: absolute;
   left: 50%; top: 50%;
   transform: translate(-50%, -50%);
@@ -406,8 +406,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: #f3efe8;
   text-align: center;
 }
-.paused-note strong { font-size: 15px; color: #e0a63c; }
-.paused-note span { font-size: 13px; line-height: 1.5; color: #cfd3dc; }
+.stage-note strong { font-size: 15px; color: #e0a63c; }
+.stage-note span { font-size: 13px; line-height: 1.5; color: #cfd3dc; }
 
 @keyframes breathe { 50% { opacity: .35; } }
 

@@ -13,6 +13,6 @@ services:
       # Strongly recommended. Generate: head -c 24 /dev/urandom | base64
       # TAWNY_TOKEN: "change-me"
       # Blunts DNS rebinding. Your MagicDNS name, comma separated.
-      # ALLOWED_HOSTS: "tawny.tailnet.ts.net"
+      # ALLOWED_HOSTS: "tawny.example.net"
       # Only if the two devices are NOT both on the tailnet or LAN.
       # STUN_URLS: "stun:stun.l.google.com:19302"

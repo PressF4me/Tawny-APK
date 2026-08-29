@@ -19,6 +19,7 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.provider.MediaStore
 import android.provider.Settings
 import android.text.InputType
 import android.util.Base64
@@ -156,6 +157,34 @@ object Diag {
  * accent. Mirrors public/style.css. Call [load] before building any UI.
  * (Field names are roles, not literal hues — BERRY is bronze in dark mode.)
  */
+/**
+ * The type scale.
+ *
+ * There were seventeen distinct text sizes in this file and five different ones
+ * for what is semantically the same thing — a screen title. Sizes are sp; the
+ * matching line-height multipliers live beside them so multi-line copy stops
+ * being tight on some screens and airy on others.
+ */
+object Type {
+    const val WORDMARK = 46f     // the welcome screen's "Tawny"
+    const val WORDMARK_SM = 28f  // the same mark on a secondary screen
+    const val TITLE = 27f        // screen title
+    const val DIALOG = 22f       // title inside a card
+    const val BODY = 16f
+    const val SUB = 15f          // supporting line under a title; also links
+    const val LABEL = 13f        // tracked-out small caps
+    const val CAPTION = 11f
+    const val MICRO = 10f        // the build stamp
+    const val LEAD_BODY = 1.45f  // line-height multiplier for running text
+    const val LEAD_TIGHT = 1.2f  // for headings
+}
+
+/** One radius language. 3-4dp "equipment panel" everywhere; nothing rounder. */
+object Radius {
+    const val CARD = 4      // dp
+    const val CONTROL = 3   // dp
+}
+
 object Hue {
     var BG = 0; var PANEL = 0; var RAISE = 0; var LINE = 0
     var TEXT = 0; var DIM = 0; var BERRY = 0; var SKY = 0
@@ -248,22 +277,77 @@ class MainActivity : AppCompatActivity() {
     private val d get() = resources.displayMetrics.density
     private fun dp(v: Int) = (v * d).toInt()
 
+    /** Background work that must not sit on the UI thread. */
+    private val io = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "tawny-io").apply { isDaemon = true }
+    }
+
     private var pendingConsent: (() -> Unit)? = null
+
+    /**
+     * What the pending permission request was *for*, as a name that survives a
+     * Bundle. The lambda above cannot: if the Activity is recreated while the
+     * OS permission dialog is up ("Don't keep activities", memory pressure, a
+     * locale or font-scale change), it comes back null and the user lands on a
+     * dead screen having just granted camera and microphone.
+     */
+    private var consentTag: String? = null
+
+    /** Rebuild the post-permission action from its tag. */
+    private fun consentAction(tag: String?): (() -> Unit)? = when (tag) {
+        "monitor" -> ({ onWatcher() })
+        "handheld" -> ({ onHandheld() })
+        "live-viewer" -> ({ goLive("viewer") })
+        else -> null
+    }
 
     private val askPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
-        val consent = pendingConsent
+        val consent = pendingConsent ?: consentAction(consentTag)
         pendingConsent = null
+        consentTag = null
         if (granted.values.all { it }) {
             consent?.invoke()
         } else {
-            toast("Tawny needs the camera and microphone for this.")
+            onPermissionRefused()
         }
         if (pendingScan) {
             pendingScan = false
             if (has(android.Manifest.permission.CAMERA)) showScanner()
         }
+    }
+
+    /**
+     * A denial used to be a toast and nothing else — and once the user has
+     * checked "Don't ask again" the system dialog never appears again, so the
+     * app became permanently unusable with no way out. Offer the only route
+     * that still works.
+     */
+    private fun onPermissionRefused() {
+        val permanent = !shouldShowRequestPermissionRationale(
+            android.Manifest.permission.RECORD_AUDIO
+        ) && !shouldShowRequestPermissionRationale(android.Manifest.permission.CAMERA)
+        if (!permanent) {
+            toast("Tawny needs the camera and microphone for this.")
+            return
+        }
+        themedDialog(
+            title = "Permission needed",
+            body = "Tawny can't stream without the camera and microphone, and " +
+                "Android won't ask again from here. You can switch them on in " +
+                "this app's system settings.",
+            primaryLabel = "Open settings",
+            onPrimary = {
+                try {
+                    startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            .setData(Uri.fromParts("package", packageName, null))
+                    )
+                } catch (e: Exception) { toast("Could not open settings.") }
+            },
+            secondaryLabel = "Not now"
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -293,6 +377,10 @@ class MainActivity : AppCompatActivity() {
         // in the instance state — honour it instead of re-running the cold-start
         // routing, which would send the user back to the front door.
         val resumed = savedInstanceState?.getString("screen")?.let { restoreScreen(it) } == true
+        // A permission request that was in flight when the Activity was
+        // recreated: keep what it was for, so the grant still leads somewhere.
+        consentTag = savedInstanceState?.getString("consentTag")
+        pendingScan = savedInstanceState?.getBoolean("pendingScan", false) == true
         when {
             resumed -> Unit
             role == "station" && !key.isNullOrBlank() -> goLive("station")
@@ -313,6 +401,8 @@ class MainActivity : AppCompatActivity() {
         // Only the native screens are worth restoring; a live call is rebuilt by
         // the normal resume path instead of being re-entered blind.
         if (!isLive) outState.putString("screen", screen)
+        consentTag?.let { outState.putString("consentTag", it) }
+        if (pendingScan) outState.putBoolean("pendingScan", true)
     }
 
     /** Re-mount a screen by name after a recreate. False = not restorable. */
@@ -503,7 +593,7 @@ class MainActivity : AppCompatActivity() {
      * ask. Runs [then] once the needed permissions are granted (immediately if
      * they already are).
      */
-    private fun disclose(needCamera: Boolean, then: () -> Unit) {
+    private fun disclose(needCamera: Boolean, tag: String, then: () -> Unit) {
         val needed = buildList {
             if (needCamera) add(android.Manifest.permission.CAMERA)
             add(android.Manifest.permission.RECORD_AUDIO)
@@ -526,6 +616,7 @@ class MainActivity : AppCompatActivity() {
             primaryLabel = "Continue",
             onPrimary = {
                 pendingConsent = then
+                consentTag = tag
                 askPermissions.launch(needed.toTypedArray())
             },
             secondaryLabel = "Not now"
@@ -684,24 +775,30 @@ class MainActivity : AppCompatActivity() {
         layoutParams = lp(topMargin = 16)
     }
 
-    private fun heading(title: String, sub: String) = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        layoutParams = lp()
-        addView(TextView(this@MainActivity).apply {
-            text = title
-            setTextColor(Hue.TEXT)
-            textSize = 27f
-            letterSpacing = 0f
-            typeface = uiFontSemi
-        })
-        addView(TextView(this@MainActivity).apply {
-            text = sub
-            setTextColor(Hue.DIM)
-            textSize = 15f
-            typeface = uiFont
-            setPadding(0, dp(5), 0, 0)
-        })
-    }
+    private fun heading(title: String, sub: String, center: Boolean = false) =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = lp()
+            val g = if (center) Gravity.CENTER_HORIZONTAL else Gravity.START
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                setTextColor(Hue.TEXT)
+                textSize = Type.TITLE
+                letterSpacing = 0f
+                typeface = uiFontSemi
+                gravity = g
+                setLineSpacing(0f, 1.2f)
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = sub
+                setTextColor(Hue.DIM)
+                textSize = Type.SUB
+                typeface = uiFont
+                gravity = g
+                setLineSpacing(0f, 1.4f)
+                setPadding(0, dp(5), 0, 0)
+            })
+        }
 
     private fun pill(label: String, fg: Int, fill: Int, stroke: Int, onClick: () -> Unit) =
         TextView(this).apply {
@@ -924,6 +1021,51 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    /**
+     * A plain "working on it" screen. `goLive` used to wipe the display and
+     * mount a WebView whose background is just the page colour, so the user
+     * stared at a flat cream rectangle until the page finished loading.
+     */
+    private fun showBusy(label: String) {
+        clearScreen()
+        screen = "busy"
+        val col = column(scroll = false)
+        col.addView(wordmark())
+        col.addView(waitingRow(label))
+        root.addView(col)
+    }
+
+    /**
+     * Bring the LAN relay up without blocking the UI thread.
+     *
+     * Starting it inline meant a `CountDownLatch.await(3, SECONDS)` plus up to
+     * fifty blocking socket binds ran on the main thread from a tap — well
+     * inside ANR territory on a cold device. The server is usually already up
+     * by the time this is called a second time, so the fast path stays sync.
+     */
+    /** The LAN relay would not bind. Offer a retry that re-enters as a Monitor. */
+    private fun relayFailed() {
+        Diag.log("shell", "signal server failed to bind")
+        themedDialog(
+            title = "Could not start the monitor",
+            body = "Tawny could not open a connection on this network. Check this " +
+                "phone is on Wi-Fi, then try again.",
+            primaryLabel = "Try again",
+            onPrimary = { onWatcher() },
+            secondaryLabel = "Back",
+            onSecondary = { showRole() }
+        )
+    }
+
+    private fun withSignalServer(onReady: (Int) -> Unit) {
+        signalServer?.let { onReady(it.boundPort); return }
+        showBusy("Starting the monitor")
+        io.execute {
+            val port = ensureSignalServer()
+            runOnUiThread { if (!isFinishing && !isDestroyed) onReady(port) }
+        }
+    }
+
     private fun waitingRow(label: String) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER
@@ -1010,7 +1152,7 @@ class MainActivity : AppCompatActivity() {
             }
         }.apply()
         if (role == "station") onWatcher()
-        else disclose(needCamera = false) { goLive("viewer") }
+        else disclose(needCamera = false, tag = "live-viewer") { goLive("viewer") }
     }
 
     private fun relativeTime(ts: Long): String {
@@ -1500,7 +1642,7 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
-        disclose(needCamera = true) {
+        disclose(needCamera = true, tag = "monitor") {
             if (prefs.getString("channelKey", null).isNullOrBlank()) {
                 promptRoomName { name ->
                     prefs.edit()
@@ -1588,12 +1730,8 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun startWatcher(ip: String?) {
-        val sigPort = ensureSignalServer()
-        if (sigPort < 0) {
-            toast("Could not start the Monitor. Restart the app and try again.")
-            return
-        }
+    private fun startWatcher(ip: String?) = withSignalServer { sigPort ->
+        if (sigPort < 0) { relayFailed(); return@withSignalServer }
         // Persist the role now so an unattended Watcher that gets killed
         // (Samsung battery, low memory) comes back as the Watcher, not the setup
         // screen. Clear any leftover Handheld state so resumeSession() can't
@@ -1636,7 +1774,7 @@ class MainActivity : AppCompatActivity() {
     // -------------------------------------------------------- the handheld
 
     private fun onHandheld() {
-        disclose(needCamera = false) {
+        disclose(needCamera = false, tag = "handheld") {
             if (has(android.Manifest.permission.CAMERA)) {
                 showScanner()
                 return@disclose
@@ -1922,21 +2060,22 @@ class MainActivity : AppCompatActivity() {
     // -------------------------------------------------------- live (webview)
 
     private fun goLive(role: String) {
+        if (role == "station") {
+            withSignalServer { port ->
+                if (port < 0) { relayFailed(); return@withSignalServer }
+                goLiveWith(role, "ws://127.0.0.1:$port")
+            }
+            return
+        }
+        val lan = prefs.getString("signalUrl", null)
+        if (lan == null && !hasRendezvous) return showWelcome()
+        goLiveWith(role, lan)   // may be null — app.js then uses the rendezvous only
+    }
+
+    private fun goLiveWith(role: String, signal: String?) {
         val key = prefs.getString("channelKey", null) ?: return showWelcome()
         val name = prefs.getString("channelName", "your pet") ?: "your pet"
         val httpPort = ensureAssetServer()
-        val signal: String? = if (role == "station") {
-            val port = ensureSignalServer()
-            if (port < 0) {
-                toast("Could not start the Monitor. Restart the app and try again.")
-                return showRole()
-            }
-            "ws://127.0.0.1:$port"
-        } else {
-            val lan = prefs.getString("signalUrl", null)
-            if (lan == null && !hasRendezvous) return showWelcome()
-            lan   // may be null — app.js then uses the rendezvous only
-        }
         // Mint the Monitor's admission ticket BEFORE reading it. The rendezvous
         // admits a Monitor only if its first frame carries sha256(ticket), and
         // the QR has to advertise that very same ticket. Reading `myToken`
@@ -1948,10 +2087,11 @@ class MainActivity : AppCompatActivity() {
         val token = if (role == "station") watcherToken()
                     else prefs.getString("pairToken", null)
         prefs.edit().putString("role", role).apply()
+        val ip = lanIp()      // was enumerated three times in a row, on the UI thread
         val pairPayload = if (role == "station")
-            pairingPayload(lanIp(), signalServer?.boundPort ?: 0, key, name, token)
+            pairingPayload(ip, signalServer?.boundPort ?: 0, key, name, token)
         else null
-        Diag.log("shell", "goLive role=$role lan=${lanIp() ?: "-"} signal=${signal ?: "-"} " +
+        Diag.log("shell", "goLive role=$role lan=${ip ?: "-"} signal=${signal ?: "-"} " +
             "rv=${BuildConfig.RENDEZVOUS_URL.ifBlank { "NONE" }} " +
             "ticket=${if (token.isNullOrBlank()) "MISSING" else "yes"}")
         showWeb("http://127.0.0.1:$httpPort/#native", role, key, name, signal,
@@ -2073,12 +2213,20 @@ class MainActivity : AppCompatActivity() {
         }
         val col = column(scroll = true).apply { gravity = Gravity.CENTER_HORIZONTAL }
         col.addView(backLink { confirmEndCall() })
-        col.addView(heading(name, "Scan this to start watching"))
-        col.addView(ImageView(this).apply {
+        // Centred: this column centres everything else, and heading() defaults to
+        // START, so the screen's own title used to be the one thing out of line.
+        col.addView(heading(name, "Scan this to start watching", center = true))
+        val qr = ImageView(this).apply {
             val s = dp(260)
             layoutParams = LinearLayout.LayoutParams(s, s).also { it.topMargin = dp(16) }
-            setImageBitmap(qrBitmap(payload, 640))
-        })
+        }
+        col.addView(qr)
+        // A 640x640 ZXing encode is not free, and this runs on the way into a
+        // live session where the UI thread is already busy.
+        io.execute {
+            val bmp = try { qrBitmap(payload, 640) } catch (e: Exception) { null }
+            runOnUiThread { if (bmp != null && qr.isAttachedToWindow) qr.setImageBitmap(bmp) }
+        }
         col.addView(
             body(
                 "On the other phone, open Tawny and tap Watch your pet. Point " +
@@ -2238,19 +2386,36 @@ class MainActivity : AppCompatActivity() {
          */
         @JavascriptInterface
         fun saveImage(dataUrl: String, filename: String) {
-            runOnUiThread {
+            // Decoding and writing a multi-megabyte PNG used to happen inside
+            // runOnUiThread. It also went to getExternalFilesDir(), which is
+            // app-private from API 29 on — so "Saved" was true but the picture
+            // never appeared in the user's gallery. MediaStore, off the UI thread.
+            val safe = filename.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .replace(Regex("^\\.+"), "_")        // no "." / ".." names
+                .ifBlank { "snapshot.png" }
+            io.execute {
                 try {
                     val b64 = dataUrl.substringAfter("base64,")
                     val bytes = Base64.decode(b64, Base64.DEFAULT)
-                    val dir = getExternalFilesDir(Environment.DIRECTORY_PICTURES) ?: filesDir
-                    val safe = filename.replace(Regex("[^A-Za-z0-9._-]"), "_")
-                        .replace(Regex("^\\.+"), "_")        // no "." / ".." names
-                        .ifBlank { "snapshot.png" }
-                    File(dir, safe).writeBytes(bytes)
-                    toast("Saved $safe")
+                    val values = android.content.ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, safe)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+                        put(
+                            MediaStore.MediaColumns.RELATIVE_PATH,
+                            Environment.DIRECTORY_PICTURES + "/Tawny"
+                        )
+                    }
+                    val resolver = contentResolver
+                    val uri = resolver.insert(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+                    ) ?: throw java.io.IOException("no MediaStore row")
+                    resolver.openOutputStream(uri).use { out ->
+                        (out ?: throw java.io.IOException("no stream")).write(bytes)
+                    }
+                    runOnUiThread { toast("Saved to Pictures/Tawny") }
                 } catch (e: Exception) {
-                    toast("Could not save the snapshot")
                     Log.w("Tawny", "snapshot failed", e)
+                    runOnUiThread { toast("Could not save the snapshot") }
                 }
             }
         }

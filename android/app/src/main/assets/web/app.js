@@ -20,7 +20,10 @@ const el = {
   local: $('#local'), loader: $('#loader'), peerAudio: $('#peer-audio'),
   peercount: $('#peercount'),
   sas: $('#sas'), sascode: $('#sas-code'), saschip: $('#sas-chip'),
-  sasnote: $('#sas-note'), pausedNote: $('#paused-note'),
+  sasnote: $('#sas-note'),
+  stageNote: $('#stage-note'),
+  stageNoteTitle: $('#stage-note-title'),
+  stageNoteBody: $('#stage-note-body'),
   dot: $('#dot'), statusline: $('#statusline'), channel: $('#channel'),
   meter: $('#meter'), dimMeter: $('#dim-meter'), dimmer: $('#dimmer'),
   talkflag: $('#talkflag'), chimes: $('#chimes'), toast: $('#toast'),
@@ -62,6 +65,9 @@ const MAX_VIEWERS = 5;
 // couple of dozen; anything past this is a peer filling memory.
 const MAX_PENDING_ICE = 64;
 
+// How long a Viewer waits for a picture before saying something useful.
+const CONNECT_TIMEOUT_MS = 25000;
+
 // --------------------------------------------------------------- storage
 
 const readJSON = (k, fallback) => {
@@ -101,6 +107,15 @@ function toast(msg, ms = 2600) {
   el.toast.hidden = false;
   clearTimeout(toast._t);
   toast._t = setTimeout(() => { el.toast.hidden = true; }, ms);
+}
+
+/** The single message overlay on the video stage. Pass null to clear it. */
+function stageNote(title, body) {
+  if (!el.stageNote) return;
+  if (!title) { el.stageNote.hidden = true; return; }
+  el.stageNoteTitle.textContent = title;
+  el.stageNoteBody.textContent = body || '';
+  el.stageNote.hidden = false;
 }
 
 function note(node, msg) {
@@ -943,6 +958,11 @@ async function fetchIce() {
     const j = await r.json();
     const turn = Array.isArray(j.iceServers) ? j.iceServers : [];
     S.ice = [...(S.cfg.stun || []).map((urls) => ({ urls })), ...turn];
+    // newPC() snapshots the server list at construction, so a TURN answer that
+    // lands after the first connection was previously never used by it — the
+    // one case that actually needs a relay (both peers behind carrier NAT) is
+    // also the case where the connection is still failing when TURN arrives.
+    if (turn.length) applyIceToLivePeers();
     const ttl = Number(j.ttl) || 0;
     if (ttl > 30) {
       clearTimeout(S.iceTimer);
@@ -980,6 +1000,7 @@ function removePeer(id) {
   const p = S.peers.get(id);
   if (!p) return;
   clearTimeout(p.iceKick);
+  clearTimeout(p.connectDeadline);
   clearTimeout(p.sasTimer);      // stop the safety-code retry loop
   if (p.qTimer) { clearInterval(p.qTimer); p.qTimer = null; }
   if (p.pc) { p.pc.onnegotiationneeded = null; try { p.pc.close(); } catch {} }
@@ -991,7 +1012,7 @@ function removePeer(id) {
     // Lost the Monitor — clear the picture and wait for it to come back.
     stopMeter();
     S.remotePaused = false;
-    if (el.pausedNote) el.pausedNote.hidden = true;
+    stageNote(null);
     el.talkflag.hidden = true;
     S.remoteStream = null;
     el.remote.srcObject = null;
@@ -1014,7 +1035,7 @@ function teardownAll() {
   el.saschip.hidden = true;
   S.remotePaused = false;
   S.captureLost = false;
-  if (el.pausedNote) el.pausedNote.hidden = true;
+  stageNote(null);
   // clear digital zoom so transforms don't carry over into the next session
   const remoteEl = document.getElementById('remote');
   if (remoteEl) remoteEl.style.transform = '';
@@ -1179,26 +1200,46 @@ async function handle(m, entry) {
       // backgrounded). Say so, instead of leaving a frozen frame up.
       if (typeof m.paused === 'boolean') {
         S.remotePaused = m.paused;
-        if (el.pausedNote) el.pausedNote.hidden = !m.paused;
+        stageNote(m.paused ? 'The monitor is paused' : null,
+          'Its screen turned off or the app moved to the background. The picture '
+          + 'comes back on its own when the monitor phone is woken.');
         status(m.paused ? 'Monitor paused' : 'On air', m.paused ? 'warn' : 'live');
         if (!m.petName) break;
       }
-      if (!m.petName) break;
+      if (typeof m.petName !== 'string') break;
+      // Peer-controlled, and it ends up in SharedPreferences and the recent-
+      // sessions JSON, so bound it the same way the name field does.
+      const petName = m.petName.replace(/\s+/g, ' ').trim().slice(0, 40);
+      if (!petName) break;
       if (S.channel) {
-        S.channel.name = m.petName;
+        S.channel.name = petName;
         const list = getChannels();
         const ch = list.find((c) => c.key === S.channel.key);
-        if (ch) { ch.name = m.petName; setChannels(list); }
-        if (el.channel) el.channel.textContent = m.petName;
+        if (ch) { ch.name = petName; setChannels(list); }
+        if (el.channel) el.channel.textContent = petName;
       }
-      if (S.nativeShell) tellNative('petname', { name: m.petName });
+      if (S.nativeShell) tellNative('petname', { name: petName });
       break;
     }
     case 'camera-control': {
-      // Station receives zoom/lens commands from a viewer.
+      // Station receives zoom/lens commands from a viewer. These are entirely
+      // peer-controlled: NaN used to reach applyConstraints and render "NaN×",
+      // and repeated lens commands re-ran getUserMedia in a loop, letting a
+      // viewer cycle the Monitor's camera hardware.
       if (S.role !== 'station') break;
-      if (m.zoom != null) applyZoom(Number(m.zoom));
-      if (m.lens != null) switchLens(Number(m.lens));
+      if (m.zoom != null) {
+        const z = Number(m.zoom);
+        if (Number.isFinite(z)) applyZoom(Math.min(Math.max(z, 1), 8));
+      }
+      if (m.lens != null) {
+        const i = Number(m.lens);
+        const now = Date.now();
+        if (Number.isInteger(i) && i >= 0 && i < S.cameras.length
+            && now - (handle._lensAt || 0) > 1500) {
+          handle._lensAt = now;
+          switchLens(i);
+        }
+      }
       break;
     }
     case 'bye':
@@ -1213,6 +1254,21 @@ async function handle(m, entry) {
 function iceServers() {
   if (S.ice && S.ice.length) return S.ice;
   return (S.cfg.stun || []).map((urls) => ({ urls }));
+}
+
+/** Push a newly-fetched ICE server list into connections that already exist. */
+function applyIceToLivePeers() {
+  for (const p of S.peers.values()) {
+    const pc = p.pc;
+    if (!pc || pc.connectionState === 'closed') continue;
+    try { pc.setConfiguration({ iceServers: iceServers(), iceCandidatePoolSize: 0 }); }
+    catch { continue; }
+    // Only restart the ones that need it; a healthy connection stays untouched.
+    const st = pc.iceConnectionState;
+    if (st === 'failed' || st === 'disconnected' || st === 'checking' || st === 'new') {
+      try { pc.restartIce(); } catch {}
+    }
+  }
 }
 
 function newPC(peer) {
@@ -1245,6 +1301,7 @@ function newPC(peer) {
       el.remote.hidden = !hasVideo;
       if (hasVideo) playSoon(el.remote);
       el.loader.hidden = true;
+      if (!S.remotePaused) stageNote(null);
       startMeter(stream);           // meter the Watcher's room
     } else {
       // Station. Talk-back audio always rides a hidden per-peer <audio>.
@@ -1277,11 +1334,33 @@ function newPC(peer) {
 
   pc.onconnectionstatechange = () => {
     const st = pc.connectionState;
-    if (st === 'connected') clearTimeout(peer.iceKick);
-    else if (st === 'failed') reconnectPeer(peer);
+    if (st === 'connected') {
+      clearTimeout(peer.iceKick);
+      clearTimeout(peer.connectDeadline);
+      peer.connectDeadline = null;
+    } else if (st === 'failed') reconnectPeer(peer);
     updateStatus();
     updatePeerChip();
   };
+
+  // Without TURN, two peers both behind carrier-grade NAT never gather a usable
+  // candidate pair — and nothing timed that out, so the Viewer sat on
+  // "Connecting" indefinitely with no idea why. Say something after a while.
+  if (S.role === 'viewer' && peer.role === 'station') {
+    clearTimeout(peer.connectDeadline);
+    peer.connectDeadline = setTimeout(() => {
+      if (peer.pc && peer.pc.connectionState !== 'connected') {
+        diag(`connect timeout (ice=${peer.pc.iceConnectionState})`);
+        const relayed = (S.ice || []).some((e) => /^turns?:/i.test(
+          Array.isArray(e.urls) ? e.urls[0] || '' : e.urls || ''));
+        stageNote('Still trying to connect', relayed
+          ? 'Check the monitor phone is awake with Tawny open.'
+          : 'A direct connection could not be made from this network. If both '
+            + 'phones are on mobile data, try putting this one on Wi-Fi.');
+        status('Cannot connect', 'warn');
+      }
+    }, CONNECT_TIMEOUT_MS);
+  }
 
   // A short ICE drop usually heals itself; when it doesn't, the viewer forces a
   // restart so it isn't left on a frozen frame. The Watcher just waits.
@@ -2030,9 +2109,6 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
   start(role === 'station' ? 'station' : 'viewer');
   return true;
 };
-
-// Back-compat alias for the not-yet-updated iOS shell (deferred parity work).
-window.frentalkStart = window.tawnyStart;
 
 (async function init() {
   if ('BarcodeDetector' in window) el.chScan.hidden = false;

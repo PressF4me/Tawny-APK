@@ -22,6 +22,26 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.concurrent.thread
 
+/**
+ * `connect-src` for the pages this server hands out.
+ *
+ * It used to end in a blanket `https:`, which meant that if script injection
+ * ever landed in the page, the channel key sitting in localStorage could be
+ * posted to any host on the internet. The page only ever needs three things:
+ * its own origin, the Monitor's relay on the LAN (a plain `ws:` on a private
+ * address that changes with the network), and the one rendezvous host this
+ * build was compiled against.
+ */
+private val CONNECT_SRC: String = buildString {
+    append("'self' ws:")
+    val rv = BuildConfig.RENDEZVOUS_URL
+    if (rv.isNotBlank()) {
+        val host = rv.removePrefix("wss://").removePrefix("ws://")
+            .substringBefore('/').substringBefore('?')
+        if (host.isNotBlank()) { append(" wss://"); append(host); append(" https://"); append(host) }
+    }
+}
+
 private fun firstFreePort(start: Int): Int {
     for (p in start until start + 25) {
         try { ServerSocket(p).use { }; return p } catch (e: Exception) { /* taken */ }
@@ -39,7 +59,15 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
 
     val port: Int
     private val server: ServerSocket
-    private val pool = Executors.newCachedThreadPool()
+    // Bounded, not newCachedThreadPool(): any other app on the device holding
+    // INTERNET can open sockets to loopback, and an unbounded pool would let it
+    // spawn threads until the process dies. Binding to 127.0.0.1 is not a UID
+    // boundary.
+    private val pool = java.util.concurrent.ThreadPoolExecutor(
+        2, 8, 30, java.util.concurrent.TimeUnit.SECONDS,
+        java.util.concurrent.ArrayBlockingQueue(32),
+        java.util.concurrent.ThreadPoolExecutor.DiscardPolicy(),
+    )
     @Volatile private var running = true
 
     init {
@@ -67,9 +95,18 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
     }
 
     private fun handle(sock: Socket) {
+        // A caller that never finishes its request should not hold a worker.
+        sock.soTimeout = 5_000
         val reader = BufferedReader(InputStreamReader(sock.getInputStream()))
-        val requestLine = reader.readLine() ?: return
-        while (true) { val h = reader.readLine() ?: break; if (h.isEmpty()) break }
+        // readLine() with no bound would happily assemble a several-hundred-
+        // megabyte request line or header and take the process with it.
+        val requestLine = readLineCapped(reader) ?: return
+        var headers = 0
+        while (true) {
+            val h = readLineCapped(reader) ?: break
+            if (h.isEmpty()) break
+            if (++headers > MAX_HEADERS) return
+        }
 
         val parts = requestLine.split(" ")
         val out = sock.getOutputStream()
@@ -111,6 +148,18 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
         return "web/" + stack.joinToString("/")
     }
 
+    /** readLine(), but gives up instead of buffering an unbounded line. */
+    private fun readLineCapped(reader: BufferedReader): String? {
+        val sb = StringBuilder()
+        while (true) {
+            val c = reader.read()
+            if (c < 0) return if (sb.isEmpty()) null else sb.toString()
+            if (c == '\n'.code) return sb.toString().removeSuffix("\r")
+            if (sb.length >= MAX_LINE) return null
+            sb.append(c.toChar())
+        }
+    }
+
     private fun mime(path: String) = when (path.substringAfterLast('.', "")) {
         "html" -> "text/html; charset=utf-8"
         "js", "mjs" -> "text/javascript; charset=utf-8"
@@ -131,7 +180,7 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
             "Referrer-Policy: no-referrer\r\n" +
             "Content-Security-Policy: default-src 'none'; script-src 'self'; " +
             "style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; " +
-            "font-src 'self'; manifest-src 'self'; connect-src 'self' ws: wss: https:; " +
+            "font-src 'self'; manifest-src 'self'; connect-src $CONNECT_SRC; " +
             "base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n" +
             "Connection: close\r\n\r\n"
         out.write(head.toByteArray(Charsets.US_ASCII))
@@ -143,6 +192,11 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
         running = false
         try { server.close() } catch (e: Exception) {}
         pool.shutdownNow()
+    }
+
+    private companion object {
+        const val MAX_LINE = 8 * 1024
+        const val MAX_HEADERS = 64
     }
 }
 

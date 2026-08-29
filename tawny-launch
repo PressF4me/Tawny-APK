@@ -17,7 +17,7 @@ elif [ -f "$CONFIG" ]; then
   URL="$(cat "$CONFIG")"
 else
   echo "No server address saved yet. Run:" >&2
-  echo "  tawny-launch https://tawny.tailnet.ts.net" >&2
+  echo "  tawny-launch https://tawny.example.net" >&2
   exit 1
 fi
 

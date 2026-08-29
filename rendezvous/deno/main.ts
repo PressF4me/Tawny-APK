@@ -17,7 +17,12 @@
 const ROOM_RE = /^[a-f0-9]{32}$/;
 const TICKET_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
-const RELAY = new Set(["offer", "answer", "ice", "bye", "chime", "chime-ack", "talking"]);
+// "cameras", "meta" and "camera-control" were missing here — the same bug that
+// made the lens picker, remote zoom and pet-name sync inert on the other relays.
+const RELAY = new Set([
+  "offer", "answer", "ice", "bye", "chime", "chime-ack", "talking",
+  "cameras", "meta", "camera-control",
+]);
 const MAX_PER_ROOM = 6;
 const MAX_STATIONS = 1;
 const TICKET_TTL = 24 * 60 * 60_000;

@@ -271,10 +271,11 @@
       </div>
     </div>
 
-    <div id="paused-note" class="paused-note" hidden>
-      <strong>The monitor is paused</strong>
-      <span>Its screen turned off or the app moved to the background. The picture
-        resumes on its own when the monitor phone is woken.</span>
+    <!-- One centred message over the video. Two overlays fighting for the same
+         spot is how the SAS card ended up on top of the picture-in-picture. -->
+    <div id="stage-note" class="stage-note" hidden>
+      <strong id="stage-note-title"></strong>
+      <span id="stage-note-body"></span>
     </div>
 
     <div id="talkflag" class="talkflag" hidden>Listening to you</div>
@@ -360,7 +361,7 @@
     <div id="pair-custom-wrap" class="field" hidden>
       <span>Address</span>
       <input id="pair-custom" spellcheck="false" autocapitalize="off"
-             placeholder="https://tawny.tailnet.ts.net">
+             placeholder="https://tawny.example.net">
     </div>
 
     <p id="pair-warn" class="warn" hidden></p>

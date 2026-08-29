@@ -30,7 +30,7 @@ struct SetupView: View {
                         .kerning(2)
                         .foregroundColor(Theme.dim)
 
-                    TextField("tawny.tailnet.ts.net", text: $text)
+                    TextField("tawny.example.net", text: $text)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
