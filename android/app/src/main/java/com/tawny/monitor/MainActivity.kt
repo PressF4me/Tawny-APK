@@ -2247,6 +2247,22 @@ class MainActivity : AppCompatActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
         }
         view.setBackgroundColor(Hue.BG)
+        // GUARD: this binding is NOT origin-scoped. Android has no per-origin
+        // form of addJavascriptInterface — every frame the WebView loads gets
+        // `TawnyNative`, including any third-party iframe. It is safe here only
+        // because of two invariants that must hold together:
+        //
+        //   1. the page is bundled in the APK and served from this process's own
+        //      loopback server (AssetHttpServer), never from the network, and
+        //   2. `public/index.html` embeds no iframe, and its meta CSP is
+        //      `default-src 'none'` with no `frame-src`, so one cannot be
+        //      loaded even if a script tried.
+        //
+        // Break either one — an <iframe>, an external help page, a remote CDN
+        // for a font — and a foreign origin can call snapshot(), keepAwake() and
+        // the rest of Bridge directly. If that day comes, move the bridge behind
+        // WebViewCompat.addWebMessageListener(..., allowedOriginRules), which
+        // *is* origin-scoped. See SECURITY.md, "JavaScript bridge".
         view.addJavascriptInterface(Bridge(), "TawnyNative")
 
         view.webChromeClient = object : WebChromeClient() {

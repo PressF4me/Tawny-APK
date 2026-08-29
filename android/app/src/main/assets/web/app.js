@@ -494,6 +494,16 @@ async function openScanner() {
 el.chScan.addEventListener('click', openScanner);
 $('#scan-close').addEventListener('click', () => S.scanStop?.());
 
+// The admission ticket arrives from somewhere attacker-supplyable — a pasted
+// URL, a scanned code, a `tawny://pair` intent — and from here it is echoed
+// into the signalling `hello` frame and the /turn query string. Hold it to the
+// same charset every relay validates it against (TICKET_RE in worker.js,
+// room.js and deno/main.ts, and the identical Regex in MainActivity's
+// parsePairing) rather than forwarding whatever turned up. A ticket outside
+// this set can only ever be refused, so refuse the whole link now instead of
+// half-adopting a channel that will fail admission later.
+const TICKET_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
 // Import a pairing link. Returns true when it was a valid one.
 function adopt(raw) {
   let hash;
@@ -504,7 +514,11 @@ function adopt(raw) {
   if (!key || !/^[A-Za-z0-9_-]{16,64}$/.test(key)) return false;
 
   const name = (p.get('n') || 'Pet camera').slice(0, 40);
-  if (p.get('t')) S.token = p.get('t');
+  const token = p.get('t');
+  if (token) {
+    if (!TICKET_RE.test(token)) return false;
+    S.token = token;
+  }
 
   const list = getChannels();
   let ch = list.find((c) => c.key === key);
@@ -2095,7 +2109,10 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
   }
   S.signalUrl = signalUrl || null;              // may be null on a cloud-only pairing
   if (rendezvousUrl) S.cfg.rendezvous = rendezvousUrl;
-  if (token) S.token = token;
+  if (token) {
+    if (!TICKET_RE.test(token)) return false;   // same guard as adopt()
+    S.token = token;
+  }
   const wanted = (name || 'Pet camera').slice(0, 40);
   const list = getChannels();
   let ch = list.find((c) => c.key === key);
