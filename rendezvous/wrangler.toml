@@ -20,6 +20,15 @@ new_sqlite_classes = ["Room"]
 binding = "RL"
 id = "a8cb27e35c234a54b3a15f5ea6118b76"
 
+# Atomic per-IP rate limiting. The KV counter below is a read-modify-write
+# against an eventually-consistent store, so a burst walks through it; this
+# binding is the real limit and the KV path is only a fallback.
+[[unsafe.bindings]]
+name = "LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
+
 [vars]
 # Public STUN servers handed to clients (safe to ship). Empty = clients use
 # whatever is already baked into the app's config.json.

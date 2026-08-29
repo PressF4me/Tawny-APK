@@ -50,8 +50,29 @@ function originOk(request, env) {
   return list(env.ALLOWED_ORIGINS).includes(o) || list(env.ALLOWED_ORIGINS).includes(h.host);
 }
 
+/**
+ * Per-IP throttle.
+ *
+ * This used to be a read-modify-write against Workers KV, which is eventually
+ * consistent with cache propagation measured in tens of seconds — a burst from
+ * one address read a stale counter near zero and walked straight through. The
+ * native rate-limiting binding is atomic and is the right tool; the KV path is
+ * kept only as a fallback so a deployment without the binding still degrades to
+ * the old, weak behaviour rather than to no limit at all.
+ *
+ * Note this is a coarse outer gate. The limit that actually protects a channel
+ * is the per-room failure counter inside the Durable Object, which is strongly
+ * consistent and cannot be sidestepped by rotating source addresses.
+ */
 async function rateLimited(env, ip) {
-  if (!env.RL || !ip) return false;
+  if (!ip) return false;
+  if (env.LIMITER?.limit) {
+    try {
+      const { success } = await env.LIMITER.limit({ key: ip });
+      return !success;
+    } catch { /* fall through to KV */ }
+  }
+  if (!env.RL) return false;
   const key = `rl:${ip}:${Math.floor(Date.now() / 600_000)}`;   // 10-min bucket
   const n = Number((await env.RL.get(key)) || 0) + 1;
   await env.RL.put(key, String(n), { expirationTtl: 900 });

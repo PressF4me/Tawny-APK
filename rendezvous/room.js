@@ -7,9 +7,11 @@
 // per-pairing admission ticket.
 //
 // Admission (fail-closed): every socket must send {type:'hello'} as its first
-// frame before it is joined to the room or told about anyone. A Handheld's hello
-// must carry a ticket `t` whose sha256 matches the one the Watcher registered
-// (in its own hello's `hashT`). No ticket ⇒ no admission.
+// frame before it is joined to the room or told about anyone. A Viewer's hello
+// must carry a ticket `t` whose sha256 matches the one the Monitor registered
+// (in its own hello's `hashT`). No ticket ⇒ no admission. A Monitor that wants
+// to *change* the registered ticket must also prove it holds the channel key,
+// with `a` = sha256("tawny-auth-v1|" + key).
 //
 // Uses the WebSocket Hibernation API so an idle room costs nothing.
 
@@ -24,6 +26,14 @@ const RELAY = new Set([
 ]);
 const TICKET_TTL_MS = 24 * 60 * 60 * 1000;
 const HEX64 = /^[a-f0-9]{64}$/;
+// A socket that connects and never says hello held a slot forever: pending
+// sockets are excluded from members(), so MAX_PER_ROOM never stopped them.
+const ADMIT_TIMEOUT_MS = 10_000;
+// Signalling frames are a few KB. Anything larger is someone filling memory.
+const MAX_MSG = 64 * 1024;
+// Wrong answers, per room, before this room stops entertaining new sockets.
+const MAX_FAILED_ADMITS = 20;
+const FAIL_WINDOW_MS = 10 * 60 * 1000;
 
 const hex = (buf) =>
   [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -45,6 +55,26 @@ export class Room {
     return rec && Date.now() <= rec.exp ? rec : null;
   }
 
+  /**
+   * Count a rejected admission. A room that is being probed stops accepting
+   * new sockets for a while — strongly consistent, unlike the KV counter in the
+   * Worker, because it lives in the one object that owns this room.
+   */
+  async noteFailure() {
+    const now = Date.now();
+    const f = (await this.state.storage.get('fails')) || { n: 0, since: now };
+    if (now - f.since > FAIL_WINDOW_MS) { f.n = 0; f.since = now; }
+    f.n += 1;
+    await this.state.storage.put('fails', f);
+  }
+
+  async tooManyFailures() {
+    const f = await this.state.storage.get('fails');
+    if (!f) return false;
+    if (Date.now() - f.since > FAIL_WINDOW_MS) return false;
+    return f.n >= MAX_FAILED_ADMITS;
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
 
@@ -63,8 +93,12 @@ export class Room {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     // pending: joined to the socket set but not yet admitted to the room.
-    server.serializeAttachment({ role, pending: true });
+    server.serializeAttachment({ role, pending: true, since: Date.now() });
     this.state.acceptWebSocket(server);
+    // Close anything still unadmitted when the next alarm runs.
+    const due = Date.now() + ADMIT_TIMEOUT_MS;
+    const cur = await this.state.storage.getAlarm();
+    if (cur === null || cur > due) await this.state.storage.setAlarm(due);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -73,6 +107,9 @@ export class Room {
   }
 
   async webSocketMessage(ws, raw) {
+    if (typeof raw === 'string' ? raw.length > MAX_MSG : raw.byteLength > MAX_MSG) {
+      ws.close(4009, 'message too large'); return;
+    }
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     if (!msg || typeof msg !== 'object') return;
@@ -80,44 +117,77 @@ export class Room {
     if (!meta) return;
 
     // ---- admission ----
+    //
+    // Order matters here, and it did not used to. The ticket was re-written
+    // before the room's capacity and single-Monitor checks ran, so an attacker
+    // who knew only the room id could connect, be turned away with 4004
+    // "monitor already running" — and still have re-keyed the channel on the
+    // way out, locking every paired Viewer to 4008 until the 24h TTL expired.
+    // Nothing that gets rejected may change stored state.
     if (meta.pending) {
       if (msg.type !== 'hello') { ws.close(4000, 'expected hello'); return; }
-      const rec = await this.ticket();
+      if (await this.tooManyFailures()) { ws.close(4029, 'too many attempts'); return; }
 
+      const rec = await this.ticket();
+      const here = this.members();
+
+      // 1. Capacity first — a refused socket must be a no-op.
+      if (here.length >= MAX_PER_ROOM) { ws.close(4003, 'channel full'); return; }
+      if (meta.role === 'station' &&
+          here.filter((w) => w.deserializeAttachment()?.role === 'station').length >= MAX_STATIONS) {
+        ws.close(4004, 'monitor already running'); return;
+      }
+
+      // 2. Then prove admission.
+      //
+      // `a` is sha256("tawny-auth-v1|" + channel key) — a second, independent
+      // hash of the key under a different domain separator. It proves the
+      // sender holds the key without revealing it, and unlike the room id it
+      // cannot be learned by watching traffic: the room id travels in the
+      // WebSocket URL, is written to the on-device diagnostics log, and until
+      // this release went out in clear text on the LAN.
+      //
+      // It is stored with the ticket and expires with it, so a room whose
+      // Monitor never comes back resets on its own rather than staying claimed
+      // by whoever spoke first.
+      let rekey = null;
       if (meta.role === 'viewer') {
-        if (!rec || (await sha256Hex(msg.t)) !== rec.hashT) { ws.close(4008, 'pairing expired'); return; }
-      } else { // station
-        // The Monitor is the authority on the current ticket: a hello carrying a
-        // well-formed hashT always (re)writes the record.
-        //
-        // This used to be write-once for TICKET_TTL_MS, which bricked a channel
-        // for a full day whenever the Monitor's ticket changed under it — an app
-        // data wipe, "Start over", a re-pair, or a stale record from an earlier
-        // install. Neither side could ever satisfy the stored hash again, so the
-        // Monitor got 4008 and every Handheld off the LAN saw "Monitor isn't on
-        // yet", with no way to recover except waiting out the TTL.
-        //
-        // It gives nothing away: the room id is sha256("tawny-room-v1|" + key),
-        // so anyone who can address this room already holds the channel key —
-        // the ticket was never what kept them out.
-        if (typeof msg.hashT === 'string' && HEX64.test(msg.hashT)) {
-          if (!rec || rec.hashT !== msg.hashT) {
-            await this.state.storage.put('ticket', { hashT: msg.hashT, exp: Date.now() + TICKET_TTL_MS });
-            await this.state.storage.setAlarm(Date.now() + TICKET_TTL_MS + 60_000);
-          }
+        if (!rec || (await sha256Hex(msg.t)) !== rec.hashT) {
+          await this.noteFailure();
+          ws.close(4008, 'pairing expired'); return;
+        }
+      } else {
+        const claimed = typeof msg.a === 'string' && HEX64.test(msg.a) ? msg.a : null;
+        if (rec?.auth && claimed && claimed !== rec.auth) {
+          await this.noteFailure();
+          ws.close(4008, 'wrong channel key'); return;
+        }
+        // A channel this build has claimed cannot be re-keyed by a caller that
+        // cannot prove the key. Older shells are still admitted below on a
+        // ticket matching what is already stored.
+        const mayRekey = claimed !== null || !rec?.auth;
+        const hashT = typeof msg.hashT === 'string' && HEX64.test(msg.hashT) ? msg.hashT : null;
+
+        if (hashT && mayRekey) {
+          // Deferred: applied only once this socket is actually admitted.
+          rekey = { hashT, auth: claimed || rec?.auth || null };
         } else if (rec) {
-          // Older shells send only `t`; honour it against the stored hash.
-          if ((await sha256Hex(msg.t)) !== rec.hashT) { ws.close(4008, 'pairing expired'); return; }
+          if ((await sha256Hex(msg.t)) !== rec.hashT) {
+            await this.noteFailure();
+            ws.close(4008, 'pairing expired'); return;
+          }
         } else {
+          await this.noteFailure();
           ws.close(4008, 'no pairing ticket'); return;
         }
       }
 
-      const here = this.members();
-      if (here.length >= MAX_PER_ROOM) { ws.close(4003, 'channel full'); return; }
-      if (meta.role === 'station' &&
-          here.some((w) => w.deserializeAttachment()?.role === 'station')) {
-        ws.close(4004, 'monitor already running'); return;
+      // 3. Admitted. Only now may stored state change.
+      if (rekey && (!rec || rec.hashT !== rekey.hashT || rec.auth !== rekey.auth)) {
+        await this.state.storage.put('ticket', {
+          hashT: rekey.hashT, auth: rekey.auth, exp: Date.now() + TICKET_TTL_MS,
+        });
+        await this.state.storage.setAlarm(Date.now() + TICKET_TTL_MS + 60_000);
       }
 
       const id = hex(crypto.getRandomValues(new Uint8Array(6)));
@@ -151,6 +221,15 @@ export class Room {
   }
 
   async alarm() {
+    // Sweep sockets that connected and never said hello.
+    const cutoff = Date.now() - ADMIT_TIMEOUT_MS;
+    for (const w of this.state.getWebSockets()) {
+      const m = w.deserializeAttachment();
+      if (m?.pending && (m.since || 0) < cutoff) {
+        try { w.close(4008, 'no hello'); } catch {}
+      }
+    }
+
     const rec = await this.state.storage.get('ticket');
     if (!rec) return;
     // A Monitor that is plugged in and left alone — the whole point of the

@@ -782,6 +782,12 @@ function openSignal(base, tag) {
         hello.t = S.token;
         if (S.role === 'station') { try { hello.hashT = await sha256hex(S.token); } catch {} }
       }
+      // Proof that this Monitor holds the channel key, so only it can re-key the
+      // room. A second hash of the key under a different domain separator: the
+      // relay cannot derive it from the room id, and it never sees the key.
+      if (S.role === 'station' && S.channel?.key) {
+        try { hello.a = await sha256hex(`tawny-auth-v1|${S.channel.key}`); } catch {}
+      }
       try { ws.send(JSON.stringify(hello)); } catch {}
       updateStatus();
     };
