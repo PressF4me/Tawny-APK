@@ -1,23 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Tawny — a flat, friendly owlet silhouette. Sits inside the 66dp safe circle
-     (centre 54,54 · r 33). Regenerate the web/raster set with tools/gen-icons.sh. -->
+<!-- Tawny — a tawny owlet: facial disc with a rim, ear tufts big enough to
+     survive 48dp, forward-facing eyes, a hooked beak, folded wings.
+     Measured, not assumed: the furthest opaque pixel is 32.5 from the centre,
+     inside the 33 safe-circle guideline (the circular mask itself clips at 36).
+     Regenerate the web/raster set with tools/gen-icons.sh. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
+  <group android:scaleX="0.965" android:scaleY="0.965"
+         android:pivotX="54" android:pivotY="54">
 
-    <!-- body + two soft ear tufts, one white shape -->
-    <path android:fillColor="#FFFFFF" android:pathData="M42,30 C 42,24 45,23 47,28 C 49,26 59,26 61,28 C 63,23 66,24 66,30 C 75,36 79,47 79,58 C 79,77 68,87 54,87 C 40,87 29,77 29,58 C 29,47 33,36 42,30 Z" />
+    <!-- body + ear tufts, one silhouette -->
+    <path android:pathData="M37,36 C34.5,29 34.5,24.5 37.5,25.6 C40.5,26.7 43,29.5 45.5,31.7 C48.4,30.2 59.6,30.2 62.5,31.7 C65,29.5 67.5,26.7 70.5,25.6 C73.5,24.5 73.5,29 71,36 C79,42.5 83.5,52 83.5,61.5 C83.5,77 70.5,86.5 54,86.5 C37.5,86.5 24.5,77 24.5,61.5 C24.5,52 29,42.5 37,36 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="54" android:startY="25"
+                android:endX="54" android:endY="87">
+                <item android:offset="0" android:color="#FFDCA55E"/>
+                <item android:offset="1" android:color="#FFB26F31"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- breast -->
+    <path android:fillColor="#FFEFD9B4"
+        android:pathData="M54,54 C66.5,54 73,63.5 73,72 C73,80.5 64.5,86.4 54,86.4 C43.5,86.4 35,80.5 35,72 C35,63.5 41.5,54 54,54 Z"/>
+
+    <!-- facial disc; the rim is what makes it read as an owl and not a face -->
+    <path android:fillColor="#FFF7EAD6"
+        android:strokeColor="#FFA0641F" android:strokeWidth="1.6"
+        android:pathData="M54,34.5 C63,34.5 72,40 72,49.5 C72,58 65,63.5 54,63.5 C43,63.5 36,58 36,49.5 C36,40 45,34.5 54,34.5 Z"/>
 
     <!-- eyes -->
-    <path android:fillColor="#3C5A73"
-        android:pathData="M44,53 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 Z" />
-    <path android:fillColor="#3C5A73"
-        android:pathData="M64,53 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 Z" />
-    <path android:fillColor="#FFFFFF"
-        android:pathData="M42.2,50.6 m-1.7,0 a1.7,1.7 0 1,0 3.4,0 a1.7,1.7 0 1,0 -3.4,0 Z" />
-    <path android:fillColor="#FFFFFF"
-        android:pathData="M62.2,50.6 m-1.7,0 a1.7,1.7 0 1,0 3.4,0 a1.7,1.7 0 1,0 -3.4,0 Z" />
+    <path android:fillColor="#FF2E2318" android:pathData="M44.6,49.5 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0 Z"/>
+    <path android:fillColor="#FF2E2318" android:pathData="M63.4,49.5 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0 Z"/>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M42,46.7 m-2.7,0 a2.7,2.7 0 1,0 5.4,0 a2.7,2.7 0 1,0 -5.4,0 Z"/>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M60.8,46.7 m-2.7,0 a2.7,2.7 0 1,0 5.4,0 a2.7,2.7 0 1,0 -5.4,0 Z"/>
 
-    <!-- little strawberry beak (points down) -->
-    <path android:fillColor="#E86A83" android:pathData="M51,58 h6 l-3,4.6 z" />
+    <!-- hooked beak -->
+    <path android:fillColor="#FFE89B33"
+        android:pathData="M54,55.4 L58.6,59.4 C58.6,63.8 49.4,63.8 49.4,59.4 Z"/>
+
+    <!-- folded wings -->
+    <path android:strokeColor="#FF9E6029" android:strokeWidth="2.6"
+        android:strokeLineCap="round" android:strokeAlpha="0.8"
+        android:pathData="M30.5,57 C29.5,68 31.5,76 36,80.5"/>
+    <path android:strokeColor="#FF9E6029" android:strokeWidth="2.6"
+        android:strokeLineCap="round" android:strokeAlpha="0.8"
+        android:pathData="M77.5,57 C78.5,68 76.5,76 72,80.5"/>
+  </group>
 </vector>

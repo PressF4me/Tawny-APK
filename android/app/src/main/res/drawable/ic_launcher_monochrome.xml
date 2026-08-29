@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon layer (Android 13+). A single silhouette with the eyes and beak
+     punched out by even-odd winding, so the owl stays recognisable when the
+     launcher paints it in one wallpaper colour. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFFFF" android:fillType="evenOdd" android:pathData="
-        M42,30 C 42,24 45,23 47,28 C 49,26 59,26 61,28 C 63,23 66,24 66,30 C 75,36 79,47 79,58 C 79,77 68,87 54,87 C 40,87 29,77 29,58 C 29,47 33,36 42,30 Z
-        M44,53 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 Z
-        M64,53 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 Z" />
+  <group android:scaleX="0.965" android:scaleY="0.965"
+         android:pivotX="54" android:pivotY="54">
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M37,36 C34.5,29 34.5,24.5 37.5,25.6 C40.5,26.7 43,29.5 45.5,31.7 C48.4,30.2 59.6,30.2 62.5,31.7 C65,29.5 67.5,26.7 70.5,25.6 C73.5,24.5 73.5,29 71,36 C79,42.5 83.5,52 83.5,61.5 C83.5,77 70.5,86.5 54,86.5 C37.5,86.5 24.5,77 24.5,61.5 C24.5,52 29,42.5 37,36 Z M44.6,49.5 m-8.6,0 a8.6,8.6 0 1,0 17.2,0 a8.6,8.6 0 1,0 -17.2,0 Z M63.4,49.5 m-8.6,0 a8.6,8.6 0 1,0 17.2,0 a8.6,8.6 0 1,0 -17.2,0 Z M54,55.4 L58.6,59.4 C58.6,63.8 49.4,63.8 49.4,59.4 Z"/>
+  </group>
 </vector>

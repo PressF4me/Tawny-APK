@@ -20,8 +20,19 @@ for size in 192 512; do
   echo "wrote public/icon-$size.png"
 done
 
-# 512 Play Store icon = same art, no extra padding (the ink rounded-rect is in
-# the SVG). Maskable safe-zone is generous because the owl sits well inside.
+# Play rejects an icon with an alpha channel on some paths and renders it
+# unpredictably on others; flatten to be certain there is none.
+if command -v magick >/dev/null; then
+  magick "$out/icon-512.png" -background none -alpha remove -alpha off \
+    "$out/icon-512.png"
+fi
+
+# 512 Play Store icon.
+#
+# The art is deliberately FULL-BLEED and opaque: the old SVG drew its own
+# rounded rectangle with transparent corners, and Play applies its own rounded
+# mask on top, so the store card showed a visibly double-rounded icon with a
+# halo. Play's own guidance is a square with no corner radius and no alpha.
 cp "$out/icon-512.png" "$here/docs/play-icon-512.png" 2>/dev/null || \
   { mkdir -p "$here/docs"; cp "$out/icon-512.png" "$here/docs/play-icon-512.png"; }
 echo "wrote docs/play-icon-512.png"
