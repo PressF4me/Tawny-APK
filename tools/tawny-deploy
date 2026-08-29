@@ -27,12 +27,18 @@ ACTIVITY="com.tawny.monitor.MainActivity"
 BUILD=1
 INSTALL=1
 PAIR=0
+CLEAN=0
+ALLOW_EMU=0
 
 for a in "$@"; do
   case "$a" in
     --pair)  PAIR=1; BUILD=0; INSTALL=0 ;;
     --build) INSTALL=0 ;;
     --fast)  BUILD=0 ;;
+    --clean) CLEAN=1 ;;
+    --emulator) ALLOW_EMU=1 ;;
+    -h|--help)
+      sed -n '2,30p' "$0" | sed 's/^# \?//'; exit 0 ;;
   esac
 done
 
@@ -66,9 +72,35 @@ if [ "${#DEVICES[@]}" -eq 0 ]; then
   echo ""
   echo "No ADB devices connected."
   echo ""
-  echo "If this is your first time, run:  tawny-deploy --pair"
-  echo "If you've paired before, make sure Wireless debugging is ON on your phone."
-  echo "(Settings → Developer options → Wireless debugging)"
+  echo "  Wireless:  turn ON Settings → Developer options → Wireless debugging"
+  echo "             then re-run. First time on a phone: tawny-deploy --pair"
+  echo "  USB:       plug it in and accept the 'Allow USB debugging?' prompt"
+  echo ""
+  echo "  Discover a phone that is already advertising:  adb mdns services"
+  echo ""
+  exit 1
+fi
+
+# Say out loud what is about to be written to, because this script installs to
+# EVERY connected device. A running emulator silently absorbing a deploy meant
+# for a phone is the exact way two sessions ended up reviewing different builds.
+REAL=0
+echo ""
+echo "Targets:"
+for D in "${DEVICES[@]}"; do
+  M=$(adb -s "$D" shell getprop ro.product.model 2>/dev/null | tr -d '\r')
+  case "$D" in
+    emulator-*) echo "  · $D  ($M)  ← emulator" ;;
+    *)          echo "  · $D  ($M)"; REAL=$((REAL+1)) ;;
+  esac
+done
+echo ""
+
+if [ "$REAL" -eq 0 ] && [ "$ALLOW_EMU" -eq 0 ]; then
+  echo "Only an emulator is connected — no real device to deploy to."
+  echo ""
+  echo "  Wanted the phones?  Turn Wireless debugging back ON and re-run."
+  echo "  Meant the emulator? Re-run with:  tawny-deploy --emulator"
   echo ""
   exit 1
 fi
@@ -91,10 +123,20 @@ if [ "$INSTALL" -eq 1 ]; then
     [ -z "$DEVICE" ] && continue
     MODEL=$(adb -s "$DEVICE" shell getprop ro.product.model 2>/dev/null | tr -d '\r' || echo "$DEVICE")
     echo "Installing on $MODEL ($DEVICE)…"
-    # uninstall the old version first so no stale data or signing conflicts remain
-    adb -s "$DEVICE" uninstall "$PKG" >/dev/null 2>&1 || true
-    adb -s "$DEVICE" install -r "$APK"
+    # An in-place upgrade keeps the pairing. Uninstalling first destroys the
+    # channelKey and the saved sessions, forcing a re-pair by QR on a real
+    # phone — only do it when explicitly asked, or when the signature clashes.
+    if [ "$CLEAN" -eq 1 ]; then
+      echo "  (--clean: removing the existing install and its data)"
+      adb -s "$DEVICE" uninstall "$PKG" >/dev/null 2>&1 || true
+    fi
+    if ! adb -s "$DEVICE" install -r "$APK"; then
+      echo "  in-place install failed — retrying after uninstall (data will be lost)"
+      adb -s "$DEVICE" uninstall "$PKG" >/dev/null 2>&1 || true
+      adb -s "$DEVICE" install "$APK"
+    fi
     adb -s "$DEVICE" shell am start -n "$PKG/$ACTIVITY" >/dev/null 2>&1 || true
-    echo "  ✓ Launched on $MODEL"
+    VN=$(adb -s "$DEVICE" shell dumpsys package "$PKG" 2>/dev/null | awk -F= '/versionName/{print $2; exit}' | tr -d '\r')
+    echo "  ✓ Launched on $MODEL — v${VN:-?}"
   done
 fi
