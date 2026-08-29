@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# Build the Tawny debug APK and install it wirelessly via ADB over Wi-Fi.
+#
+# FIRST-TIME SETUP (one-time per phone):
+#   1. On your phone: Settings → Developer options → Wireless debugging → enable
+#   2. Tap "Pair device with pairing code"
+#   3. Run:  tawny-deploy --pair
+#      Enter the IP:port and 6-digit code shown on screen.
+#   4. Done. The phone is remembered by adb permanently.
+#
+# DAILY USE:
+#   tawny-deploy          build + install on all connected wireless devices
+#   tawny-deploy --build  build only (no install)
+#   tawny-deploy --fast   skip build, just install the last APK
+#
+set -euo pipefail
+
+export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/sdk}"
+export JAVA_HOME="${JAVA_HOME:-$HOME/Android/jdk17}"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
+
+PROJECT="$HOME/Downloads/frentalk"
+APK="$PROJECT/android/app/build/outputs/apk/debug/app-debug.apk"
+PKG="com.tawny.monitor.debug"
+ACTIVITY="com.tawny.monitor.MainActivity"
+
+BUILD=1
+INSTALL=1
+PAIR=0
+
+for a in "$@"; do
+  case "$a" in
+    --pair)  PAIR=1; BUILD=0; INSTALL=0 ;;
+    --build) INSTALL=0 ;;
+    --fast)  BUILD=0 ;;
+  esac
+done
+
+# ── pair mode ────────────────────────────────────────────────────────────────
+if [ "$PAIR" -eq 1 ]; then
+  echo ""
+  echo "On your phone:"
+  echo "  Settings → Developer options → Wireless debugging → Pair device with pairing code"
+  echo ""
+  read -rp "IP:port shown on phone (e.g. 192.168.1.42:37549): " PAIR_ADDR
+  read -rp "6-digit pairing code shown on phone: " PAIR_CODE
+  adb pair "$PAIR_ADDR" "$PAIR_CODE"
+  echo ""
+  echo "Paired! Now enable 'Wireless debugging' if not already on, then note the"
+  echo "IP:port shown on the main Wireless debugging screen (different from pairing port)."
+  read -rp "IP:port from the main Wireless debugging screen: " CONN_ADDR
+  adb connect "$CONN_ADDR"
+  echo ""
+  echo "Connected. Run 'adb devices -l' to verify. Future deploys are automatic."
+  exit 0
+fi
+
+# ── reconnect any known wireless devices that dropped ────────────────────────
+# adb remembers paired devices; try to reconnect any that show as offline
+adb devices | awk '/offline/{print $1}' | while read -r dev; do
+  adb connect "$dev" 2>/dev/null || true
+done
+
+mapfile -t DEVICES < <(adb devices | grep -v "^List" | grep "device$" | awk '{print $1}')
+if [ "${#DEVICES[@]}" -eq 0 ]; then
+  echo ""
+  echo "No ADB devices connected."
+  echo ""
+  echo "If this is your first time, run:  tawny-deploy --pair"
+  echo "If you've paired before, make sure Wireless debugging is ON on your phone."
+  echo "(Settings → Developer options → Wireless debugging)"
+  echo ""
+  exit 1
+fi
+
+# ── build ────────────────────────────────────────────────────────────────────
+if [ "$BUILD" -eq 1 ]; then
+  echo "Building…"
+  ( cd "$PROJECT/android" && ./gradlew -q :app:assembleDebug )
+  echo "Build done. APK: $(du -sh "$APK" | cut -f1)"
+fi
+
+if [ ! -f "$APK" ]; then
+  echo "No APK found at $APK — run without --fast first." >&2
+  exit 1
+fi
+
+# ── install on every connected device ────────────────────────────────────────
+if [ "$INSTALL" -eq 1 ]; then
+  for DEVICE in "${DEVICES[@]}"; do
+    [ -z "$DEVICE" ] && continue
+    MODEL=$(adb -s "$DEVICE" shell getprop ro.product.model 2>/dev/null | tr -d '\r' || echo "$DEVICE")
+    echo "Installing on $MODEL ($DEVICE)…"
+    # uninstall the old version first so no stale data or signing conflicts remain
+    adb -s "$DEVICE" uninstall "$PKG" >/dev/null 2>&1 || true
+    adb -s "$DEVICE" install -r "$APK"
+    adb -s "$DEVICE" shell am start -n "$PKG/$ACTIVITY" >/dev/null 2>&1 || true
+    echo "  ✓ Launched on $MODEL"
+  done
+fi

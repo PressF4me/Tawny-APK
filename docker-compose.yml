@@ -1,0 +1,18 @@
+services:
+  tawny:
+    build: .
+    image: tawny:local
+    container_name: tawny
+    restart: unless-stopped
+    # Loopback only. tailscale serve reaches it here; the LAN cannot.
+    # Change to "8099:8099" only if you understand what that exposes.
+    ports:
+      - "127.0.0.1:8099:8099"
+    environment:
+      PORT: "8099"
+      # Strongly recommended. Generate: head -c 24 /dev/urandom | base64
+      # TAWNY_TOKEN: "change-me"
+      # Blunts DNS rebinding. Your MagicDNS name, comma separated.
+      # ALLOWED_HOSTS: "tawny.tailnet.ts.net"
+      # Only if the two devices are NOT both on the tailnet or LAN.
+      # STUN_URLS: "stun:stun.l.google.com:19302"

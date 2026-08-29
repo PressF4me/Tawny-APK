@@ -1,0 +1,2919 @@
+package com.tawny.monitor
+
+import android.animation.ValueAnimator
+import android.annotation.SuppressLint
+import android.app.Application
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.media.AudioManager
+import android.net.Uri
+import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
+import android.text.InputType
+import android.util.Base64
+import android.util.Log
+import android.view.GestureDetector
+import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.animation.LinearInterpolator
+import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Button
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.ScrollView
+import android.widget.Space
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.EncodeHintType
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.NotFoundException
+import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import java.io.File
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.security.SecureRandom
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.min
+import kotlin.math.sin
+
+class TawnyApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        // Apply the saved theme choice before any Activity is themed.
+        val m = getSharedPreferences("tawny", MODE_PRIVATE).getString("theme", "system")
+        androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+            when (m) {
+                "light" -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO
+                "dark" -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES
+                else -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            }
+        )
+    }
+}
+
+/**
+ * On-device flight recorder for the signaling path.
+ *
+ * The failures worth chasing happen with the Handheld on cellular — off the
+ * Wi-Fi, so the phone is not reachable by adb and logcat is out of reach. Both
+ * the native shell and the web page (through `Bridge.post` "diag") append here,
+ * the log survives a restart, and it can be read on the phone itself by
+ * long-pressing the version stamp, or pulled with:
+ *
+ *   adb shell run-as com.tawny.monitor.debug cat files/diag.log
+ *
+ * Never write the channel key or a raw admission ticket in here — only whether
+ * one was present. The room id is a hash and is logged on purpose: it is what
+ * lets the Monitor's log and the Handheld's log be lined up.
+ */
+object Diag {
+    private const val MAX_BYTES = 96 * 1024
+    private const val KEEP_LINES = 400
+    private val stamp = java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.US)
+    private var file: File? = null
+
+    fun init(ctx: Context) {
+        if (file != null) return
+        file = File(ctx.filesDir, "diag.log")
+        log("app", "── launched v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}), " +
+            "android ${android.os.Build.VERSION.SDK_INT} on ${android.os.Build.MODEL}")
+    }
+
+    @Synchronized
+    fun log(tag: String, msg: String) {
+        val line = "${stamp.format(java.util.Date())}  $tag  $msg"
+        Log.d("TawnyDiag", line)
+        val f = file ?: return
+        try {
+            f.appendText(line + "\n")
+            if (f.length() > MAX_BYTES) {
+                f.writeText(f.readLines().takeLast(KEEP_LINES).joinToString("\n") + "\n")
+            }
+        } catch (e: Exception) { /* diagnostics must never break the app */ }
+    }
+
+    @Synchronized fun dump(): String =
+        try { file?.takeIf { it.exists() }?.readText().orEmpty() } catch (e: Exception) { "" }
+
+    @Synchronized fun clear() {
+        try { file?.writeText("") } catch (e: Exception) {}
+    }
+}
+
+/**
+ * Palette, resolved from res/values(-night)/colors.xml so it tracks light/dark.
+ * Light = "strawberry cheesecake"; dark = "brushed leather" with a warm-bronze
+ * accent. Mirrors public/style.css. Call [load] before building any UI.
+ * (Field names are roles, not literal hues — BERRY is bronze in dark mode.)
+ */
+object Hue {
+    var BG = 0; var PANEL = 0; var RAISE = 0; var LINE = 0
+    var TEXT = 0; var DIM = 0; var BERRY = 0; var SKY = 0
+    var LIVE = 0; var STAGE = 0; var ON_ACCENT = 0
+
+    fun load(c: Context) {
+        BG = c.getColor(R.color.bg)
+        PANEL = c.getColor(R.color.panel)
+        RAISE = c.getColor(R.color.raise)
+        LINE = c.getColor(R.color.line)
+        TEXT = c.getColor(R.color.text)
+        DIM = c.getColor(R.color.dim)
+        BERRY = c.getColor(R.color.berry)
+        SKY = c.getColor(R.color.sky)
+        LIVE = c.getColor(R.color.live)
+        STAGE = c.getColor(R.color.stage)
+        ON_ACCENT = c.getColor(R.color.on_accent)   // text/glyph on a BERRY fill
+    }
+}
+
+/**
+ * Native onboarding for Tawny — no address to type, Wi-Fi only.
+ *
+ *   welcome (animated) → "this device" role choice
+ *     ├─ The Watcher  → runs the web app + a signaling relay in this APK,
+ *     │                 shows a QR with its LAN address + channel key
+ *     └─ The Handheld → scans that QR, connects straight to the Watcher
+ *
+ * The web app ([public/app.js], bundled in assets/web/) runs in a WebView and
+ * owns the WebRTC stack. It is served from a local server on 127.0.0.1 — a
+ * secure-context origin, so getUserMedia works with no external URL. The page
+ * is loaded with `#native` and [tawnyStart] is called with the role, key,
+ * and signaling address to jump straight into the session.
+ *
+ * The wrapper still does what a WebView cannot: grant the WebView's own capture
+ * request, hold the screen on during a call, route audio through the hardware
+ * echo canceller, and catch snapshot downloads as base64.
+ */
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var root: FrameLayout
+    private var web: WebView? = null
+    private var pairOverlay: View? = null   // QR shown over the Watcher's live view while waiting
+    private var isLive = false
+
+    private var scene: PetSceneView? = null
+    private var playScene: PlayfulSceneView? = null   // the animated critters on sessions home
+    private var versionView: View? = null             // build stamp / diagnostics hatch
+
+    // Which native screen is up. Flipping the theme recreates the Activity, so
+    // this rides along in the instance state and the user comes back to the
+    // screen they were on instead of being dropped at the front door.
+    private var screen: String = "welcome"
+    private var scannerStop: (() -> Unit)? = null
+    private var scanHandled = false
+    private var pendingScan = false
+
+    private var assetServer: AssetHttpServer? = null
+    private var signalServer: SignalServer? = null
+
+    // Horizontal-swipe navigation. Swipe RIGHT = back (the platform convention),
+    // swipe LEFT = forward. `null` = no gesture on that edge.
+    private var onSwipeBack: (() -> Unit)? = null
+    private var onSwipeForward: (() -> Unit)? = null
+    private val swipes by lazy {
+        GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onFling(
+                e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
+            ): Boolean {
+                if (e1 == null) return false
+                val dx = e2.x - e1.x
+                val dy = e2.y - e1.y
+                if (abs(dx) < dp(64) || abs(dx) < abs(dy) * 2 || abs(vx) < 500f) return false
+                val act = if (dx > 0) onSwipeBack else onSwipeForward
+                act?.let { haptic(); it() }
+                return act != null
+            }
+        })
+    }
+
+    private val prefs by lazy { getSharedPreferences("tawny", Context.MODE_PRIVATE) }
+
+    // Bundled fonts (assets/fonts): brush calligraphy for titles, Mukta for UI text.
+    private val titleFont by lazy { Typeface.createFromAsset(assets, "fonts/MaShanZheng.ttf") }
+    private val uiFont by lazy { Typeface.createFromAsset(assets, "fonts/Mukta-Regular.ttf") }
+    private val uiFontSemi by lazy { Typeface.createFromAsset(assets, "fonts/Mukta-SemiBold.ttf") }
+
+    private val MP = ViewGroup.LayoutParams.MATCH_PARENT
+    private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
+    private val d get() = resources.displayMetrics.density
+    private fun dp(v: Int) = (v * d).toInt()
+
+    private var pendingConsent: (() -> Unit)? = null
+
+    private val askPermissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        val consent = pendingConsent
+        pendingConsent = null
+        if (granted.values.all { it }) {
+            consent?.invoke()
+        } else {
+            toast("Tawny needs the camera and microphone for this.")
+        }
+        if (pendingScan) {
+            pendingScan = false
+            if (has(android.Manifest.permission.CAMERA)) showScanner()
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
+        super.onCreate(savedInstanceState)
+        Diag.init(applicationContext)
+        Hue.load(this)                       // resolves light vs. dark palette
+        root = FrameLayout(this).apply { setBackgroundColor(Hue.BG) }
+        setContentView(root)
+
+        // Keep content clear of the status and navigation bars.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val b = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(0, b.top, 0, b.bottom)
+            insets
+        }
+
+        onBackPressedDispatcher.addCallback(this, backHandler)
+
+        // Land on a real screen first, so declining a pairing link below leaves
+        // the user somewhere sensible instead of on a blank activity.
+        val role = prefs.getString("role", null)
+        val key = prefs.getString("channelKey", null)
+        val signal = prefs.getString("signalUrl", null)
+        val canViewerResume = !key.isNullOrBlank() && (!signal.isNullOrBlank() || hasRendezvous)
+        // A recreate (theme flip, system light/dark change) carries the screen
+        // in the instance state — honour it instead of re-running the cold-start
+        // routing, which would send the user back to the front door.
+        val resumed = savedInstanceState?.getString("screen")?.let { restoreScreen(it) } == true
+        when {
+            resumed -> Unit
+            role == "station" && !key.isNullOrBlank() -> goLive("station")
+            role == "viewer" && canViewerResume -> showHandheldHome()
+            loadRecentSessions().isNotEmpty() -> showSessionsHome()
+            // Onboarding is a one-time thing: it shows on the very first launch
+            // and never auto-appears again. A returning user who never finished
+            // setting up a session lands straight on the role screen instead.
+            prefs.getBoolean("seenWelcome", false) -> showRole()
+            else -> showWelcome()
+        }
+
+        handlePairLink(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        // Only the native screens are worth restoring; a live call is rebuilt by
+        // the normal resume path instead of being re-entered blind.
+        if (!isLive) outState.putString("screen", screen)
+    }
+
+    /** Re-mount a screen by name after a recreate. False = not restorable. */
+    private fun restoreScreen(name: String): Boolean {
+        when (name) {
+            "welcome" -> showWelcome()
+            "role" -> showRole()
+            "handheld" -> showHandheldHome()
+            "offline" -> showMonitorOffline()
+            "diag" -> showDiagnostics()
+            // Only if there is still something to list, else fall through to the
+            // normal routing rather than showing an empty home.
+            "sessions" -> if (loadRecentSessions().isEmpty()) return false else showSessionsHome()
+            else -> return false
+        }
+        return true
+    }
+
+    /**
+     * The system back button follows the same path as the on-screen arrow. In a
+     * live call it asks first — back used to drop straight out of the app and
+     * silently kill an unattended Watcher.
+     */
+    private val backHandler = object : androidx.activity.OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            val back = onSwipeBack
+            when {
+                isLive -> confirmEndCall()
+                back != null -> { haptic(); back() }
+                else -> finish()
+            }
+        }
+    }
+
+    private fun confirmEndCall() {
+        val watching = prefs.getString("role", null) == "station"
+        themedDialog(
+            title = if (watching) "Stop watching?" else "End the call?",
+            body = if (watching)
+                "Viewers won't be able to check in until you start monitoring again."
+            else
+                "You can watch again from the home screen.",
+            primaryLabel = if (watching) "Stop" else "End call",
+            onPrimary = {
+                saveRecentSession()
+                endLive()
+                if (watching) stopServers()
+                afterSession()
+            },
+            secondaryLabel = "Keep going"
+        )
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePairLink(intent)
+    }
+
+    // Watch every touch for a horizontal fling without stealing it from the
+    // views underneath (taps, vertical scroll, the WebView all still work).
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        swipes.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    /** Register this screen's swipe-left (back) and swipe-right (forward) actions. */
+    private fun swipeNav(back: (() -> Unit)?, forward: (() -> Unit)?) {
+        onSwipeBack = back
+        onSwipeForward = forward
+    }
+
+    private fun haptic() {
+        root.performHapticFeedback(
+            HapticFeedbackConstants.VIRTUAL_KEY,
+            HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
+        )
+    }
+
+    /**
+     * Jump to the session this device already has: the Handheld's "call" home
+     * if it's paired, the Watcher's code screen if it's a Watcher. Returns
+     * false when nothing is set up yet.
+     */
+    private fun resumeSession(): Boolean {
+        val key = prefs.getString("channelKey", null)
+        if (key.isNullOrBlank()) return false
+        // A Handheld has a saved role of "viewer", or a LAN signalUrl; anything
+        // else with a channel key is a Watcher (it owns the channel it made).
+        val isViewer = prefs.getString("role", null) == "viewer" ||
+            !prefs.getString("signalUrl", null).isNullOrBlank()
+        if (isViewer) {
+            prefs.edit().putString("role", "viewer").apply()
+            showHandheldHome()
+        } else {
+            prefs.edit().putString("role", "station").apply()
+            goLive("station")
+        }
+        return true
+    }
+
+    /**
+     * A `tawny://pair?...` link opened from outside the app (a camera app, a
+     * browser, another app). The intent filter is exported and BROWSABLE, so any
+     * page or app on the device can fire one of these — accepting it silently
+     * would let a hostile link repoint this Handheld at someone else's Watcher
+     * and throw away the pairing the user already had. Always ask first; the
+     * in-app scanner path ([onScanned]) is the one that needs no confirmation,
+     * because there the user deliberately aimed the camera at a code.
+     */
+    private fun handlePairLink(intent: Intent?): Boolean {
+        val data = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data ?: return false
+        val p = parsePairing(data.toString()) ?: run {
+            toast("That Tawny link is not valid.")
+            return false
+        }
+        confirmPairing(p)
+        return true
+    }
+
+    /** "Connect to this monitor?" — the gate on every externally supplied link. */
+    private fun confirmPairing(p: Pairing) {
+        val paired = prefs.getString("channelKey", null)
+        val replacing = !paired.isNullOrBlank() && paired != p.key
+        val where = p.signal?.removePrefix("ws://")?.let { "$it on your Wi-Fi" }
+            ?: "your monitor over the internet"
+        themedDialog(
+            title = "Connect to “${p.name}”?",
+            body = "This code connects to $where.\n\n" + (
+                if (replacing)
+                    "Connecting will replace the monitor this phone is paired with now."
+                else
+                    "Only connect if this is your own monitor."
+            ),
+            primaryLabel = "Connect",
+            onPrimary = { joinAsHandheld(p) },
+            secondaryLabel = "Not now"
+        )
+    }
+
+    private fun joinAsHandheld(p: Pairing) {
+        stopScanner()
+        Diag.log("shell", "pair accepted name=\"${p.name}\" lan=${p.signal ?: "-"} " +
+            "ticket=${if (p.token.isNullOrBlank()) "MISSING" else "yes"}")
+        prefs.edit()
+            .apply { if (p.signal != null) putString("signalUrl", p.signal) else remove("signalUrl") }
+            .apply { if (p.token != null) putString("pairToken", p.token) else remove("pairToken") }
+            .putString("channelKey", p.key)
+            .putString("channelName", p.name)
+            .putString("role", "viewer")
+            .apply()
+        goLive("viewer")
+    }
+
+    /** Manual fallback when the camera can't get a clean read. */
+    private fun promptPairLink() {
+        val input = EditText(this).apply {
+            hint = "tawny://pair?h=…"
+            inputType = InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine()
+            setTextColor(Hue.TEXT)
+            setHintTextColor(Hue.DIM)
+            clipboardText()?.let { if (it.startsWith("tawny://pair")) setText(it) }
+        }
+        val wrap = FrameLayout(this).apply {
+            val m = dp(20); setPadding(m, dp(8), m, 0); addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Paste the pairing link")
+            .setMessage("On the monitor phone, tap 'Show as link' and send it to yourself.")
+            .setView(wrap)
+            .setPositiveButton("Connect") { _, _ ->
+                val p = parsePairing(input.text.toString())
+                if (p == null) toast("That is not a Tawny pairing link.") else joinAsHandheld(p)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun clipboardText(): String? = try {
+        getSystemService(android.content.ClipboardManager::class.java)
+            ?.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()?.trim()
+    } catch (e: Exception) { null }
+
+    /**
+     * Prominent disclosure before the OS permission prompt (Play policy): say
+     * plainly what camera + microphone are for and where the media goes, then
+     * ask. Runs [then] once the needed permissions are granted (immediately if
+     * they already are).
+     */
+    private fun disclose(needCamera: Boolean, then: () -> Unit) {
+        val needed = buildList {
+            if (needCamera) add(android.Manifest.permission.CAMERA)
+            add(android.Manifest.permission.RECORD_AUDIO)
+        }.filter { !has(it) }
+        if (needed.isEmpty()) { then(); return }
+
+        val body = if (needCamera)
+            "This phone will use its camera and microphone to stream your pet to " +
+                "your other phone while Tawny is open. The video and sound are sent " +
+                "encrypted, directly between your devices, and are never recorded or " +
+                "stored anywhere."
+        else
+            "Tawny will use this phone's microphone so you can talk back to your " +
+                "pet. Your voice is sent encrypted, directly to the monitor phone, and is " +
+                "never recorded or stored anywhere."
+
+        themedDialog(
+            title = if (needCamera) "Camera & microphone" else "Microphone",
+            body = body,
+            primaryLabel = "Continue",
+            onPrimary = {
+                pendingConsent = then
+                askPermissions.launch(needed.toTypedArray())
+            },
+            secondaryLabel = "Not now"
+        )
+    }
+
+    // -------------------------------------------------------- screen frame
+
+    private val animScale: Float
+        get() = try {
+            Settings.Global.getFloat(
+                contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+            )
+        } catch (e: Exception) { 1f }
+
+    private fun clearScreen() {
+        scene?.stop(); scene = null
+        playScene?.stop(); playScene = null
+        scannerStop?.invoke(); scannerStop = null
+        swipeNav(null, null)
+        (pairOverlay?.parent as? ViewGroup)?.removeView(pairOverlay)
+        pairOverlay = null
+        web?.let {
+            (it.parent as? ViewGroup)?.removeView(it)
+            it.loadUrl("about:blank")
+            it.destroy()
+        }
+        web = null
+        root.removeAllViews()
+        // Mounted first so it sits behind whatever the caller adds next, then
+        // lifted to the front once that screen is up — a screen's full-bleed
+        // ScrollView would otherwise swallow the long-press. Screens that own
+        // the whole surface (live WebView, QR overlay, scanner) hide it.
+        versionView = versionTag().also { root.addView(it) }
+        root.post { versionView?.let { if (it.parent === root) root.bringChildToFront(it) } }
+        // Gentle cross-fade into whatever the caller mounts next.
+        root.animate().cancel()
+        if (animScale > 0f) {
+            root.alpha = 0.35f
+            root.animate().alpha(1f).setDuration((150 * animScale).toLong()).start()
+        } else {
+            root.alpha = 1f
+        }
+    }
+
+    private fun column(scroll: Boolean): LinearLayout {
+        val pad = dp(24)
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+            if (!scroll) gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(MP, if (scroll) WC else MP)
+        }
+    }
+
+    private fun gap(h: Int) = Space(this).apply {
+        layoutParams = LinearLayout.LayoutParams(MP, dp(h))
+    }
+
+    private fun lp(topMargin: Int = 0, centerH: Boolean = false) =
+        LinearLayout.LayoutParams(if (centerH) WC else MP, WC).also {
+            it.topMargin = dp(topMargin)
+            if (centerH) it.gravity = Gravity.CENTER_HORIZONTAL
+        }
+
+    private fun roundRect(fill: Int, stroke: Int) = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(3).toFloat()
+        setColor(if (fill == 0) Color.TRANSPARENT else fill)
+        setStroke(dp(1), stroke)
+    }
+
+    /**
+     * An on-theme replacement for the stock Material AlertDialog: the same
+     * parchment "equipment panel" card the rest of the app uses.
+     */
+    private fun themedDialog(
+        title: String,
+        body: String,
+        primaryLabel: String,
+        onPrimary: () -> Unit,
+        secondaryLabel: String? = null,
+        onSecondary: (() -> Unit)? = null,
+        cancelable: Boolean = true
+    ) {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(4).toFloat()
+                setColor(Hue.PANEL)
+                setStroke(dp(1), Hue.LINE)
+            }
+            val p = dp(22); setPadding(p, p, p, p)
+        }
+        card.addView(TextView(this).apply {
+            text = title
+            setTextColor(Hue.TEXT)
+            textSize = 22f
+            typeface = uiFontSemi
+        })
+        card.addView(TextView(this).apply {
+            text = body
+            setTextColor(Hue.DIM)
+            textSize = 15f
+            typeface = uiFont
+            setLineSpacing(0f, 1.4f)
+            setPadding(0, dp(12), 0, 0)
+        })
+        val wrap = FrameLayout(this).apply { val m = dp(16); setPadding(m, m, m, m); addView(card) }
+        val dialog = AlertDialog.Builder(this).setView(wrap).setCancelable(cancelable).create()
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            setDimAmount(0.82f)
+        }
+        card.addView(primary(primaryLabel) { dialog.dismiss(); onPrimary() })
+        if (secondaryLabel != null) {
+            card.addView(link(secondaryLabel) { dialog.dismiss(); onSecondary?.invoke() })
+        }
+        dialog.show()
+    }
+
+    // -------------------------------------------------------- widgets
+
+    private fun wordmark(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        layoutParams = lp(topMargin = 4)
+        addView(TextView(this@MainActivity).apply {
+            text = "Tawny"
+            setTextColor(Hue.TEXT)
+            textSize = 46f
+            letterSpacing = 0.03f
+            typeface = titleFont
+            gravity = Gravity.CENTER
+        })
+        addView(TextView(this@MainActivity).apply {
+            text = "Pet Monitor"
+            setTextColor(Hue.DIM)
+            textSize = 15f
+            letterSpacing = 0.04f
+            typeface = uiFont
+            gravity = Gravity.CENTER
+            setPadding(0, dp(2), 0, 0)
+        })
+    }
+
+    private fun body(s: String, maxW: Int = 0) = TextView(this).apply {
+        text = s
+        setTextColor(Hue.DIM)
+        textSize = 16f
+        typeface = uiFont
+        gravity = Gravity.CENTER
+        if (maxW > 0) maxWidth = dp(maxW)
+        setLineSpacing(0f, 1.45f)
+        layoutParams = lp(topMargin = 16)
+    }
+
+    private fun heading(title: String, sub: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = lp()
+        addView(TextView(this@MainActivity).apply {
+            text = title
+            setTextColor(Hue.TEXT)
+            textSize = 27f
+            letterSpacing = 0f
+            typeface = uiFontSemi
+        })
+        addView(TextView(this@MainActivity).apply {
+            text = sub
+            setTextColor(Hue.DIM)
+            textSize = 15f
+            typeface = uiFont
+            setPadding(0, dp(5), 0, 0)
+        })
+    }
+
+    private fun pill(label: String, fg: Int, fill: Int, stroke: Int, onClick: () -> Unit) =
+        TextView(this).apply {
+            text = label
+            letterSpacing = 0.04f
+            textSize = 17f
+            typeface = uiFontSemi
+            setTextColor(fg)
+            gravity = Gravity.CENTER
+            background = roundRect(fill, stroke)
+            setPadding(dp(18), dp(15), dp(18), dp(15))
+            isClickable = true
+            isFocusable = true
+            layoutParams = lp(topMargin = 12)
+            setOnClickListener { onClick() }
+        }
+
+    private fun primary(label: String, onClick: () -> Unit) =
+        pill(label, Hue.ON_ACCENT, Hue.BERRY, Hue.BERRY, onClick)
+
+    private fun link(label: String, onClick: () -> Unit) = TextView(this).apply {
+        text = label
+        letterSpacing = 0.02f
+        textSize = 15f
+        typeface = uiFont
+        setTextColor(Hue.DIM)
+        gravity = Gravity.CENTER
+        setPadding(dp(8), dp(12), dp(8), dp(12))
+        isClickable = true
+        isFocusable = true
+        layoutParams = lp(topMargin = 14, centerH = true)
+        setOnClickListener { onClick() }
+    }
+
+    /**
+     * Tiny build stamp in the bottom-left of every native screen. It exists so
+     * you can glance at each phone and see they are all running the same
+     * deploy — `tools/tawny-bump` moves it, `tools/tawny-deploy` ships it.
+     */
+    private fun versionTag(): View = TextView(this).apply {
+        text = "v${BuildConfig.VERSION_NAME} · ${BuildConfig.VERSION_CODE}"
+        textSize = 10f
+        typeface = uiFont
+        setTextColor(Hue.DIM)
+        alpha = 0.5f
+        letterSpacing = 0.06f
+        contentDescription = "App version — long-press for diagnostics"
+        layoutParams = FrameLayout.LayoutParams(WC, WC).also {
+            it.gravity = Gravity.START or Gravity.BOTTOM
+            it.leftMargin = dp(12); it.bottomMargin = dp(8)
+        }
+        // Deliberately hidden behind a long-press: a support hatch, not a feature.
+        isLongClickable = true
+        setOnLongClickListener { haptic(); showDiagnostics(); true }
+    }
+
+    /**
+     * The bug reporter. Shows the flight recorder ([Diag]) and hands it off —
+     * "Send report" opens the share sheet so the log can be mailed or messaged
+     * out from a phone that is on cellular and unreachable by adb.
+     */
+    private fun showDiagnostics() {
+        clearScreen()
+        screen = "diag"
+        swipeNav(back = { afterSession() }, forward = null)
+        val report = Diag.dump().ifBlank { "(nothing recorded yet)" }
+
+        val outer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = dp(16); setPadding(p, p, p, p)
+            layoutParams = FrameLayout.LayoutParams(MP, MP)
+        }
+        outer.addView(backLink { afterSession() })
+        outer.addView(heading("Diagnostics", "The last few sessions, as the app saw them."))
+
+        // Vertical scroller wrapping a horizontal one: the lines are long and
+        // must not wrap, so the log pans in both directions.
+        val vScroll = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(MP, 0, 1f).also { it.topMargin = dp(12) }
+            background = roundRect(Hue.PANEL, Hue.LINE)
+            val p = dp(10); setPadding(p, p, p, p)
+        }
+        vScroll.addView(HorizontalScrollView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(MP, WC)
+            addView(TextView(this@MainActivity).apply {
+                text = report
+                setTextColor(Hue.TEXT)
+                textSize = 10f
+                typeface = Typeface.MONOSPACE
+                setTextIsSelectable(true)
+                setHorizontallyScrolling(true)
+                layoutParams = FrameLayout.LayoutParams(WC, WC)
+            })
+        })
+        outer.addView(vScroll)
+
+        outer.addView(primary("Send report") {
+            startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "Tawny diagnostics v${BuildConfig.VERSION_NAME}")
+                        putExtra(Intent.EXTRA_TEXT, report)
+                    },
+                    "Send Tawny diagnostics"
+                )
+            )
+        })
+        outer.addView(link("Copy to clipboard") {
+            getSystemService(android.content.ClipboardManager::class.java)
+                ?.setPrimaryClip(android.content.ClipData.newPlainText("Tawny diagnostics", report))
+            toast("Copied")
+        })
+        outer.addView(link("Clear log") {
+            themedDialog(
+                title = "Clear the log?",
+                body = "The recorded history is deleted from this phone.",
+                primaryLabel = "Clear",
+                onPrimary = { Diag.clear(); Diag.init(applicationContext); showDiagnostics() },
+                secondaryLabel = "Keep it"
+            )
+        })
+        root.addView(outer)
+    }
+
+    /** Small round Light ↔ Dark toggle, pinned top-right of the screen. */
+    private fun themeToggleView(): View {
+        return TextView(this).apply {
+            textSize = 17f
+            gravity = Gravity.CENTER
+            setTextColor(Hue.DIM)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Hue.PANEL)
+                setStroke(dp(1), Hue.LINE)
+            }
+            val s = dp(38)
+            layoutParams = FrameLayout.LayoutParams(s, s).also {
+                it.gravity = Gravity.END or Gravity.TOP
+                it.topMargin = dp(6); it.rightMargin = dp(6)
+            }
+            isClickable = true; isFocusable = true
+            contentDescription = "Toggle light / dark theme"
+            text = if (currentTheme() == "dark") "☾" else "☀"
+            setOnClickListener {
+                val next = if (currentTheme() == "dark") "light" else "dark"
+                prefs.edit().putString("theme", next).apply()
+                applyNightMode(next)   // recreates the activity
+            }
+        }
+    }
+
+    private fun applyNightMode(mode: String) {
+        androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+            when (mode) {
+                "light" -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO
+                "dark" -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES
+                else -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            }
+        )
+    }
+
+    private fun backLink(onClick: () -> Unit) = TextView(this).apply {
+        text = "←"
+        textSize = 32f
+        typeface = uiFontSemi
+        setTextColor(Hue.TEXT)
+        setShadowLayer(6f, 0f, 0f, 0x66FFFFFF)   // stays legible over the camera too
+        gravity = Gravity.CENTER
+        setPadding(0, dp(2), dp(18), dp(14))
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Back"
+        layoutParams = LinearLayout.LayoutParams(WC, WC).also {
+            it.gravity = Gravity.START
+            it.bottomMargin = dp(2)
+        }
+        setOnClickListener { haptic(); onClick() }
+    }
+
+    private fun roleCard(
+        tag: String, title: String, blurb: String, kind: String, onClick: () -> Unit
+    ): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(3).toFloat()
+            setColor(Hue.PANEL)
+            setStroke(dp(1), Hue.LINE)
+        }
+        setPadding(dp(18), dp(18), dp(18), dp(18))
+        isClickable = true
+        isFocusable = true
+        layoutParams = lp(topMargin = 12)
+        setOnClickListener { onClick() }
+
+        addView(IconView(this@MainActivity, kind).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(42), dp(42)).also { it.bottomMargin = dp(8) }
+        })
+        addView(TextView(this@MainActivity).apply {
+            text = tag.uppercase()
+            setTextColor(Hue.BERRY)
+            textSize = 13f
+            letterSpacing = 0.16f
+            typeface = uiFontSemi
+        })
+        addView(TextView(this@MainActivity).apply {
+            text = title
+            setTextColor(Hue.TEXT)
+            textSize = 20f
+            typeface = uiFontSemi
+            setPadding(0, dp(4), 0, dp(4))
+        })
+        addView(TextView(this@MainActivity).apply {
+            text = blurb
+            setTextColor(Hue.DIM)
+            textSize = 15f
+            typeface = uiFont
+            setLineSpacing(0f, 1.4f)
+        })
+    }
+
+    private fun waitingRow(label: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        layoutParams = lp(topMargin = 8)
+        addView(ProgressBar(this@MainActivity).apply {
+            isIndeterminate = true
+            indeterminateTintList = ColorStateList.valueOf(Hue.BERRY)
+            layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).also { it.rightMargin = dp(10) }
+        })
+        addView(TextView(this@MainActivity).apply {
+            text = label.uppercase()
+            setTextColor(Hue.DIM)
+            textSize = 13f
+            letterSpacing = 0.14f
+            typeface = uiFontSemi
+        })
+    }
+
+    // ------------------------------------------------- recent sessions
+
+    private fun saveRecentSession() {
+        val key = prefs.getString("channelKey", null) ?: return
+        val role = prefs.getString("role", null) ?: return
+        val petName = prefs.getString("channelName", "your pet") ?: "your pet"
+        val signalUrl = prefs.getString("signalUrl", null)
+        val token = if (role == "station") prefs.getString("myToken", null)
+                    else prefs.getString("pairToken", null)
+        val entry = org.json.JSONObject().apply {
+            put("role", role); put("petName", petName); put("channelKey", key)
+            if (!signalUrl.isNullOrBlank()) put("signalUrl", signalUrl)
+            if (!token.isNullOrBlank()) put("token", token)
+            put("timestamp", System.currentTimeMillis())
+        }
+        val existing = loadRecentSessions()
+            .filter { !(it.optString("channelKey") == key && it.optString("role") == role) }
+            .take(2)
+        val arr = org.json.JSONArray()
+        arr.put(entry)
+        existing.forEach { arr.put(it) }
+        prefs.edit().putString("recentSessions", arr.toString()).apply()
+    }
+
+    private fun loadRecentSessions(): List<org.json.JSONObject> {
+        val raw = prefs.getString("recentSessions", null) ?: return emptyList()
+        return try {
+            val arr = org.json.JSONArray(raw)
+            (0 until arr.length()).map { arr.getJSONObject(it) }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    private fun updateRecentSessionName(channelKey: String, newName: String) {
+        val updated = loadRecentSessions().map { s ->
+            if (s.optString("channelKey") == channelKey) s.apply { put("petName", newName) } else s
+        }
+        val arr = org.json.JSONArray()
+        updated.forEach { arr.put(it) }
+        prefs.edit().putString("recentSessions", arr.toString()).apply()
+    }
+
+    private fun deleteRecentSession(channelKey: String, role: String) {
+        val remaining = loadRecentSessions()
+            .filter { !(it.optString("channelKey") == channelKey && it.optString("role") == role) }
+        val arr = org.json.JSONArray()
+        remaining.forEach { arr.put(it) }
+        prefs.edit().putString("recentSessions", arr.toString()).apply()
+    }
+
+    private fun restoreSession(session: org.json.JSONObject) {
+        val key = session.optString("channelKey")
+        val role = session.optString("role")
+        val petName = session.optString("petName", "your pet")
+        val signalUrl = session.optString("signalUrl").takeIf { it.isNotBlank() }
+        val token = session.optString("token").takeIf { it.isNotBlank() }
+        prefs.edit().apply {
+            putString("channelKey", key)
+            putString("channelName", petName)
+            if (role == "station") {
+                if (token != null) putString("myToken", token) else remove("myToken")
+                remove("pairToken"); remove("signalUrl")
+            } else {
+                if (token != null) putString("pairToken", token) else remove("pairToken")
+                remove("myToken")
+                if (signalUrl != null) putString("signalUrl", signalUrl) else remove("signalUrl")
+            }
+        }.apply()
+        if (role == "station") onWatcher()
+        else disclose(needCamera = false) { goLive("viewer") }
+    }
+
+    private fun relativeTime(ts: Long): String {
+        if (ts == 0L) return ""
+        val d = System.currentTimeMillis() - ts
+        return when {
+            d < 60_000L -> "just now"
+            d < 3_600_000L -> "${d / 60_000L}m ago"
+            d < 86_400_000L -> "${d / 3_600_000L}h ago"
+            d < 172_800_000L -> "yesterday"
+            else -> "${d / 86_400_000L}d ago"
+        }
+    }
+
+    // ------------------------------------------------- sessions home
+
+    /** After a session ends: go to sessions home if there are any, else role select. */
+    private fun afterSession() {
+        if (loadRecentSessions().isNotEmpty()) showSessionsHome() else showRole()
+    }
+
+    /**
+     * The landing screen when saved sessions exist. Sessions ARE the home —
+     * no welcome, no role choice needed. A secondary link lets the user start fresh.
+     */
+    private fun showSessionsHome() {
+        clearScreen()
+        screen = "sessions"
+        swipeNav(back = null, forward = null)
+        val sessions = loadRecentSessions()
+        if (sessions.isEmpty()) { showRole(); return }
+
+        val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+        val col = column(scroll = true)
+
+        col.addView(TextView(this).apply {
+            text = "Tawny"
+            setTextColor(Hue.TEXT)
+            textSize = 28f
+            letterSpacing = 0.03f
+            typeface = titleFont
+            gravity = Gravity.CENTER_HORIZONTAL
+            layoutParams = lp(topMargin = 4, centerH = true)
+        })
+        // A bit of life over an otherwise plain list: a kitten swatting a ball,
+        // Tawny hopping, a dog with its bone. Idles quietly; respects "remove
+        // animations".
+        playScene = PlayfulSceneView(this).also {
+            it.layoutParams = LinearLayout.LayoutParams(MP, dp(128)).also { p ->
+                p.topMargin = dp(2)
+            }
+        }
+        col.addView(playScene)
+        col.addView(TextView(this).apply {
+            text = "Pick up where you left off"
+            setTextColor(Hue.DIM)
+            textSize = 14f
+            typeface = uiFont
+            gravity = Gravity.CENTER_HORIZONTAL
+            layoutParams = lp(topMargin = 2, centerH = true)
+        })
+        col.addView(gap(10))
+
+        sessions.forEach { session ->
+            val key = session.optString("channelKey")
+            val role = session.optString("role")
+            val petName = session.optString("petName", "your pet")
+            val roleLabel = if (role == "station") "Monitor" else "Viewer"
+            val timeStr = relativeTime(session.optLong("timestamp", 0L))
+
+            // Container: delete strip behind + card in front for swipe-left
+            val container = FrameLayout(this).apply { layoutParams = lp(topMargin = 10) }
+
+            val deleteStrip = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE; cornerRadius = dp(16).toFloat()
+                    setColor(0xFFD32F2F.toInt())
+                }
+                layoutParams = FrameLayout.LayoutParams(MP, MP)
+                setPadding(0, 0, dp(20), 0)
+                addView(TextView(this@MainActivity).apply {
+                    text = "Delete"; setTextColor(Color.WHITE); textSize = 14f; typeface = uiFontSemi
+                })
+            }
+            container.addView(deleteStrip)
+
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(16).toFloat()
+                    setColor(Hue.PANEL)
+                    setStroke(dp(1), Hue.LINE)
+                }
+                setPadding(dp(16), dp(16), dp(16), dp(16))
+                layoutParams = FrameLayout.LayoutParams(MP, WC)
+                isClickable = true; isFocusable = true
+            }
+
+            // Swipe-left + long-press touch handler
+            var downX = 0f; var downY = 0f; var swipeRevealed = false
+            val swipeThreshold = dp(60).toFloat()
+            card.setOnTouchListener { v, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = event.rawX; downY = event.rawY; true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.rawX - downX
+                        if (dx < -swipeThreshold / 2) {
+                            val clamped = maxOf(dx, -dp(80).toFloat())
+                            v.translationX = clamped
+                        } else if (dx > 0 && v.translationX < 0) {
+                            v.translationX = minOf(0f, v.translationX + dx * 0.4f)
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        val dx = event.rawX - downX
+                        val dy = event.rawY - downY
+                        when {
+                            // Tap (small movement) — restore session or dismiss swipe
+                            dx > -swipeThreshold / 2 && abs(dx) < dp(12) && abs(dy) < dp(12) -> {
+                                if (swipeRevealed) {
+                                    v.animate().translationX(0f).setDuration(150).start()
+                                    swipeRevealed = false
+                                } else {
+                                    haptic(); restoreSession(session)
+                                }
+                            }
+                            // Full swipe-left — reveal the delete strip
+                            dx < -swipeThreshold -> {
+                                v.animate().translationX(-dp(88).toFloat()).setDuration(150).start()
+                                swipeRevealed = true
+                            }
+                            // Partial swipe or swipe-right — snap back
+                            else -> {
+                                v.animate().translationX(0f).setDuration(150).start()
+                                swipeRevealed = false
+                            }
+                        }
+                        v.performClick()
+                        true
+                    }
+                    else -> false
+                }
+            }
+            deleteStrip.setOnClickListener {
+                haptic()
+                themedDialog(
+                    title = "Remove session?",
+                    body = "\"$petName\" will be removed from your recent sessions.",
+                    primaryLabel = "Remove",
+                    onPrimary = { deleteRecentSession(key, role); showSessionsHome() },
+                    secondaryLabel = "Cancel"
+                )
+            }
+            card.setOnLongClickListener {
+                haptic()
+                themedDialog(
+                    title = petName,
+                    body = "What would you like to do?",
+                    primaryLabel = "Edit name",
+                    onPrimary = {
+                        val nameInput = EditText(this).apply {
+                            setText(petName)
+                            hint = "Pet's name or room (e.g. Mochi, Living room)"
+                            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+                            setTextColor(Hue.TEXT); setHintTextColor(Hue.DIM)
+                            textSize = 16f; typeface = uiFont
+                            val p = dp(8); setPadding(p, p, p, p)
+                            background = GradientDrawable().apply {
+                                shape = GradientDrawable.RECTANGLE; cornerRadius = dp(4).toFloat()
+                                setColor(Hue.BG); setStroke(dp(1), Hue.LINE)
+                            }
+                            layoutParams = android.widget.LinearLayout.LayoutParams(MP, WC).apply { topMargin = dp(12) }
+                        }
+                        val dlg = android.app.AlertDialog.Builder(this).setCancelable(true).create()
+                        val editLayout = android.widget.LinearLayout(this).apply {
+                            orientation = android.widget.LinearLayout.VERTICAL
+                            val p = dp(22); setPadding(p, p, p, p)
+                            background = GradientDrawable().apply {
+                                shape = GradientDrawable.RECTANGLE; cornerRadius = dp(4).toFloat()
+                                setColor(Hue.PANEL); setStroke(dp(1), Hue.LINE)
+                            }
+                            addView(TextView(this@MainActivity).apply {
+                                text = "Rename session"
+                                setTextColor(Hue.TEXT); textSize = 20f; typeface = uiFontSemi
+                            })
+                            addView(TextView(this@MainActivity).apply {
+                                text = "Enter the pet's name or the room where the monitor is placed."
+                                setTextColor(Hue.DIM); textSize = 14f; typeface = uiFont
+                                setPadding(0, dp(8), 0, 0); setLineSpacing(0f, 1.4f)
+                            })
+                            addView(nameInput)
+                            addView(primary("Save") {
+                                dlg.dismiss()
+                                val n = nameInput.text.toString().trim().ifBlank { petName }
+                                updateRecentSessionName(key, n)
+                                showSessionsHome()
+                            })
+                            addView(link("Cancel") { dlg.dismiss() })
+                        }
+                        dlg.setView(FrameLayout(this).apply { val m = dp(16); setPadding(m, m, m, m); addView(editLayout) })
+                        dlg.window?.apply {
+                            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+                            setDimAmount(0.82f)
+                        }
+                        dlg.show()
+                    },
+                    secondaryLabel = "Delete session",
+                    onSecondary = {
+                        themedDialog(
+                            title = "Remove session?",
+                            body = "\"$petName\" will be removed from your recent sessions.",
+                            primaryLabel = "Remove",
+                            onPrimary = { deleteRecentSession(key, role); showSessionsHome() },
+                            secondaryLabel = "Cancel"
+                        )
+                    }
+                )
+                true
+            }
+
+            card.addView(IconView(this, if (role == "station") "camera" else "phone").apply {
+                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).also { it.rightMargin = dp(14) }
+            })
+
+            val textCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+            }
+            textCol.addView(TextView(this).apply {
+                text = petName
+                setTextColor(Hue.TEXT)
+                textSize = 18f
+                typeface = uiFontSemi
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            textCol.addView(TextView(this).apply {
+                text = "$roleLabel · $timeStr"
+                setTextColor(Hue.DIM)
+                textSize = 13f
+                typeface = uiFont
+                setPadding(0, dp(3), 0, 0)
+            })
+            card.addView(textCol)
+
+            card.addView(TextView(this).apply {
+                text = "›"
+                setTextColor(Hue.BERRY)
+                textSize = 30f
+                typeface = uiFontSemi
+                layoutParams = LinearLayout.LayoutParams(WC, WC).also { it.leftMargin = dp(12) }
+            })
+
+            container.addView(card)
+            col.addView(container)
+        }
+
+        col.addView(gap(12))
+        col.addView(TextView(this).apply {
+            text = "+ Set up a new session"
+            setTextColor(Hue.BERRY)
+            textSize = 15f
+            typeface = uiFontSemi
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(3).toFloat()
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(1), Hue.BERRY)
+            }
+            setPadding(dp(18), dp(14), dp(18), dp(14))
+            isClickable = true; isFocusable = true
+            layoutParams = lp()
+            setOnClickListener { showRole() }
+        })
+
+        scroll.addView(col)
+        root.addView(scroll)
+        root.addView(themeToggleView())
+    }
+
+    // (recentSessionsRow removed — replaced by showSessionsHome)
+    private fun recentSessionsRow_unused(): View? {
+        val sessions = loadRecentSessions()
+        if (sessions.isEmpty()) return null
+
+        val wrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = lp(topMargin = 20)
+            alpha = 0f
+        }
+
+        wrapper.addView(TextView(this).apply {
+            text = "RECENT"
+            setTextColor(Hue.DIM)
+            textSize = 11f
+            letterSpacing = 0.14f
+            typeface = uiFontSemi
+            layoutParams = lp()
+        })
+
+        val hScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(MP, WC).also { it.topMargin = dp(8) }
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, dp(8), 0)
+        }
+
+        sessions.forEach { session ->
+            val key = session.optString("channelKey")
+            val role = session.optString("role")
+            val petName = session.optString("petName", "your pet")
+            val roleLabel = if (role == "station") "Monitor" else "Viewer"
+            val timeStr = relativeTime(session.optLong("timestamp", 0L))
+
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(12).toFloat()
+                    setColor(Hue.PANEL)
+                    setStroke(dp(1), Hue.LINE)
+                }
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                layoutParams = LinearLayout.LayoutParams(dp(148), WC).also { it.rightMargin = dp(8) }
+                isClickable = true; isFocusable = true
+                setOnClickListener { haptic(); restoreSession(session) }
+                setOnLongClickListener {
+                    haptic(); deleteRecentSession(key, role); showRole(); true
+                }
+            }
+
+            // Icon + pet name
+            val topRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            topRow.addView(IconView(this@MainActivity, if (role == "station") "camera" else "phone").apply {
+                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).also { it.rightMargin = dp(6) }
+            })
+            topRow.addView(TextView(this@MainActivity).apply {
+                text = petName
+                setTextColor(Hue.TEXT)
+                textSize = 13f
+                typeface = uiFontSemi
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+            })
+            card.addView(topRow)
+
+            card.addView(TextView(this).apply {
+                text = "$roleLabel · $timeStr"
+                setTextColor(Hue.DIM)
+                textSize = 11f
+                typeface = uiFont
+                setPadding(0, dp(4), 0, 0)
+            })
+
+            row.addView(card)
+        }
+
+        hScroll.addView(row)
+        wrapper.addView(hScroll)
+
+        // Fade in after mount
+        wrapper.post {
+            if (animScale > 0f)
+                wrapper.animate().alpha(1f).setDuration((200 * animScale).toLong()).start()
+            else
+                wrapper.alpha = 1f
+        }
+        return wrapper
+    }
+
+    // -------------------------------------------------------- welcome
+
+    private fun showWelcome() {
+        clearScreen()
+        screen = "welcome"
+        // Not committed to a role here — don't let onCreate auto-resume into one.
+        // Also mark onboarding as seen so a cold start never lands here again.
+        prefs.edit().remove("role").putBoolean("seenWelcome", true).apply()
+        swipeNav(back = null, forward = { if (!resumeSession()) showRole() })
+        val col = column(scroll = false)
+        scene = PetSceneView(this).also {
+            it.layoutParams = LinearLayout.LayoutParams(dp(300), dp(200))
+        }
+        col.addView(scene)
+        col.addView(wordmark())
+        col.addView(
+            body(
+                "Watch your pet from anywhere in the world. " +
+                    "Two phones, no accounts — just open the app and connect.",
+                maxW = 300
+            )
+        )
+        col.addView(gap(4))
+        col.addView(primary("Get started") { showRole() })
+        col.addView(link("I want to watch a monitor") { onHandheld() })
+        root.addView(col)
+        root.addView(themeToggleView())
+    }
+
+    // -------------------------------------------------------- handheld home
+
+    /**
+     * A paired Handheld between calls. Rather than dropping the user back on the
+     * welcome screen — as if nothing had ever been set up — show one obvious
+     * action: call the Watcher again. Re-pairing is still one tap away.
+     */
+    private fun showHandheldHome() {
+        clearScreen()
+        screen = "handheld"
+        swipeNav(back = { showWelcome() }, forward = { goLive("viewer") })
+        val name = prefs.getString("channelName", "your pet") ?: "your pet"
+        val col = column(scroll = false)
+        col.addView(IconView(this, "phone").apply {
+            layoutParams = LinearLayout.LayoutParams(dp(60), dp(60)).also {
+                it.bottomMargin = dp(6)
+                it.gravity = Gravity.CENTER_HORIZONTAL
+            }
+        })
+        col.addView(wordmark())
+        col.addView(
+            body(
+                "Connected to $name's monitor. Tap below to check in from anywhere.",
+                maxW = 300
+            )
+        )
+        col.addView(gap(6))
+        col.addView(primary("Watch $name now") { goLive("viewer") })
+        col.addView(link("Connect to a different monitor") { onHandheld() })
+        root.addView(col)
+    }
+
+    // -------------------------------------------------------- role choice
+
+    private fun showRole() {
+        clearScreen()
+        screen = "role"
+        prefs.edit().remove("role").apply()
+        swipeNav(back = { showWelcome() }, forward = { if (!resumeSession()) onWatcher() })
+        val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+        val col = column(scroll = true)
+        col.addView(backLink { showWelcome() })
+        col.addView(heading("Set up Tawny", "How will you use this phone?"))
+        col.addView(
+            roleCard(
+                "The Monitor", "Stays with your pet",
+                "Plug it in and point the camera. It streams live video and " +
+                    "sound, and shows a code so others can watch too.",
+                "camera"
+            ) { onWatcher() }
+        )
+        col.addView(
+            roleCard(
+                "The Viewer", "Watch from anywhere",
+                "Check in on your pet from this phone — at home, at work, " +
+                    "or anywhere in the world.",
+                "phone"
+            ) { onHandheld() }
+        )
+        scroll.addView(col)
+        root.addView(scroll)
+    }
+
+    // -------------------------------------------------------- the watcher
+
+    private fun onWatcher() {
+        val ip = lanIp()
+        if (ip == null && !hasRendezvous) {
+            themedDialog(
+                title = "Connect to Wi-Fi",
+                body = "Tawny couldn't find a network connection. " +
+                    "Connect this phone to Wi-Fi and try again.",
+                primaryLabel = "OK", onPrimary = {}
+            )
+            return
+        }
+        disclose(needCamera = true) {
+            if (prefs.getString("channelKey", null).isNullOrBlank()) {
+                promptRoomName { name ->
+                    prefs.edit()
+                        .putString("channelKey", newKey())
+                        .putString("channelName", name)
+                        .remove("myToken")        // fresh channel → fresh admission ticket
+                        .apply()
+                    startWatcher(ip)
+                }
+            } else {
+                startWatcher(ip)
+            }
+        }
+    }
+
+    /**
+     * Name the spot the Watcher is aimed at; the Handheld shows "<name> monitor".
+     * Built as a bare equipment-panel card so it matches the rest of the app
+     * rather than the stock Material dialog.
+     */
+    private fun promptRoomName(onName: (String) -> Unit) {
+        val current = prefs.getString("channelName", "")?.takeUnless { it == "Pet camera" || it == "your pet" }.orEmpty()
+
+        val input = EditText(this).apply {
+            hint = "Mochi, Bella, Luna…"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+            filters = arrayOf(android.text.InputFilter.LengthFilter(40))
+            setSingleLine()
+            setText(current)
+            setSelection(text.length)
+            typeface = uiFont
+            textSize = 16f
+            letterSpacing = 0.02f
+            setTextColor(Hue.TEXT)
+            setHintTextColor(Hue.DIM)
+            background = roundRect(Hue.BG, Hue.LINE)
+            setPadding(dp(14), dp(13), dp(14), dp(13))
+            layoutParams = lp(topMargin = 18)
+        }
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(4).toFloat()
+                setColor(Hue.PANEL)
+                setStroke(dp(1), Hue.LINE)
+            }
+            val p = dp(22)
+            setPadding(p, p, p, p)
+        }
+        card.addView(TextView(this).apply {
+            text = "What's your pet's name?"
+            setTextColor(Hue.TEXT)
+            textSize = 22f
+            letterSpacing = 0f
+            typeface = uiFontSemi
+        })
+        card.addView(input)
+
+        val wrap = FrameLayout(this).apply {
+            val m = dp(16); setPadding(m, m, m, m); addView(card)
+        }
+        val dialog = AlertDialog.Builder(this).setView(wrap).create()
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            setDimAmount(0.82f)
+        }
+
+        val submit = {
+            onName(input.text.toString().trim().ifBlank { "your pet" })
+            dialog.dismiss()
+        }
+        input.setOnEditorActionListener { _, _, _ -> submit(); true }
+
+        card.addView(primary("Continue") { submit() })
+        card.addView(link("Cancel") { dialog.dismiss() })
+
+        // Open with the keyboard up and the cursor waiting.
+        dialog.window?.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
+        )
+        input.requestFocus()
+        dialog.show()
+    }
+
+    private fun startWatcher(ip: String?) {
+        val sigPort = ensureSignalServer()
+        if (sigPort < 0) {
+            toast("Could not start the Monitor. Restart the app and try again.")
+            return
+        }
+        // Persist the role now so an unattended Watcher that gets killed
+        // (Samsung battery, low memory) comes back as the Watcher, not the setup
+        // screen. Clear any leftover Handheld state so resumeSession() can't
+        // misread this device as a paired Handheld.
+        prefs.edit()
+            .putString("role", "station")
+            .remove("signalUrl")
+            .remove("pairToken")
+            .apply()
+        // Go straight into the live station view — camera on, joined to the
+        // relay room — with the pairing QR as an overlay until a Handheld
+        // connects. (No manual "start watching" tap.)
+        goLive("station")
+    }
+
+    /**
+     * A short admission ticket for the rendezvous. Minted once per channel and
+     * kept in prefs so a Watcher restart re-registers the same one and earlier
+     * Handhelds still connect. No secret — the rendezvous only stores sha256(t).
+     */
+    private fun watcherToken(): String? {
+        if (!hasRendezvous) return null
+        prefs.getString("myToken", null)?.let { return it }
+        return randToken(16).also { prefs.edit().putString("myToken", it).apply() }
+    }
+
+    private fun showPairText(payload: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Pairing link")
+            .setMessage(payload)
+            .setPositiveButton("Copy") { _, _ ->
+                val cm = getSystemService(android.content.ClipboardManager::class.java)
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Tawny pairing", payload))
+                toast("Copied")
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    // -------------------------------------------------------- the handheld
+
+    private fun onHandheld() {
+        disclose(needCamera = false) {
+            if (has(android.Manifest.permission.CAMERA)) {
+                showScanner()
+                return@disclose
+            }
+            themedDialog(
+                title = "Connect to your monitor",
+                body = "Scan the monitor's QR code with the camera, or paste its " +
+                    "pairing link instead.",
+                primaryLabel = "Use camera",
+                onPrimary = {
+                    pendingScan = true
+                    askPermissions.launch(arrayOf(android.Manifest.permission.CAMERA))
+                },
+                secondaryLabel = "Paste a link",
+                onSecondary = { promptPairLink() }
+            )
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun showScanner() {
+        clearScreen()
+        scanHandled = false
+        swipeNav(back = { stopScanner(); showRole() }, forward = null)
+
+        val preview = PreviewView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(MP, MP)
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        }
+        root.addView(preview)
+        versionView?.visibility = View.GONE      // camera preview owns the surface
+
+        val overlay = column(scroll = false).apply { gravity = Gravity.TOP }
+        overlay.addView(backLink { stopScanner(); showRole() })
+        overlay.addView(TextView(this).apply {
+            text = "Scan your monitor's QR code"
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 21f
+            letterSpacing = 0f
+            typeface = uiFontSemi
+            setShadowLayer(8f, 0f, 0f, Color.BLACK)
+            layoutParams = lp(topMargin = 4)
+        })
+        overlay.addView(TextView(this).apply {
+            text = "Hold your pet monitor's QR code in frame."
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 15f
+            typeface = uiFont
+            setShadowLayer(8f, 0f, 0f, Color.BLACK)
+            layoutParams = lp(topMargin = 6)
+        })
+        overlay.addView(TextView(this).apply {
+            text = "PASTE A LINK INSTEAD"
+            letterSpacing = 0.12f
+            textSize = 14f
+            typeface = uiFontSemi
+            setTextColor(Hue.BERRY)
+            setShadowLayer(8f, 0f, 0f, Color.BLACK)
+            setPadding(0, dp(10), dp(8), dp(10))
+            isClickable = true
+            isFocusable = true
+            layoutParams = lp(topMargin = 10)
+            setOnClickListener { promptPairLink() }
+        })
+        root.addView(overlay)
+
+        val exec = Executors.newSingleThreadExecutor()
+        scannerStop = { exec.shutdown() }
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            val provider = try { future.get() } catch (e: Exception) {
+                toast("Could not start the camera.")
+                exec.shutdown()
+                return@addListener
+            }
+            val prev = Preview.Builder().build().also {
+                it.setSurfaceProvider(preview.surfaceProvider)
+            }
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+            val reader = MultiFormatReader().apply {
+                setHints(
+                    mapOf(DecodeHintType.POSSIBLE_FORMATS to arrayListOf(BarcodeFormat.QR_CODE))
+                )
+            }
+            analysis.setAnalyzer(exec) { proxy ->
+                val text = try { decodeQr(proxy, reader) } catch (e: Exception) { null }
+                proxy.close()
+                if (text != null) runOnUiThread { onScanned(text) }
+            }
+            try {
+                provider.unbindAll()
+                provider.bindToLifecycle(
+                    this, CameraSelector.DEFAULT_BACK_CAMERA, prev, analysis
+                )
+            } catch (e: Exception) {
+                toast("Could not open the camera.")
+            }
+            scannerStop = {
+                try { provider.unbindAll() } catch (e: Exception) {}
+                exec.shutdown()
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun stopScanner() {
+        scannerStop?.invoke()
+        scannerStop = null
+    }
+
+    private fun decodeQr(proxy: ImageProxy, reader: MultiFormatReader): String? {
+        val plane = proxy.planes[0]
+        val buf = plane.buffer
+        val data = ByteArray(buf.remaining())
+        buf.get(data)
+        val rowStride = plane.rowStride
+        val width = min(proxy.width, rowStride)
+        val source = PlanarYUVLuminanceSource(
+            data, rowStride, proxy.height, 0, 0, width, proxy.height, false
+        )
+        return try {
+            reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
+        } catch (e: NotFoundException) {
+            reader.reset()
+            try {
+                reader.decodeWithState(BinaryBitmap(HybridBinarizer(source.invert()))).text
+            } catch (e2: NotFoundException) {
+                reader.reset()
+                null
+            }
+        }
+    }
+
+    private fun onScanned(raw: String) {
+        if (scanHandled) return
+        val p = parsePairing(raw) ?: run {
+            toast("That is not a Tawny pairing code.")
+            return
+        }
+        scanHandled = true
+        joinAsHandheld(p)
+    }
+
+    // -------------------------------------------------------- keys / codes
+
+    private fun randToken(bytes: Int): String {
+        val b = ByteArray(bytes)
+        SecureRandom().nextBytes(b)
+        return Base64.encodeToString(b, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+    }
+
+    private fun newKey() = randToken(16)
+
+    /** Whether this build can reach a Handheld off the LAN. */
+    private val hasRendezvous get() = BuildConfig.RENDEZVOUS_URL.isNotBlank()
+
+    /**
+     * `tawny://pair?k=&n=&h=<lan ip:port>&t=<token>`. `h` is dropped when Wi-Fi
+     * is down or the Watcher is relay-only; `t` (a short per-pairing admission
+     * ticket for the rendezvous) is added only when this build has one.
+     */
+    private fun pairingPayload(ip: String?, sigPort: Int, key: String, name: String, token: String?) =
+        buildString {
+            append("tawny://pair?k=${Uri.encode(key)}&n=${Uri.encode(name)}")
+            if (ip != null) append("&h=$ip:$sigPort")
+            if (token != null) append("&t=${Uri.encode(token)}")
+        }
+
+    private data class Pairing(
+        val signal: String?,   // ws://<lan-ip>:<port>, or null for relay-only
+        val key: String,
+        val name: String,
+        val token: String?
+    )
+
+    /** RFC1918 / link-local only — `h` in a pairing link is always a home-LAN address. */
+    private fun isPrivateHost(hostPort: String): Boolean {
+        val ip = hostPort.substringBeforeLast(':')
+        val o = ip.split('.').map { it.toIntOrNull() ?: return false }
+        if (o.size != 4 || o.any { it !in 0..255 }) return false
+        return o[0] == 10 ||
+            (o[0] == 172 && o[1] in 16..31) ||
+            (o[0] == 192 && o[1] == 168) ||
+            (o[0] == 169 && o[1] == 254)
+    }
+
+    private fun parsePairing(raw: String): Pairing? {
+        val uri = try { Uri.parse(raw.trim()) } catch (e: Exception) { return null }
+        if (uri.scheme != "tawny" || uri.host != "pair") return null
+        val key = uri.getQueryParameter("k") ?: return null
+        if (!Regex("^[A-Za-z0-9_-]{16,64}$").matches(key)) return null
+        var h = uri.getQueryParameter("h")
+        if (h != null && (!Regex("^\\d{1,3}(\\.\\d{1,3}){3}:\\d{2,5}$").matches(h) || !isPrivateHost(h))) {
+            h = null   // a public IP in a pairing link is not something we dial
+        }
+        val token = uri.getQueryParameter("t")
+        if (token != null && !Regex("^[A-Za-z0-9_-]{8,64}$").matches(token)) return null
+        // Nothing to dial: no usable LAN address and this build has no internet relay.
+        if (h == null && !hasRendezvous) return null
+        val name = (uri.getQueryParameter("n") ?: "Pet camera").take(40)
+        return Pairing(h?.let { "ws://$it" }, key, name, token)
+    }
+
+    private fun qrBitmap(text: String, sizePx: Int): Bitmap {
+        val matrix = QRCodeWriter().encode(
+            text, BarcodeFormat.QR_CODE, sizePx, sizePx,
+            mapOf(
+                EncodeHintType.MARGIN to 1,
+                EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M
+            )
+        )
+        val w = matrix.width
+        val h = matrix.height
+        val pixels = IntArray(w * h)
+        for (y in 0 until h) {
+            val row = y * w
+            for (x in 0 until w) {
+                // QR must stay dark-on-light regardless of theme.
+                pixels[row + x] = if (matrix.get(x, y)) 0xFF1B1B24.toInt() else 0xFFFFFFFF.toInt()
+            }
+        }
+        return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    // -------------------------------------------------------- local servers
+
+    /** Serves the bundled web app on 127.0.0.1. Both roles need it. */
+    private fun ensureAssetServer(): Int {
+        val s = assetServer ?: AssetHttpServer(applicationContext, 8809).also { assetServer = it }
+        return s.port
+    }
+
+    /**
+     * The Watcher's signaling relay, reachable on the LAN. The port is kept
+     * stable across restarts so a Handheld paired earlier can still reconnect
+     * (as long as the Watcher keeps the same Wi-Fi address).
+     */
+    /** Returns the bound port, or -1 if the relay could not start. */
+    private fun ensureSignalServer(): Int {
+        signalServer?.let { return it.boundPort }
+        val s = SignalServer(prefs.getInt("sigPort", 8820)).apply {
+            isReuseAddr = true
+            start()
+        }
+        if (!s.ready.await(3, TimeUnit.SECONDS)) {
+            try { s.stop(200) } catch (e: Exception) {}
+            return -1
+        }
+        signalServer = s
+        prefs.edit().putInt("sigPort", s.boundPort).apply()
+        return s.boundPort
+    }
+
+    private fun stopServers() {
+        assetServer?.stop(); assetServer = null
+        try { signalServer?.stop(800) } catch (e: Exception) {}
+        signalServer = null
+    }
+
+    /** This phone's private Wi-Fi address, preferring the wlan interface. */
+    private fun lanIp(): String? {
+        var fallback: String? = null
+        try {
+            for (nif in NetworkInterface.getNetworkInterfaces()) {
+                if (!nif.isUp || nif.isLoopback) continue
+                for (addr in nif.inetAddresses) {
+                    if (addr is Inet4Address && addr.isSiteLocalAddress) {
+                        val ip = addr.hostAddress ?: continue
+                        if (nif.name.startsWith("wlan")) return ip
+                        if (fallback == null) fallback = ip
+                    }
+                }
+            }
+        } catch (e: Exception) { /* fall through */ }
+        return fallback
+    }
+
+    // -------------------------------------------------------- live (webview)
+
+    private fun goLive(role: String) {
+        val key = prefs.getString("channelKey", null) ?: return showWelcome()
+        val name = prefs.getString("channelName", "your pet") ?: "your pet"
+        val httpPort = ensureAssetServer()
+        val signal: String? = if (role == "station") {
+            val port = ensureSignalServer()
+            if (port < 0) {
+                toast("Could not start the Monitor. Restart the app and try again.")
+                return showRole()
+            }
+            "ws://127.0.0.1:$port"
+        } else {
+            val lan = prefs.getString("signalUrl", null)
+            if (lan == null && !hasRendezvous) return showWelcome()
+            lan   // may be null — app.js then uses the rendezvous only
+        }
+        // Mint the Monitor's admission ticket BEFORE reading it. The rendezvous
+        // admits a Monitor only if its first frame carries sha256(ticket), and
+        // the QR has to advertise that very same ticket. Reading `myToken`
+        // straight from prefs here used to hand the page a null on the first
+        // run of a fresh channel (onWatcher() clears it) — the Monitor was then
+        // refused by the relay ("no pairing ticket") and every Handheld off the
+        // LAN saw "Monitor isn't on yet". The LAN relay needs no ticket, which
+        // is why this only ever broke the over-the-internet path.
+        val token = if (role == "station") watcherToken()
+                    else prefs.getString("pairToken", null)
+        prefs.edit().putString("role", role).apply()
+        val pairPayload = if (role == "station")
+            pairingPayload(lanIp(), signalServer?.boundPort ?: 0, key, name, token)
+        else null
+        Diag.log("shell", "goLive role=$role lan=${lanIp() ?: "-"} signal=${signal ?: "-"} " +
+            "rv=${BuildConfig.RENDEZVOUS_URL.ifBlank { "NONE" }} " +
+            "ticket=${if (token.isNullOrBlank()) "MISSING" else "yes"}")
+        showWeb("http://127.0.0.1:$httpPort/#native", role, key, name, signal,
+            BuildConfig.RENDEZVOUS_URL, token, pairPayload)
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun showWeb(
+        url: String, role: String, key: String, name: String,
+        signal: String?, rendezvous: String, token: String?, pairPayload: String? = null
+    ) {
+        clearScreen()
+        val serverHost = Uri.parse(url).host
+
+        val view = WebView(this)
+        web = view
+        var kicked = false
+
+        view.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true          // channel keys live here
+            mediaPlaybackRequiresUserGesture = false
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            cacheMode = WebSettings.LOAD_DEFAULT
+        }
+        view.setBackgroundColor(Hue.BG)
+        view.addJavascriptInterface(Bridge(), "TawnyNative")
+
+        view.webChromeClient = object : WebChromeClient() {
+            override fun onPermissionRequest(request: PermissionRequest) {
+                if (request.origin.host != serverHost) {
+                    request.deny(); return
+                }
+                val allowed = request.resources.filter { res ->
+                    when (res) {
+                        PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
+                            has(android.Manifest.permission.CAMERA)
+                        PermissionRequest.RESOURCE_AUDIO_CAPTURE ->
+                            has(android.Manifest.permission.RECORD_AUDIO)
+                        else -> false
+                    }
+                }
+                if (allowed.isEmpty()) request.deny() else request.grant(allowed.toTypedArray())
+            }
+
+            override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                Log.d("Tawny", "${m.message()} @${m.lineNumber()}")
+                return true
+            }
+        }
+
+        view.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                v: WebView, req: WebResourceRequest
+            ): Boolean {
+                val target = req.url
+                if (target.host == serverHost) return false
+                // Hand off only ordinary web links. Passing every scheme to
+                // ACTION_VIEW would let the page launch intent://, file:// and
+                // friends at other apps on the device.
+                if (target.scheme !in setOf("http", "https")) return true
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, target))
+                } catch (e: Exception) {
+                    toast("No app can open that link.")
+                }
+                return true
+            }
+
+            override fun onPageFinished(v: WebView, u: String) {
+                if (kicked) return
+                kicked = true
+                v.evaluateJavascript(
+                    "window.tawnyStart && window.tawnyStart(" +
+                        "${jsStr(role)},${jsStr(key)},${jsStr(name)}," +
+                        "${signal?.let { jsStr(it) } ?: "null"},${jsStr(rendezvous)}," +
+                        "${token?.let { jsStr(it) } ?: "null"},{theme:${jsStr(currentTheme())}})",
+                    null
+                )
+            }
+
+            override fun onReceivedError(
+                v: WebView, req: WebResourceRequest, err: WebResourceError
+            ) {
+                if (!req.isForMainFrame) return
+                endLive()
+                showError(err.description?.toString() ?: "Could not load the app")
+            }
+        }
+
+        // Snapshots come across the bridge as base64 (see Bridge.saveImage), so
+        // this only fires for stray links. Same scheme rule as navigation.
+        view.setDownloadListener { dlUrl, _, _, _, _ ->
+            val u = Uri.parse(dlUrl)
+            if (u.scheme !in setOf("http", "https")) return@setDownloadListener
+            try { startActivity(Intent(Intent.ACTION_VIEW, u)) } catch (e: Exception) {}
+        }
+
+        root.addView(view, FrameLayout.LayoutParams(MP, MP))
+        versionView?.visibility = View.GONE      // the live view owns the surface
+
+        if (pairPayload != null) {
+            pairOverlay = buildPairOverlay(name, pairPayload)
+            root.addView(pairOverlay, FrameLayout.LayoutParams(MP, MP))
+        }
+        // Station live view: swipe / back ends the session.
+        if (role == "station") swipeNav(back = { confirmEndCall() }, forward = null)
+
+        view.loadUrl(url)
+    }
+
+    /** The pairing QR + links, shown over the Watcher's live view until a
+     *  Handheld connects (Bridge "watching"/"waiting" toggle its visibility). */
+    private fun buildPairOverlay(name: String, payload: String): View {
+        val scroll = ScrollView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(MP, MP)
+            setBackgroundColor(Hue.BG)
+        }
+        val col = column(scroll = true).apply { gravity = Gravity.CENTER_HORIZONTAL }
+        col.addView(backLink { confirmEndCall() })
+        col.addView(heading(name, "Scan this to start watching"))
+        col.addView(ImageView(this).apply {
+            val s = dp(260)
+            layoutParams = LinearLayout.LayoutParams(s, s).also { it.topMargin = dp(16) }
+            setImageBitmap(qrBitmap(payload, 640))
+        })
+        col.addView(
+            body(
+                "On the other phone, open Tawny and tap Watch your pet. Point " +
+                    "its camera at this code to connect — from anywhere in the world.",
+                maxW = 300
+            )
+        )
+        col.addView(waitingRow("Waiting for a viewer to connect"))
+        col.addView(link("Show as link") { showPairText(payload) })
+        col.addView(link("Rename this monitor") {
+            promptRoomName { newName ->
+                prefs.edit().putString("channelName", newName).apply()
+                goLive("station")   // rebuild the live view + a fresh QR
+            }
+        })
+        scroll.addView(col)
+        return scroll
+    }
+
+    /** The palette the WebView should use right now — "light" or "dark". Honours
+     *  an explicit user choice; otherwise follows the resolved OS setting. */
+    private fun currentTheme(): String {
+        prefs.getString("theme", null)?.let { if (it == "light" || it == "dark") return it }
+        val night = resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        return if (night == android.content.res.Configuration.UI_MODE_NIGHT_YES) "dark" else "light"
+    }
+
+    private fun jsStr(s: String) =
+        "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""
+
+    private fun has(p: String) =
+        ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
+
+    private fun showError(message: String) {
+        val role = prefs.getString("role", "viewer") ?: "viewer"
+        themedDialog(
+            title = "Something went wrong",
+            body = "$message\n\nTry restarting the app, or check that this phone has a network connection.",
+            primaryLabel = "Retry",
+            onPrimary = { goLive(role) },
+            secondaryLabel = "Start over",
+            onSecondary = {
+                prefs.edit().clear().apply()
+                stopServers()
+                showWelcome()
+            },
+            cancelable = false
+        )
+    }
+
+    /**
+     * Viewer tried to connect but the monitor phone isn't running Tawny yet.
+     * Show a warm, non-technical screen instead of an error dialog.
+     */
+    private fun showMonitorOffline() {
+        screen = "offline"
+        if (isFinishing) return
+        Diag.log("shell", "showMonitorOffline — handheld gave up reaching the monitor")
+        val petName = prefs.getString("channelName", null)
+            ?.takeUnless { it.isBlank() } ?: "your pet"
+        clearScreen()
+        swipeNav(back = { showHandheldHome() }, forward = null)
+        val col = column(scroll = false)
+        col.addView(IconView(this, "phone").apply {
+            layoutParams = LinearLayout.LayoutParams(dp(60), dp(60)).also {
+                it.bottomMargin = dp(6)
+                it.gravity = Gravity.CENTER_HORIZONTAL
+            }
+        })
+        col.addView(TextView(this).apply {
+            text = "Monitor isn't on yet"
+            setTextColor(Hue.TEXT)
+            textSize = 24f
+            typeface = uiFontSemi
+            gravity = Gravity.CENTER
+            layoutParams = lp(topMargin = 12)
+        })
+        col.addView(
+            body(
+                "Start Tawny on $petName's monitor phone and leave it open,\n" +
+                    "then tap Retry here.",
+                maxW = 300
+            )
+        )
+        col.addView(gap(8))
+        col.addView(primary("Retry") { goLive("viewer") })
+        col.addView(link("Go back") { showHandheldHome() })
+        root.addView(col)
+        root.addView(themeToggleView())
+    }
+
+    /** @suppress kept for internal use by Bridge; real UX now goes through showMonitorOffline */
+    private fun onWatcherUnreachable() {
+        if (isFinishing) return
+        endLive()
+        showMonitorOffline()
+    }
+
+    // ----------------------------------------------------------- bridge
+
+    inner class Bridge {
+        /** Called by public/app.js as the session changes state. */
+        @JavascriptInterface
+        fun post(json: String) {
+            val obj = try { org.json.JSONObject(json) } catch (e: Exception) { return }
+            val event = obj.optString("event")
+            val message = obj.optString("message").ifBlank { null }
+            // Log off the UI thread: "diag" is chatty and carries no UI work.
+            if (event == "diag") { Diag.log("web ", obj.optString("line")); return }
+            Diag.log("web ", "event=$event" + (message?.let { " — $it" } ?: ""))
+            runOnUiThread {
+                when (event) {
+                    "live" -> beginLive()
+                    "idle" -> endLive()
+                    "ended" -> {
+                        saveRecentSession()
+                        endLive()
+                        if (prefs.getString("role", null) == "station") stopServers()
+                        afterSession()
+                    }
+                    // Watcher: a Handheld connected / all disconnected — show or
+                    // hide the pairing-QR overlay over the live view.
+                    "watching" -> pairOverlay?.visibility = View.GONE
+                    "waiting" -> pairOverlay?.visibility = View.VISIBLE
+                    // Theme changed from the in-session web toggle.
+                    "theme" -> {
+                        val mode = obj.optString("mode")
+                        if (mode == "light" || mode == "dark") {
+                            prefs.edit().putString("theme", mode).apply()
+                            if (!isLive) applyNightMode(mode)   // don't recreate mid-call
+                        }
+                    }
+                    "petname" -> {
+                        val name = obj.optString("name").ifBlank { null } ?: return@runOnUiThread
+                        prefs.edit().putString("channelName", name).apply()
+                        updateRecentSessionName(prefs.getString("channelKey", null) ?: return@runOnUiThread, name)
+                    }
+                    "unreachable" -> onWatcherUnreachable()
+                    "error" -> {
+                        endLive()
+                        if (prefs.getString("role", null) == "viewer") showMonitorOffline()
+                        else showError(message ?: "Could not start the session")
+                    }
+                }
+            }
+        }
+
+        /**
+         * WebView drops `<a download>` on blob: URLs, so snapshots would
+         * disappear without this. The page hands us base64 instead.
+         */
+        @JavascriptInterface
+        fun saveImage(dataUrl: String, filename: String) {
+            runOnUiThread {
+                try {
+                    val b64 = dataUrl.substringAfter("base64,")
+                    val bytes = Base64.decode(b64, Base64.DEFAULT)
+                    val dir = getExternalFilesDir(Environment.DIRECTORY_PICTURES) ?: filesDir
+                    val safe = filename.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                        .replace(Regex("^\\.+"), "_")        // no "." / ".." names
+                        .ifBlank { "snapshot.png" }
+                    File(dir, safe).writeBytes(bytes)
+                    toast("Saved $safe")
+                } catch (e: Exception) {
+                    toast("Could not save the snapshot")
+                    Log.w("Tawny", "snapshot failed", e)
+                }
+            }
+        }
+    }
+
+    private fun beginLive() {
+        isLive = true
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        am.mode = AudioManager.MODE_IN_COMMUNICATION
+        // Force the loudspeaker. On API 31+ `isSpeakerphoneOn` is deprecated and
+        // often a no-op, which left the far end's talk-back routed to a silent
+        // earpiece — so pin the built-in speaker as the communication device.
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            val speaker = am.availableCommunicationDevices.firstOrNull {
+                it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            }
+            if (speaker != null) runCatching { am.setCommunicationDevice(speaker) }
+        } else {
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = true
+        }
+    }
+
+    private fun endLive() {
+        isLive = false
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            runCatching { am.clearCommunicationDevice() }
+        } else {
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = false
+        }
+        am.mode = AudioManager.MODE_NORMAL
+    }
+
+    // -------------------------------------------------------- lifecycle
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // System light/dark flip (uiMode is in configChanges so we aren't
+        // recreated). Reload the palette and refresh what's on screen.
+        Hue.load(this)
+        root.setBackgroundColor(Hue.BG)
+        val w = web
+        if (w != null) {
+            w.evaluateJavascript(
+                "window.tawnySetTheme && window.tawnySetTheme(${jsStr(currentTheme())})", null
+            )
+        } else if (scannerStop == null) {
+            recreate()   // rebuild the current native screen with the new palette
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        web?.evaluateJavascript(
+            "window.dispatchEvent(new Event('tawny:background'))", null
+        )
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (isLive) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        web?.evaluateJavascript(
+            "window.dispatchEvent(new Event('tawny:foreground'))", null
+        )
+    }
+
+    override fun onDestroy() {
+        endLive()
+        stopScanner()
+        stopServers()
+        scene?.stop()
+        playScene?.stop()
+        web?.destroy()
+        web = null
+        super.onDestroy()
+    }
+
+    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
+}
+
+// ============================================================ custom views
+
+/**
+ * Flat, rounded camera / phone glyph for the role cards — same soft filled
+ * language as the owlet mascot. Body in the accent colour, details punched in
+ * the card colour behind it, one tiny accent highlight.
+ */
+private class IconView(ctx: Context, private val kind: String) : View(ctx) {
+    private val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Hue.BERRY }
+    private val cut = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Hue.PANEL }
+    private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Hue.BERRY }
+
+    private fun rr(c: Canvas, l: Float, t: Float, r: Float, b: Float, rad: Float, p: Paint) =
+        c.drawRoundRect(RectF(l, t, r, b), rad, rad, p)
+
+    override fun onDraw(canvas: Canvas) {
+        val s = min(width, height) / 48f
+        canvas.save()
+        canvas.scale(s, s)
+        if (kind == "camera") {
+            rr(canvas, 12f, 9f, 25f, 16f, 3f, body)          // viewfinder hump
+            rr(canvas, 5f, 14f, 43f, 39f, 6f, body)          // body
+            canvas.drawCircle(24f, 26.5f, 8f, cut)           // lens well
+            canvas.drawCircle(24f, 26.5f, 4.2f, dot)         // lens
+            canvas.drawCircle(21.6f, 24.1f, 1.5f, cut)       // glint
+            canvas.drawCircle(37f, 19.5f, 1.8f, cut)         // flash
+        } else {
+            rr(canvas, 13f, 4f, 35f, 44f, 6f, body)          // handset
+            rr(canvas, 16.5f, 9.5f, 31.5f, 35.5f, 3f, cut)   // screen
+            rr(canvas, 20.5f, 39.2f, 27.5f, 41.2f, 1f, cut)  // home bar
+            canvas.drawCircle(24f, 6.6f, 1f, cut)            // earpiece
+        }
+        canvas.restore()
+    }
+}
+
+/**
+ * Shared look for the little animated scenes: soft flat fills in warm cream,
+ * biscuit and dove-grey, dark bean eyes with a catch-light, a contact shadow
+ * under each critter, and springy secondary motion (ears, tails, a ball that
+ * squashes when it lands). Deliberately plush rather than a line drawing.
+ * Honours the system "remove animations" setting — motion off draws the pose.
+ */
+private abstract class CritterScene(ctx: Context) : View(ctx) {
+
+    protected abstract val vw: Float
+    protected abstract val vh: Float
+    protected open val loopMs = 3800L
+
+    protected fun paint(c: Int) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL; color = c
+    }
+
+    /** Dark "brushed leather" UI vs. light "strawberry cheesecake" — the pets
+     *  are tuned separately for each so they read on both grounds. */
+    protected val onDark = (
+        0.299f * Color.red(Hue.BG) + 0.587f * Color.green(Hue.BG) + 0.114f * Color.blue(Hue.BG)
+    ) < 128f
+
+    protected val cream = paint(if (onDark) 0xFFE7DBC1.toInt() else 0xFFF1E7D3.toInt())
+    protected val creamHi = paint(if (onDark) 0xFFF4EAD5.toInt() else 0xFFFDF8EE.toInt())
+    protected val creamLo = paint(if (onDark) 0xFFC9B790.toInt() else 0xFFDDCCAD.toInt())
+    protected val biscuit = paint(if (onDark) 0xFFCC9A63.toInt() else 0xFFD59E6B.toInt())   // the dog
+    protected val biscuitLo = paint(if (onDark) 0xFFA9784A.toInt() else 0xFFBB8453.toInt())
+    protected val dove = paint(if (onDark) 0xFFB6AD99.toInt() else 0xFFC2B8A5.toInt())      // the cat
+    protected val ink = paint(if (onDark) 0xFF2E2116.toInt() else 0xFF3C2A1E.toInt())       // eyes / muzzle dot
+    protected val berry = paint(Hue.BERRY)                   // noses, beak, inner ear, tongue
+    protected val sky = paint(Hue.SKY)                       // the ball, owl eyes
+    protected val hi = paint(if (onDark) 0x22FFFFFF else 0x2BFFFFFF)   // volume highlight
+    protected val lo = paint(if (onDark) 0x26000000 else 0x1F000000)   // volume shade
+    protected val cast = paint(Color.BLACK)                  // ground shadow (alpha set per call)
+    private val castMul = if (onDark) 1.9f else 1f
+
+    /** The pet outline. A warm dark line, a touch chunky by request. */
+    protected val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = if (onDark) 0xFF3A2A1B.toInt() else 0xFF48331E.toInt()
+        strokeWidth = 2.6f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    protected val hair = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = if (onDark) 0xFF5B4634.toInt() else Hue.DIM
+        strokeWidth = 2.2f; strokeCap = Paint.Cap.ROUND; alpha = if (onDark) 200 else 150
+    }
+
+    private var phase = 0f
+    protected val t get() = phase
+    private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+        repeatCount = ValueAnimator.INFINITE
+        interpolator = LinearInterpolator()
+        addUpdateListener { phase = it.animatedValue as Float; invalidate() }
+    }
+    private val reduceMotion: Boolean
+        get() = try {
+            Settings.Global.getFloat(
+                context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+            ) == 0f
+        } catch (e: Exception) { false }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        animator.duration = loopMs
+        if (!reduceMotion && !animator.isStarted) animator.start()
+    }
+
+    override fun onDetachedFromWindow() {
+        animator.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    fun stop() = animator.cancel()
+
+    override fun onDraw(canvas: Canvas) {
+        val s = min(width / vw, height / vh)
+        canvas.save()
+        canvas.translate((width - vw * s) / 2f, (height - vh * s) / 2f)
+        canvas.scale(s, s)
+        drawScene(canvas)
+        canvas.restore()
+    }
+
+    protected abstract fun drawScene(c: Canvas)
+
+    // ---------------------------------------------------------------- helpers
+
+    /** 1 = eyes open; briefly dips toward 0 once per loop. */
+    protected fun blink(offset: Float = 0f): Float {
+        val d = abs(((t + offset) % 1f) - 0.5f)
+        return if (d < 0.032f) (d / 0.032f).coerceIn(0.06f, 1f) else 1f
+    }
+
+    protected fun capsule(
+        c: Canvas, cx: Float, cy: Float, w: Float, h: Float, p: Paint, e: Paint? = null
+    ) {
+        val r = min(w, h) / 2f
+        val l = cx - w / 2f; val top = cy - h / 2f; val ri = cx + w / 2f; val b = cy + h / 2f
+        c.drawRoundRect(l, top, ri, b, r, r, p)
+        if (e != null) c.drawRoundRect(l, top, ri, b, r, r, e)
+    }
+
+    /** A filled body mass with a soft inset highlight, underside shade, and the
+     *  pet outline. */
+    protected fun mass(c: Canvas, cx: Float, cy: Float, w: Float, h: Float, base: Paint) {
+        val r = min(w, h) / 2f
+        val rc = RectF(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
+        c.drawRoundRect(rc, r, r, base)
+        c.drawOval(RectF(cx - w * 0.36f, cy - h * 0.44f, cx + w * 0.06f, cy - h * 0.02f), hi)
+        c.drawOval(RectF(cx - w * 0.40f, cy + h * 0.04f, cx + w * 0.40f, cy + h * 0.46f), lo)
+        c.drawRoundRect(rc, r, r, edge)
+    }
+
+    protected fun castShadow(c: Canvas, cx: Float, cy: Float, w: Float, alpha: Int = 34) {
+        cast.alpha = (alpha * castMul).toInt().coerceIn(0, 255)
+        c.drawOval(RectF(cx - w / 2f, cy - w * 0.11f, cx + w / 2f, cy + w * 0.11f), cast)
+    }
+
+    /** Dark bean eye with a catch-light; [open] 1..0 squashes it shut, [look]
+     *  shifts the whole eye toward what it's watching. */
+    protected fun eye(c: Canvas, cx: Float, cy: Float, r: Float, open: Float, look: Float = 0f) {
+        val o = open.coerceIn(0f, 1f)
+        c.drawOval(RectF(cx - r + look, cy - r * o, cx + r + look, cy + r * o), ink)
+        if (o > 0.55f) c.drawCircle(cx - r * 0.34f + look, cy - r * 0.44f, r * 0.36f, creamHi)
+    }
+
+    /** Big round owl eye: sky ring, dark pupil that can aim ([look]/[lookY]),
+     *  catch-light. */
+    protected fun owlEye(
+        c: Canvas, cx: Float, cy: Float, r: Float, open: Float, look: Float, lookY: Float = 0f
+    ) {
+        val o = open.coerceIn(0.08f, 1f)
+        c.save()
+        c.scale(1f, o, cx, cy)
+        c.drawCircle(cx, cy, r, sky)
+        val ew = edge.strokeWidth
+        edge.strokeWidth = ew * 0.68f
+        c.drawCircle(cx, cy, r, edge)
+        edge.strokeWidth = ew
+        val px = cx + look
+        val py = cy + r * 0.12f + lookY * r * 0.32f
+        c.drawCircle(px, py, r * 0.52f, ink)
+        c.drawCircle(px - r * 0.18f, py - r * 0.36f, r * 0.2f, creamHi)
+        c.restore()
+    }
+
+    /** A soft rounded triangle (ears). Corners a, b, c smoothed with quads. */
+    protected fun softTri(
+        c: Canvas, ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float,
+        p: Paint, e: Paint? = null
+    ) {
+        val path = Path().apply {
+            moveTo((ax + bx) / 2f, (ay + by) / 2f)
+            quadTo(bx, by, (bx + cx) / 2f, (by + cy) / 2f)
+            quadTo(cx, cy, (cx + ax) / 2f, (cy + ay) / 2f)
+            quadTo(ax, ay, (ax + bx) / 2f, (ay + by) / 2f)
+            close()
+        }
+        c.drawPath(path, p)
+        if (e != null) c.drawPath(path, e)
+    }
+
+    /** A tapered tail / limb from a base point to a tip, filled, rounded end. */
+    protected fun taper(
+        c: Canvas, bx: Float, by: Float, tipX: Float, tipY: Float, thick: Float,
+        p: Paint, e: Paint? = null
+    ) {
+        val dx = tipX - bx; val dy = tipY - by
+        val len = hypot(dx, dy).toFloat().coerceAtLeast(0.001f)
+        val ux = -dy / len * thick; val uy = dx / len * thick
+        val path = Path().apply {
+            moveTo(bx + ux, by + uy)
+            quadTo(bx + dx * 0.55f + ux * 0.5f, by + dy * 0.55f + uy * 0.5f, tipX, tipY)
+            quadTo(bx + dx * 0.55f - ux * 0.5f, by + dy * 0.55f - uy * 0.5f, bx - ux, by - uy)
+            close()
+        }
+        c.drawPath(path, p)
+        c.drawCircle(tipX, tipY, thick * 0.55f, p)
+        if (e != null) c.drawPath(path, e)
+    }
+
+    protected fun bone(c: Canvas, cx: Float, cy: Float, half: Float) {
+        val k = half * 0.34f
+        val sh = half * 0.28f
+        c.drawRoundRect(cx - half, cy - sh, cx + half, cy + sh, sh, sh, creamLo)
+        for (e in listOf(cx - half, cx + half)) {
+            c.drawCircle(e, cy - k * 0.85f, k, creamLo)
+            c.drawCircle(e, cy + k * 0.85f, k, creamLo)
+        }
+        c.drawRoundRect(cx - half + 0.6f, cy - sh * 0.55f, cx + half - 0.6f, cy + sh * 0.55f, 1.2f, 1.2f, creamHi)
+        for (e in listOf(cx - half, cx + half)) {
+            c.drawCircle(e, cy - k * 0.85f, k - 1.1f, creamHi)
+            c.drawCircle(e, cy + k * 0.85f, k - 1.1f, creamHi)
+        }
+    }
+
+    /**
+     * A floppy ear hanging off the side of a head: narrow where it joins at
+     * ([ax],[ay]), bulging out and rounding off at the bottom, swung by
+     * [angleDeg]. Anchor it on the head's edge — the join is drawn tucked
+     * slightly under, so the lobe reads as hanging beside the face, not lying
+     * across it.
+     */
+    protected fun floppyEar(
+        c: Canvas, ax: Float, ay: Float, len: Float, wid: Float, angleDeg: Float, p: Paint
+    ) {
+        c.save()
+        c.rotate(angleDeg, ax, ay)
+        val path = Path().apply {
+            moveTo(ax - wid * 0.28f, ay)
+            cubicTo(
+                ax - wid * 0.60f, ay + len * 0.38f,
+                ax - wid * 0.52f, ay + len * 0.88f,
+                ax, ay + len
+            )
+            cubicTo(
+                ax + wid * 0.52f, ay + len * 0.88f,
+                ax + wid * 0.60f, ay + len * 0.38f,
+                ax + wid * 0.28f, ay
+            )
+            quadTo(ax, ay - wid * 0.30f, ax - wid * 0.28f, ay)
+            close()
+        }
+        c.drawPath(path, p)
+        c.drawPath(path, edge)
+        c.restore()
+    }
+
+    /** Tawny the owlet — shared between both scenes. [hop] lifts her off the
+     *  ground and flaps the wings. Pass [ballX]/[ballY] and she watches the ball,
+     *  leans after it and perks up when it comes close — part of the game. */
+    protected fun owlet(
+        c: Canvas, x: Float, groundY: Float, tNorm: Float, hop: Float = 0f,
+        ballX: Float? = null, ballY: Float? = null
+    ) {
+        val tracking = ballX != null
+        val toBall = if (tracking) ballX!! - x else 0f
+        val track = (toBall / 58f).coerceIn(-1f, 1f)          // -1 ball hard-left … +1 hard-right
+        val near = if (tracking) ((46f - abs(toBall)) / 46f).coerceIn(0f, 1f) else 0f
+        val cy = groundY - 18f - hop - near * 3f
+        val flap = (hop / 8f).coerceIn(0f, 1f) + near * 0.45f
+        val lean = track * 8f                                  // body rocks after the ball
+        val faceDx = track * 4f                                // and she cranes her face over
+        val lookX = if (tracking) track * 2.1f else cos(tNorm * 2.0 * PI).toFloat() * 0.9f
+        val lookY = if (ballY != null) ((ballY - (cy - 4f)) / 19f).coerceIn(-1.3f, 1f) else 0f
+
+        castShadow(c, x, groundY + 3f, 26f * (1f - 0.35f * flap.coerceAtMost(1f)),
+            (34 * (1f - 0.5f * flap.coerceAtMost(1f))).toInt())
+
+        // Feet stay planted; the rest of her leans and cranes after the ball.
+        if (hop < 3f) {
+            c.drawPath(Path().apply {
+                moveTo(x - 4f, groundY - 2f); lineTo(x - 7f, groundY + 1f); lineTo(x - 1f, groundY + 1f); close()
+            }, berry)
+            c.drawPath(Path().apply {
+                moveTo(x + 4f, groundY - 2f); lineTo(x + 1f, groundY + 1f); lineTo(x + 7f, groundY + 1f); close()
+            }, berry)
+        }
+
+        c.save()
+        c.rotate(lean, x, groundY)
+
+        c.save(); c.rotate(-18f - 24f * flap.coerceAtMost(1f), x - 8f, cy - 2f)
+        capsule(c, x - 11f, cy + 3f, 9f, 17f, cream, edge); c.restore()
+        c.save(); c.rotate(18f + 24f * flap.coerceAtMost(1f), x + 8f, cy - 2f)
+        capsule(c, x + 11f, cy + 3f, 9f, 17f, cream, edge); c.restore()
+
+        val tx = x + faceDx * 0.45f
+        softTri(c, tx - 8f, cy - 11f, tx - 3f, cy - 23f, tx + 1f, cy - 12f, cream, edge)
+        softTri(c, tx + 8f, cy - 11f, tx + 3f, cy - 23f, tx - 1f, cy - 12f, cream, edge)
+
+        mass(c, x, cy, 26f, 32f, cream)
+        capsule(c, x + faceDx, cy - 3f, 22f, 17f, creamHi)
+
+        val bl = blink(0.45f)
+        owlEye(c, x + faceDx - 5.4f, cy - 4f, 4.6f, bl, lookX, lookY)
+        owlEye(c, x + faceDx + 5.4f, cy - 4f, 4.6f, bl, lookX, lookY)
+        c.drawPath(Path().apply {
+            moveTo(x + faceDx - 2f, cy + 1f); lineTo(x + faceDx + 2f, cy + 1f); lineTo(x + faceDx, cy + 5f); close()
+        }, berry)
+        c.restore()
+    }
+}
+
+/** The welcome-screen trio: a cat and a dog sitting either side of Tawny the
+ *  owlet — breathing, blinking, tails alive. */
+private class PetSceneView(ctx: Context) : CritterScene(ctx) {
+    override val vw = 260f
+    override val vh = 170f
+    override val loopMs = 4200L
+
+    override fun drawScene(c: Canvas) {
+        val tau = t * 2.0 * PI
+        val g = 150f
+        val bob = sin(tau).toFloat()
+
+        // ---------------- cat, sitting, left ----------------
+        run {
+            val x = 70f
+            val by = bob * 1.6f
+            castShadow(c, x + 2f, g + 4f, 66f, 40)
+
+            val flick = sin(t * 4.0 * PI + 1.0).toFloat()
+            c.save(); c.rotate(flick * 4f, x + 6f, g - 6f)
+            val catTail = Path().apply {
+                moveTo(x + 2f, g - 4f)
+                cubicTo(x + 30f, g + 2f, x + 34f, g - 26f, x + 20f, g - 34f)
+                cubicTo(x + 12f, g - 39f, x + 6f, g - 32f, x + 11f, g - 24f)
+                cubicTo(x + 16f, g - 16f, x + 12f, g - 2f, x - 2f, g + 1f)
+                close()
+            }
+            c.drawPath(catTail, dove); c.drawPath(catTail, edge)
+            c.restore()
+
+            mass(c, x - 4f, g - 16f + by, 46f, 30f, dove)
+            mass(c, x + 2f, g - 40f + by, 34f, 46f, dove)
+            capsule(c, x + 4f, g - 30f + by, 18f, 24f, creamHi)
+            capsule(c, x - 4f, g - 3f, 12f, 9f, cream, edge)
+            capsule(c, x + 10f, g - 3f, 12f, 9f, cream, edge)
+
+            val hx = x + 3f; val hy = g - 64f + by
+            softTri(c, hx - 16f, hy - 2f, hx - 20f, hy - 22f, hx - 3f, hy - 12f, dove, edge)
+            softTri(c, hx + 16f, hy - 2f, hx + 20f, hy - 22f, hx + 3f, hy - 12f, dove, edge)
+            softTri(c, hx - 13f, hy - 4f, hx - 16f, hy - 17f, hx - 5f, hy - 11f, berry)
+            softTri(c, hx + 13f, hy - 4f, hx + 16f, hy - 17f, hx + 5f, hy - 11f, berry)
+            mass(c, hx, hy, 32f, 29f, dove)
+            capsule(c, hx, hy + 6f, 15f, 12f, creamHi)
+            val bl = blink()
+            eye(c, hx - 6f, hy - 1f, 3.4f, bl)
+            eye(c, hx + 6f, hy - 1f, 3.4f, bl)
+            c.drawPath(Path().apply {
+                moveTo(hx, hy + 8f); lineTo(hx - 2.4f, hy + 5.6f); lineTo(hx + 2.4f, hy + 5.6f); close()
+            }, berry)
+            c.drawLine(hx + 6f, hy + 5f, hx + 20f, hy + 3f, hair)
+            c.drawLine(hx + 6f, hy + 8f, hx + 20f, hy + 9f, hair)
+            c.drawLine(hx - 6f, hy + 5f, hx - 20f, hy + 3f, hair)
+            c.drawLine(hx - 6f, hy + 8f, hx - 20f, hy + 9f, hair)
+        }
+
+        // ---------------- dog, sitting, right ----------------
+        run {
+            val x = 190f
+            val by = sin(tau + 0.6).toFloat() * 1.6f
+            castShadow(c, x + 2f, g + 4f, 78f, 40)
+
+            val wag = sin(t * 7.0 * PI).toFloat()
+            c.save(); c.rotate(wag * 8f, x + 14f, g - 8f)
+            val dogTail = Path().apply {
+                moveTo(x + 12f, g - 4f)
+                cubicTo(x + 40f, g - 4f, x + 48f, g - 26f, x + 36f, g - 40f)
+                cubicTo(x + 31f, g - 46f, x + 21f, g - 44f, x + 22f, g - 36f)
+                cubicTo(x + 27f, g - 30f, x + 30f, g - 16f, x + 12f, g - 4f)
+                close()
+            }
+            c.drawPath(dogTail, biscuit); c.drawPath(dogTail, edge)
+            c.restore()
+
+            mass(c, x + 4f, g - 16f + by, 52f, 28f, biscuit)
+            mass(c, x, g - 40f + by, 42f, 46f, biscuit)
+            capsule(c, x, g - 30f + by, 20f, 26f, cream)
+            capsule(c, x - 8f, g - 3f, 13f, 10f, cream, edge)
+            capsule(c, x + 8f, g - 3f, 13f, 10f, cream, edge)
+
+            val hx = x; val hy = g - 62f + by
+            val sway = sin(tau + 0.6).toFloat() * 3f
+            // Ears hang from the top corners of the head and splay outward, so
+            // they read beside the face. Drawn BEFORE the head: only the part
+            // outside the skull shows, exactly like a real floppy ear.
+            // (+ve rotates clockwise on screen, so the LEFT ear takes the +ve
+            // angle to swing away from the face.)
+            floppyEar(c, hx - 15f, hy - 9f, 33f, 18f, 22f + sway, biscuitLo)
+            floppyEar(c, hx + 15f, hy - 9f, 33f, 18f, -22f - sway, biscuitLo)
+            mass(c, hx, hy, 34f, 31f, cream)
+            capsule(c, hx, hy + 7f, 18f, 14f, creamHi)
+            val bl = blink(0.12f)
+            eye(c, hx - 6f, hy - 2f, 3.4f, bl)
+            eye(c, hx + 6f, hy - 2f, 3.4f, bl)
+            capsule(c, hx, hy + 4f, 6f, 5f, ink)
+            c.drawCircle(hx - 1.6f, hy + 2.6f, 1.1f, creamHi)
+            c.drawArc(RectF(hx - 6f, hy + 6f, hx, hy + 13f), 20f, 130f, false, hair)
+            c.drawArc(RectF(hx, hy + 6f, hx + 6f, hy + 13f), 30f, 130f, false, hair)
+            val loll = 4f + 1.5f * (0.5f + 0.5f * sin(t * 6.0 * PI).toFloat())
+            c.drawRoundRect(hx - 2.4f, hy + 9f, hx + 2.4f, hy + 9f + loll, 2.4f, 2.4f, berry)
+        }
+
+        // ---------------- owlet, centre ----------------
+        owlet(c, 130f, g - 2f, t, hop = (0.5f + 0.5f * sin(tau).toFloat()) * 2f)
+    }
+}
+
+/** The sessions-home scene: a kitten crouches and springs at a bouncing ball,
+ *  Tawny hops, a dog lies gnawing its bone — a bit of life over the list. */
+private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
+    override val vw = 300f
+    override val vh = 140f
+    override val loopMs = 3000L
+
+    override fun drawScene(c: Canvas) {
+        val tau = t * 2.0 * PI
+        val g = 116f
+
+        // The ball arcs between the kitten and the dog, lofting high over Tawny
+        // (dead centre) and only dropping low at the two ends where they bat it —
+        // so a centred owl is never in its way, and her gaze sweeps end to end.
+        val swing = sin(tau).toFloat()
+        val ballX = 150f + 56f * swing                         // 94 (kitten) … 206 (dog)
+        val arc = abs(cos(tau).toFloat())                      // 1 over centre, 0 at the ends
+        val endBounce = abs(sin(t * 7.0 * PI).toFloat())
+        val ballLift = arc * 40f + (1f - arc) * endBounce * 13f
+        val ballY = g - 8f - ballLift
+
+        // ---------- kitten, crouched, left, springs at the ball ----------
+        run {
+            val x = 60f
+            val pounce = (-sin(tau)).toFloat().coerceAtLeast(0f)
+            val by = sin(tau).toFloat() * 1.4f
+            val wiggle = sin(t * 18.0 * PI).toFloat() * pounce * 1.6f
+            castShadow(c, x + 4f, g + 3f, 66f, 36)
+            c.save()
+            c.translate(0f, -7f * pounce)
+            c.rotate(11f * pounce, x, g)
+
+            val flick = sin(t * 11.0 * PI).toFloat()
+            c.save(); c.rotate(flick * 12f, x - 14f, g - 12f)
+            val kitTail = Path().apply {
+                moveTo(x - 12f, g - 10f)
+                cubicTo(x - 34f, g - 12f, x - 40f, g - 40f, x - 22f, g - 50f)
+                cubicTo(x - 12f, g - 55f, x - 4f, g - 47f, x - 11f, g - 39f)
+                cubicTo(x - 18f, g - 33f, x - 18f, g - 20f, x - 6f, g - 10f)
+                close()
+            }
+            c.drawPath(kitTail, dove); c.drawPath(kitTail, edge)
+            c.restore()
+
+            mass(c, x - 10f + wiggle, g - 16f + by, 34f, 26f, dove)
+            mass(c, x + 11f, g - 13f + by, 46f, 24f, dove)
+            capsule(c, x + 16f, g - 6f + by, 20f, 12f, creamHi)
+
+            capsule(c, x + 20f, g - 3f, 11f, 8f, cream, edge)
+            val px = x + 26f + 16f * pounce
+            val py = g - 3f - 12f * pounce
+            if (pounce > 0.02f) taper(c, x + 18f, g - 10f + by, px, py, 4.5f, dove, edge)
+            capsule(c, px, py, 10f, 8f, cream, edge)
+
+            val hx = x + 26f; val hy = g - 28f + by
+            softTri(c, hx - 12f, hy - 1f, hx - 15f, hy - 17f, hx - 2f, hy - 9f, dove, edge)
+            softTri(c, hx + 12f, hy - 1f, hx + 15f, hy - 17f, hx + 2f, hy - 9f, dove, edge)
+            softTri(c, hx - 10f, hy - 3f, hx - 12f, hy - 12f, hx - 4f, hy - 8f, berry)
+            softTri(c, hx + 10f, hy - 3f, hx + 12f, hy - 12f, hx + 4f, hy - 8f, berry)
+            mass(c, hx, hy, 26f, 24f, dove)
+            capsule(c, hx, hy + 5f, 12f, 10f, creamHi)
+            val bl = (blink() + pounce).coerceAtMost(1f)
+            val kitLook = ((ballX - hx) / 80f).coerceIn(-1f, 1f) * 1.7f
+            eye(c, hx - 4.5f, hy - 1f, 2.9f + 0.5f * pounce, bl, kitLook)
+            eye(c, hx + 4.5f, hy - 1f, 2.9f + 0.5f * pounce, bl, kitLook)
+            c.drawPath(Path().apply {
+                moveTo(hx, hy + 6.5f); lineTo(hx - 2f, hy + 4.5f); lineTo(hx + 2f, hy + 4.5f); close()
+            }, berry)
+            c.drawLine(hx + 5f, hy + 4f, hx + 16f, hy + 2f, hair)
+            c.drawLine(hx + 5f, hy + 6f, hx + 16f, hy + 8f, hair)
+            c.drawLine(hx - 5f, hy + 4f, hx - 16f, hy + 2f, hair)
+            c.drawLine(hx - 5f, hy + 6f, hx - 16f, hy + 8f, hair)
+            c.restore()
+        }
+
+        // ---------- dog, right — its bone, and it bats the ball when it lands ----------
+        run {
+            val x = 236f
+            // 0 when the ball is away, 1 when it drops in near the dog's paws.
+            val toy = ((ballX - 168f) / 38f).coerceIn(0f, 1f)
+            val bat = toy * abs(sin(t * 11.0 * PI).toFloat())          // paw-swat rhythm
+            val by = sin(tau).toFloat() * 1.5f - toy * abs(sin(t * 8.0 * PI).toFloat()) * 3f
+            val gnaw = sin(t * 8.0 * PI).toFloat().coerceAtLeast(0f) * 3f * (1f - toy)
+            castShadow(c, x + 4f, g + 3f, 106f, 40)
+
+            val wag = sin(t * 9.0 * PI).toFloat()
+            c.save(); c.rotate(wag * (12f + toy * 14f), x + 40f, g - 12f)
+            val lyingTail = Path().apply {
+                moveTo(x + 36f, g - 8f)
+                cubicTo(x + 58f, g - 10f, x + 64f, g - 30f, x + 52f, g - 42f)
+                cubicTo(x + 47f, g - 47f, x + 38f, g - 45f, x + 39f, g - 37f)
+                cubicTo(x + 43f, g - 32f, x + 44f, g - 18f, x + 36f, g - 8f)
+                close()
+            }
+            c.drawPath(lyingTail, biscuit); c.drawPath(lyingTail, edge)
+            c.restore()
+
+            mass(c, x + 6f, g - 15f + by, 82f, 32f, biscuit)
+            mass(c, x + 30f, g - 16f + by, 30f, 30f, biscuit)
+            capsule(c, x + 24f, g - 4f, 30f, 12f, biscuitLo, edge)
+            capsule(c, x + 12f, g - 3f, 14f, 9f, cream, edge)
+
+            // inner front paw planted; the outer one lifts to swat the ball
+            capsule(c, x - 16f, g - 3f, 24f, 10f, cream, edge)
+            val batX = x - 30f - toy * 5f
+            val batY = g - 3f - toy * 6f - bat * 12f
+            if (toy > 0.02f) taper(c, x - 6f, g - 6f, batX + 4f, batY, 4.5f, biscuit, edge)
+            capsule(c, batX, batY, 22f, 10f, cream, edge)
+            c.drawLine(x - 38f, g - 3f, x - 38f, g - 7f, hair)
+            c.drawLine(x - 34f, g - 3f, x - 34f, g - 7f, hair)
+
+            bone(c, x - 27f, g + 1f, 7.5f)
+
+            val hx = x - 18f; val hy = g - 30f + by + gnaw - toy * 4f
+            val sway = sin(tau + 0.5).toFloat() * 3f
+            // Ears hang from the top corners and splay outward — drawn BEFORE the
+            // head, so only the part beside the skull shows.
+            floppyEar(c, hx - 13f, hy - 8f, 29f, 16f, 22f + sway, biscuitLo)
+            floppyEar(c, hx + 13f, hy - 8f, 29f, 16f, -22f - sway, biscuitLo)
+            mass(c, hx, hy, 30f, 28f, cream)
+            capsule(c, hx, hy + 6f, 16f, 13f, creamHi)
+            val bl = blink(0.1f)
+            val dogLook = -toy * 2f
+            eye(c, hx - 5.5f, hy - 2f, 3.1f, bl, dogLook)
+            eye(c, hx + 5.5f, hy - 2f, 3.1f, bl, dogLook)
+            capsule(c, hx + dogLook, hy + 3f, 5.5f, 4.5f, ink)
+            c.drawCircle(hx + dogLook - 1.5f, hy + 1.7f, 1f, creamHi)
+            c.drawArc(RectF(hx - 5f, hy + 5f, hx, hy + 11f), 20f, 130f, false, hair)
+            c.drawArc(RectF(hx, hy + 5f, hx + 5f, hy + 11f), 30f, 130f, false, hair)
+            val loll = 3f + 1.6f * (0.5f + 0.5f * sin(t * 7.0 * PI).toFloat()) + toy * 2f
+            c.drawRoundRect(hx - 2.2f, hy + 7f, hx + 2.2f, hy + 7f + loll, 2.2f, 2.2f, berry)
+        }
+
+        // ---------- Tawny, dead centre, hopping, watching the ball ----------
+        owlet(
+            c, 150f, g - 2f, t, hop = abs(sin(t * 4.0 * PI).toFloat()) * 8f,
+            ballX = ballX, ballY = ballY
+        )
+
+        // ---------- the ball, kept on top so it never hides ----------
+        run {
+            val bx = ballX
+            val by = ballY
+            val lift01 = (ballLift / 40f).coerceIn(0f, 1f)
+            val sqY = 0.74f + 0.26f * lift01
+            val sqX = 2f - sqY
+            castShadow(c, bx, g + 3f, 22f * (0.55f + 0.45f * (1f - lift01)), (42 * (1f - 0.7f * lift01)).toInt())
+            c.save()
+            c.translate(bx, by)
+            c.scale(sqX, sqY)
+            c.drawCircle(0f, 0f, 9f, sky)
+            c.drawOval(RectF(-1.8f, -0.9f, 10.4f, 11.3f), lo)
+            c.drawOval(RectF(-9.5f, -10.4f, -0.9f, 1.4f), hi)
+            c.save(); c.rotate(t * 820f)
+            c.drawArc(RectF(-6.5f, -6.5f, 6.5f, 6.5f), 12f, 60f, false, hair)
+            c.drawArc(RectF(-6.5f, -6.5f, 6.5f, 6.5f), 192f, 60f, false, hair)
+            c.restore()
+            c.drawCircle(0f, 0f, 9f, edge)
+            c.restore()
+        }
+    }
+}

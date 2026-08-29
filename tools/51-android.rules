@@ -1,0 +1,46 @@
+# adb / fastboot USB access for a normal user on Arch / CachyOS.
+# Install:  sudo cp tools/51-android.rules /etc/udev/rules.d/
+#           sudo udevadm control --reload-rules && sudo udevadm trigger
+# (or run tools/setup-adb-udev.sh)
+#
+# TAG+="uaccess" makes systemd-logind grant the *currently logged-in* user an
+# ACL on the device — no group needed on a normal desktop session. The
+# GROUP/MODE lines are a fallback for non-logind setups; add yourself with
+#   sudo usermod -aG uucp $USER   (then log out / back in)
+
+# --- the generic rule: matches the ADB interface of ANY vendor -------------
+# ADB interface = bInterfaceClass ff / SubClass 42 / Protocol 01
+SUBSYSTEM=="usb", ATTR{bInterfaceClass}=="ff", ATTR{bInterfaceSubClass}=="42", ATTR{bInterfaceProtocol}=="01", MODE="0660", GROUP="uucp", TAG+="uaccess", SYMLINK+="android_adb"
+
+# fastboot / bootloader interface (class ff / subclass 42 / protocol 03)
+SUBSYSTEM=="usb", ATTR{bInterfaceClass}=="ff", ATTR{bInterfaceSubClass}=="42", ATTR{bInterfaceProtocol}=="03", MODE="0660", GROUP="uucp", TAG+="uaccess", SYMLINK+="android_fastboot"
+
+# --- per-vendor fallback (covers devices that don't expose the interface
+#     attrs until authorised) ------------------------------------------------
+# Google/Nexus/Pixel 18d1, Samsung 04e8, HTC 0bb4, Motorola 22b8, LG 1004,
+# Sony 0fce, OnePlus/Oppo 2a70 22d9, Xiaomi 2717 2a45, Huawei 12d1, ZTE 19d2,
+# Asus 0b05, Lenovo 17ef, Nokia/HMD 2e04, Fairphone 2ae5, Nothing 2d95,
+# Realme/Oppo 22d9, TCL/Alcatel 1bbb, Sony-Ericsson 0fce, Acer 0502,
+# Foxconn 0489, Qualcomm 05c6, MediaTek 0e8d
+ATTR{idVendor}=="18d1", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="04e8", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="0bb4", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="22b8", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="1004", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="0fce", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="2a70", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="22d9", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="2717", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="2a45", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="12d1", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="19d2", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="0b05", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="17ef", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="2e04", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="2ae5", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="2d95", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="1bbb", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="0502", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="0489", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="05c6", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"
+ATTR{idVendor}=="0e8d", SUBSYSTEM=="usb", MODE="0660", GROUP="uucp", TAG+="uaccess"

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tawny — a flat, friendly owlet silhouette. Sits inside the 66dp safe circle
+     (centre 54,54 · r 33). Regenerate the web/raster set with tools/gen-icons.sh. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+
+    <!-- body + two soft ear tufts, one white shape -->
+    <path android:fillColor="#FFFFFF" android:pathData="M42,30 C 42,24 45,23 47,28 C 49,26 59,26 61,28 C 63,23 66,24 66,30 C 75,36 79,47 79,58 C 79,77 68,87 54,87 C 40,87 29,77 29,58 C 29,47 33,36 42,30 Z" />
+
+    <!-- eyes -->
+    <path android:fillColor="#3C5A73"
+        android:pathData="M44,53 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 Z" />
+    <path android:fillColor="#3C5A73"
+        android:pathData="M64,53 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 Z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M42.2,50.6 m-1.7,0 a1.7,1.7 0 1,0 3.4,0 a1.7,1.7 0 1,0 -3.4,0 Z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M62.2,50.6 m-1.7,0 a1.7,1.7 0 1,0 3.4,0 a1.7,1.7 0 1,0 -3.4,0 Z" />
+
+    <!-- little strawberry beak (points down) -->
+    <path android:fillColor="#E86A83" android:pathData="M51,58 h6 l-3,4.6 z" />
+</vector>

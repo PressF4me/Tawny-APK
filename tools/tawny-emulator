@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Launch the Android emulator for the Tawny project.
+#
+#   tawny-emulator            start the 'frentalk' AVD
+#   tawny-emulator --run      start it, then build+install+launch the debug app
+#   tawny-emulator --clean    cold boot (ignore the saved snapshot)
+#   tawny-emulator <avd>      start a different AVD by name
+#
+# Env overrides: ANDROID_HOME, JAVA_HOME, TAWNY_EMU_ARGS
+set -euo pipefail
+
+export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/sdk}"
+export JAVA_HOME="${JAVA_HOME:-$HOME/Android/jdk17}"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
+
+EMU="$ANDROID_HOME/emulator/emulator"
+ADB="$ANDROID_HOME/platform-tools/adb"
+PROJECT="$HOME/Downloads/frentalk"
+PKG="com.tawny.monitor.debug"
+
+AVD="frentalk"
+RUN=0
+EXTRA=()
+for a in "$@"; do
+  case "$a" in
+    --run)   RUN=1 ;;
+    --clean) EXTRA+=(-no-snapshot-load -wipe-data) ;;
+    --*)     EXTRA+=("$a") ;;
+    *)       AVD="$a" ;;
+  esac
+done
+
+if ! "$EMU" -list-avds | grep -qx "$AVD"; then
+  echo "AVD '$AVD' not found. Available:" >&2
+  "$EMU" -list-avds >&2
+  echo >&2
+  echo "Create one with Android Studio, or:" >&2
+  echo "  sdkmanager 'system-images;android-35;google_apis;x86_64'" >&2
+  echo "  avdmanager create avd -n frentalk -k 'system-images;android-35;google_apis;x86_64' -d pixel_6" >&2
+  exit 1
+fi
+
+# already running?
+if "$ADB" devices | grep -q 'emulator-.*device'; then
+  echo "An emulator is already running."
+else
+  echo "Starting AVD '$AVD'…"
+  # -camera-back virtualscene lets the in-app QR scanner see a test pattern.
+  "$EMU" -avd "$AVD" -gpu auto -no-boot-anim \
+    -camera-back virtualscene ${TAWNY_EMU_ARGS:-} "${EXTRA[@]}" &
+fi
+
+[ "$RUN" -eq 1 ] || exit 0
+
+echo "Waiting for boot…"
+"$ADB" wait-for-device
+until [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done
+
+echo "Building + installing the debug app…"
+( cd "$PROJECT/android" && ./gradlew -q :app:assembleDebug )
+"$ADB" install -r "$PROJECT/android/app/build/outputs/apk/debug/app-debug.apk"
+"$ADB" shell am start -n "$PKG/com.tawny.monitor.MainActivity" >/dev/null
+echo "Tawny launched on $AVD."

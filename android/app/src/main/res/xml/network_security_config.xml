@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext is permitted because the app talks to two cleartext endpoints on the
+  local network only:
+
+    * http://127.0.0.1:<port>  — the in-APK web server that hosts the UI so the
+      WebView has a secure-context origin (getUserMedia needs one).
+    * ws://<watcher-lan-ip>:<port>  — the Watcher's LAN signaling relay. The
+      Handheld learns this address by scanning the Watcher's QR; it is never
+      known at build time, and Android's network-security-config cannot
+      pattern-match the RFC1918 ranges it could fall in, so cleartext is allowed
+      generally rather than per-domain.
+
+  Nothing sensitive travels in cleartext: signaling carries only SDP and a
+  hashed room id (never the channel key), and the media itself is DTLS-SRTP
+  encrypted end to end regardless of transport.
+
+  The remote path (rendezvous + TURN) is TLS-only (wss:443 / turns), enforced by
+  the wss:// / turns: URLs the app uses — it never falls back to cleartext.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

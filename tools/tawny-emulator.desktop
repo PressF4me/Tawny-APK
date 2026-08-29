@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Tawny Emulator
+GenericName=Android Emulator
+Comment=Start the Android emulator for the Tawny project
+Exec=$HOME/.local/bin/tawny-emulator
+Icon=tawny-emulator
+Terminal=false
+Categories=Development;
+Keywords=android;emulator;avd;tawny;
+StartupNotify=true
+Actions=run;clean;
+
+[Desktop Action run]
+Name=Start + build & install Tawny
+Exec=$HOME/.local/bin/tawny-emulator --run
+
+[Desktop Action clean]
+Name=Cold boot (wipe data)
+Exec=$HOME/.local/bin/tawny-emulator --clean

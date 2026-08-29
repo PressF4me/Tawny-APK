@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Bump the Tawny version number.
+#
+# Usage:
+#   tawny-bump               increment versionCode only (build bump)
+#   tawny-bump patch         0.1.0 → 0.1.1  + versionCode++
+#   tawny-bump minor         0.1.0 → 0.2.0  + versionCode++
+#   tawny-bump major         0.1.0 → 1.0.0  + versionCode++
+#   tawny-bump 1.4.2         set exact versionName + versionCode++
+#
+set -euo pipefail
+
+FILE="$HOME/Downloads/frentalk/android/version.properties"
+
+CODE=$(grep "^VERSION_CODE=" "$FILE" | cut -d= -f2 | tr -d '[:space:]')
+NAME=$(grep "^VERSION_NAME=" "$FILE" | cut -d= -f2 | tr -d '[:space:]')
+
+NEW_CODE=$(( CODE + 1 ))
+
+case "${1:-}" in
+  "")
+    NEW_NAME="$NAME"
+    ;;
+  patch)
+    IFS='.' read -r MAJ MIN PAT <<< "$NAME"
+    NEW_NAME="$MAJ.$MIN.$(( PAT + 1 ))"
+    ;;
+  minor)
+    IFS='.' read -r MAJ MIN PAT <<< "$NAME"
+    NEW_NAME="$MAJ.$(( MIN + 1 )).0"
+    ;;
+  major)
+    IFS='.' read -r MAJ MIN PAT <<< "$NAME"
+    NEW_NAME="$(( MAJ + 1 )).0.0"
+    ;;
+  [0-9]*)
+    NEW_NAME="$1"
+    ;;
+  *)
+    echo "Usage: tawny-bump [patch|minor|major|X.Y.Z]" >&2
+    exit 1
+    ;;
+esac
+
+printf "VERSION_CODE=%s\nVERSION_NAME=%s\n" "$NEW_CODE" "$NEW_NAME" > "$FILE"
+
+echo "  $NAME (build $CODE)  →  $NEW_NAME (build $NEW_CODE)"

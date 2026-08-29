@@ -1,0 +1,359 @@
+// Tawny — WebRTC signaling + static file server.
+// Media is peer-to-peer. This process brokers the handshake and nothing else.
+//
+// Channels are identified to the server only by an opaque id derived client
+// side from a secret the server never receives. See SECURITY.md.
+
+import http from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { join, extname, normalize, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { randomUUID, createHash, createHmac } from 'node:crypto';
+import { WebSocketServer } from 'ws';
+
+const PORT = Number(process.env.PORT || 8099);
+const HOST = process.env.HOST || '0.0.0.0';
+const STUN = list(process.env.STUN_URLS);
+const ALLOWED_HOSTS = list(process.env.ALLOWED_HOSTS).map((h) => h.toLowerCase());
+const TRUST_PROXY = process.env.TRUST_PROXY !== 'off';
+
+// Remote relay (all optional). RENDEZVOUS_URL is only echoed for a browser
+// client that fetches /config.json from this origin. TURN is coturn with
+// use-auth-secret (static-auth-secret === TAWNY_TURN_SECRET).
+const RENDEZVOUS_URL = process.env.RENDEZVOUS_URL || '';
+const TURN_MODE = process.env.TURN_MODE || 'auto';
+const TURN_URLS = list(process.env.TAWNY_TURN_URLS);
+const TURN_SECRET = process.env.TAWNY_TURN_SECRET || '';
+
+const MAX_PER_ROOM = 6;      // one Watcher + up to five Handhelds
+const MAX_STATIONS = 1;
+const MAX_PER_IP = 6;
+const MAX_TOTAL = 64;
+const MAX_MSG = 64 * 1024;
+const AUTH_FAILS = 8;        // per IP before lockout
+const AUTH_WINDOW = 10 * 60_000;
+
+const ROOM_RE = /^[a-f0-9]{32}$/;
+const PUBLIC = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
+
+function list(v) {
+  return (v || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json; charset=utf-8'
+};
+
+const CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
+  "connect-src 'self' https: wss: ws:",
+  "manifest-src 'self'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'"
+].join('; ');
+
+function secureHeaders(extra = {}) {
+  return {
+    'content-security-policy': CSP,
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'permissions-policy': 'camera=(self), microphone=(self), geolocation=()',
+    'cross-origin-opener-policy': 'same-origin',
+    'cross-origin-resource-policy': 'same-origin',
+    ...extra
+  };
+}
+
+// ------------------------------------------------------------------ util
+
+function clientIP(req) {
+  const raw = req.socket.remoteAddress || '';
+  const loopback = raw === '127.0.0.1' || raw === '::1' || raw === '::ffff:127.0.0.1';
+  if (TRUST_PROXY && loopback) {
+    const xff = req.headers['x-forwarded-for'];
+    if (xff) return String(xff).split(',')[0].trim();
+  }
+  return raw;
+}
+
+function hostAllowed(req) {
+  const host = String(req.headers.host || '').toLowerCase();
+  if (!host) return false;
+  if (!ALLOWED_HOSTS.length) return true;
+  const bare = host.replace(/:\d+$/, '');
+  return ALLOWED_HOSTS.includes(host) || ALLOWED_HOSTS.includes(bare);
+}
+
+// Blocks cross-site WebSocket hijacking: a page on evil.example cannot open a
+// socket here, because its Origin will not match the Host it was served from.
+function originAllowed(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // non-browser client (native app)
+  let parsed;
+  try { parsed = new URL(origin); } catch { return false; }
+  const host = String(req.headers.host || '').toLowerCase();
+  if (parsed.host.toLowerCase() === host) return true;
+  const bare = parsed.hostname.toLowerCase();
+  return ALLOWED_HOSTS.includes(bare) || ALLOWED_HOSTS.includes(parsed.host.toLowerCase());
+}
+
+const fails = new Map(); // ip -> { n, until }
+
+function lockedOut(ip) {
+  const rec = fails.get(ip);
+  if (!rec) return false;
+  if (Date.now() > rec.until) { fails.delete(ip); return false; }
+  return rec.n >= AUTH_FAILS;
+}
+
+function noteFail(ip) {
+  const rec = fails.get(ip) || { n: 0, until: 0 };
+  rec.n += 1;
+  rec.until = Date.now() + AUTH_WINDOW;
+  fails.set(ip, rec);
+}
+
+// ------------------------------------------------------------------ http
+
+const server = http.createServer(async (req, res) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, secureHeaders({ allow: 'GET, HEAD' }));
+    return res.end();
+  }
+  if (!hostAllowed(req)) {
+    res.writeHead(421, secureHeaders());
+    return res.end();
+  }
+
+  const url = new URL(req.url, 'http://localhost');
+
+  if (url.pathname === '/config.json') {
+    return json(res, 200, {
+      stun: STUN, turnMode: TURN_MODE, rendezvous: RENDEZVOUS_URL, authRequired: false
+    });
+  }
+  if (url.pathname === '/healthz') {
+    return json(res, 200, { ok: true, channels: rooms.size, clients: wss.clients.size });
+  }
+  if (url.pathname === '/turn') {
+    const room = String(url.searchParams.get('room') || '');
+    if (!ROOM_RE.test(room)) return json(res, 400, { error: 'bad room' });
+    if (!TURN_URLS.length || !TURN_SECRET) return json(res, 404, { error: 'no turn configured' });
+    // Must present a ticket valid for this room — no free credential farming.
+    const rec = tickets.get(room);
+    if (!rec || Date.now() > rec.exp ||
+        sha256hex(url.searchParams.get('t') || '') !== rec.hashT) {
+      return json(res, 403, { error: 'not paired' });
+    }
+    const ttl = 3600;
+    const username = String(Math.floor(Date.now() / 1000) + ttl);
+    const credential = createHmac('sha1', TURN_SECRET).update(username).digest('base64');
+    return json(res, 200, { iceServers: [{ urls: TURN_URLS, username, credential }], ttl });
+  }
+
+  let rel;
+  try { rel = decodeURIComponent(url.pathname); }
+  catch { return json(res, 400, { error: 'bad path' }); }
+  if (rel.includes('\0')) return json(res, 400, { error: 'bad path' });
+  if (rel.endsWith('/')) rel += 'index.html';
+
+  const file = normalize(join(PUBLIC, rel));
+  if (!file.startsWith(PUBLIC + sep) && file !== PUBLIC) {
+    res.writeHead(403, secureHeaders());
+    return res.end();
+  }
+
+  try {
+    const body = await readFile(file);
+    res.writeHead(200, secureHeaders({
+      'content-type': MIME[extname(file)] || 'application/octet-stream',
+      'content-length': body.length,
+      'cache-control': 'no-cache'
+    }));
+    res.end(req.method === 'HEAD' ? undefined : body);
+  } catch {
+    json(res, 404, { error: 'not found' });
+  }
+});
+
+function json(res, code, obj) {
+  const body = Buffer.from(JSON.stringify(obj));
+  res.writeHead(code, secureHeaders({
+    'content-type': MIME['.json'],
+    'content-length': body.length,
+    'cache-control': 'no-store'
+  }));
+  res.end(body);
+}
+
+// ------------------------------------------------------------- signaling
+
+/** @type {Map<string, Map<string, import('ws').WebSocket>>} */
+const rooms = new Map();
+const perIP = new Map();
+// room -> { hashT, exp }. Zero-secret admission: the Watcher's {type:'hello'}
+// carries sha256(ticket); a Handheld's hello must carry the matching ticket.
+// Set REQUIRE_TICKET=off for a bare LAN-style deployment with no tickets.
+const tickets = new Map();
+const sha256hex = (s) => createHash('sha256').update(String(s)).digest('hex');
+const TICKET_TTL = 24 * 60 * 60_000;
+const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MSG });
+
+// Every relayed type is addressed. Peer ids come from the server, so a client
+// cannot blind-broadcast into a channel it has joined.
+const RELAY = new Set(['offer', 'answer', 'ice', 'bye', 'chime', 'chime-ack', 'talking']);
+
+server.on('upgrade', (req, socket, head) => {
+  const ip = clientIP(req);
+  const deny = (code, why) => {
+    socket.write(`HTTP/1.1 ${code} ${why}\r\nConnection: close\r\n\r\n`);
+    socket.destroy();
+  };
+
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); } catch { return socket.destroy(); }
+  if (!/(^|\/)ws$/.test(url.pathname)) return socket.destroy();
+  if (!hostAllowed(req)) return deny(421, 'Misdirected Request');
+  if (!originAllowed(req)) { noteFail(ip); return deny(403, 'Forbidden'); }
+  if (lockedOut(ip)) return deny(429, 'Too Many Requests');
+  if (wss.clients.size >= MAX_TOTAL) return deny(503, 'Service Unavailable');
+  if ((perIP.get(ip) || 0) >= MAX_PER_IP) return deny(429, 'Too Many Requests');
+
+  const room = String(url.searchParams.get('room') || '');
+  if (!ROOM_RE.test(room)) return deny(400, 'Bad Request');
+
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req, { room, ip, url }));
+});
+
+// A device must send {type:'hello'} first and pass admission before it is joined
+// to the room or told about anyone. A Handheld's hello carries the pairing
+// ticket `t`; the Watcher's carries `hashT = sha256(t)` to register it.
+const REQUIRE_TICKET = process.env.REQUIRE_TICKET !== 'off';
+
+wss.on('connection', (ws, req, ctx) => {
+  const { room, ip, url } = ctx;
+  const role = url.searchParams.get('role') === 'station' ? 'station' : 'viewer';
+  const id = randomUUID().slice(0, 8);
+
+  ws.meta = { id, room, role, ip, pending: true };
+  ws.isAlive = true;
+  perIP.set(ip, (perIP.get(ip) || 0) + 1);
+  ws.on('pong', () => { ws.isAlive = true; });
+
+  const admit = (msg) => {
+    let rec = tickets.get(room);
+    if (rec && Date.now() > rec.exp) { tickets.delete(room); rec = null; }
+
+    if (role === 'viewer') {
+      if (REQUIRE_TICKET && (!rec || sha256hex(msg.t) !== rec.hashT)) return ws.close(4008, 'pairing expired');
+    } else { // station
+      if (rec) {
+        if (sha256hex(msg.t) !== rec.hashT) return ws.close(4008, 'pairing expired');
+      } else if (typeof msg.hashT === 'string' && /^[a-f0-9]{64}$/.test(msg.hashT)) {
+        tickets.set(room, { hashT: msg.hashT, exp: Date.now() + TICKET_TTL });
+      } else if (REQUIRE_TICKET) {
+        return ws.close(4008, 'no pairing ticket');
+      }
+    }
+
+    if (!rooms.has(room)) rooms.set(room, new Map());
+    const peers = rooms.get(room);
+    if (peers.size >= MAX_PER_ROOM) return ws.close(4003, 'channel full');
+    if (role === 'station' &&
+        [...peers.values()].some((p) => p.meta.role === 'station')) {
+      return ws.close(4004, 'monitor already running');
+    }
+
+    ws.meta.pending = false;
+    peers.set(id, ws);
+    send(ws, {
+      type: 'welcome', id, role,
+      peers: [...peers.values()].filter((p) => p !== ws)
+        .map((p) => ({ id: p.meta.id, role: p.meta.role }))
+    });
+    for (const peer of peers.values()) {
+      if (peer !== ws) send(peer, { type: 'peer-joined', id, role });
+    }
+    log(`+ ${role} ${id} -> ${room.slice(0, 8)} (${peers.size})`);
+  };
+
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if (!msg || typeof msg !== 'object') return;
+
+    if (ws.meta.pending) {
+      if (msg.type !== 'hello') return ws.close(4000, 'expected hello');
+      return admit(msg);
+    }
+    if (!RELAY.has(msg.type) || typeof msg.to !== 'string') return;
+    const peers = rooms.get(room);
+    const target = peers?.get(msg.to);
+    if (!target || target === ws) return;
+    msg.from = id;
+    send(target, msg);
+  });
+
+  ws.on('close', () => {
+    const n = (perIP.get(ip) || 1) - 1;
+    if (n <= 0) perIP.delete(ip); else perIP.set(ip, n);
+    const peers = rooms.get(room);
+    if (!peers || !peers.has(id)) return;   // pending socket never joined
+    peers.delete(id);
+    log(`- ${role} ${id} <- ${room.slice(0, 8)} (${peers.size})`);
+    if (peers.size === 0) rooms.delete(room);
+    else for (const peer of peers.values()) send(peer, { type: 'peer-left', id });
+  });
+
+  ws.on('error', () => ws.terminate());
+});
+
+function send(ws, obj) {
+  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
+}
+
+const heartbeat = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (!ws.isAlive) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    ws.ping();
+  }
+  const now = Date.now();
+  for (const [ip, rec] of fails) if (now > rec.until) fails.delete(ip);
+  for (const [room, rec] of tickets) if (now > rec.exp) tickets.delete(room);
+}, 30_000);
+heartbeat.unref?.();
+
+// Channel ids and tokens are secrets; request URLs never reach the log.
+function log(line) {
+  console.log(`${new Date().toISOString()} ${line}`);
+}
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    clearInterval(heartbeat);
+    for (const ws of wss.clients) ws.close(1001, 'server shutting down');
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 2000).unref();
+  });
+}
+
+server.listen(PORT, HOST, () => {
+  log(`tawny listening on http://${HOST}:${PORT}`);
+  log(`allowed hosts: ${ALLOWED_HOSTS.length ? ALLOWED_HOSTS.join(', ') : 'any'}`);
+  log(`stun: ${STUN.length ? STUN.join(', ') : 'none (LAN / tailnet only)'}`);
+});

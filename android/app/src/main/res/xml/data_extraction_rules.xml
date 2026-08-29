@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- channelKey is the shared secret that lets a device join the pet camera.
+     It must not leave the phone, so tawny.xml is kept out of cloud backup.
+     A direct device-to-device transfer is the user moving to a new phone, so
+     the pairing is allowed to ride along there. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="tawny.xml" />
+        <exclude domain="file" path="app_webview" />
+        <!-- The diagnostics log records room ids (hashes of the channel key). -->
+        <exclude domain="file" path="diag.log" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="tawny.xml" />
+    </device-transfer>
+</data-extraction-rules>

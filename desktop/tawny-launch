@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Open Tawny in a chromeless browser window so it behaves like an app.
+#
+# Chromium's --app= mode gives a window with no tabs or address bar. Firefox
+# has no equivalent, and its WebRTC handling of self-signed certificates is
+# fussier, so a Chromium-family browser is the better handset on the desktop.
+
+set -euo pipefail
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/tawny/url"
+
+if [ -n "${1:-}" ]; then
+  URL="$1"
+  mkdir -p "$(dirname "$CONFIG")"
+  printf '%s\n' "$URL" > "$CONFIG"
+elif [ -f "$CONFIG" ]; then
+  URL="$(cat "$CONFIG")"
+else
+  echo "No server address saved yet. Run:" >&2
+  echo "  tawny-launch https://tawny.tailnet.ts.net" >&2
+  exit 1
+fi
+
+for BROWSER in brave chromium google-chrome-stable vivaldi-stable microsoft-edge-stable; do
+  if command -v "$BROWSER" >/dev/null 2>&1; then
+    exec "$BROWSER" \
+      --app="$URL" \
+      --class=Tawny \
+      --user-data-dir="${XDG_DATA_HOME:-$HOME/.local/share}/tawny/profile" \
+      --window-size=480,860
+  fi
+done
+
+echo "No Chromium-family browser found." >&2
+echo "Install one:  sudo pacman -S chromium" >&2
+echo "Or just open $URL in Firefox." >&2
+exit 1

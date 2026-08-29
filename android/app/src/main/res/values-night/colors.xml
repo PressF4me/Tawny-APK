@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DARK — "brushed leather", neutral warm-bronze accent (never pink).
+     Mirrors the dark block in public/style.css. -->
+<resources>
+    <color name="bg">#FF191410</color>
+    <color name="panel">#FF241D16</color>
+    <color name="raise">#FF2F261C</color>
+    <color name="line">#FF4A3B2B</color>
+    <color name="text">#FFEFE5D5</color>
+    <color name="dim">#FFA99A85</color>
+    <color name="berry">#FFC79B64</color>   <!-- aged brass / tan -->
+    <color name="sky">#FFA6B489</color>     <!-- muted sage -->
+    <color name="live">#FFDB5A4A</color>
+    <color name="stage">#FF0C0B0A</color>
+    <color name="icon_bg">#FF9BC3E3</color>
+    <color name="on_accent">#FF191410</color>
+</resources>

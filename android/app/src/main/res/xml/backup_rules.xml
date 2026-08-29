@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pre-Android-12 backup. channelKey is the secret that grants access to the
+     pet camera, so nothing from tawny.xml goes to the cloud. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="tawny.xml" />
+    <exclude domain="file" path="app_webview" />
+    <!-- The diagnostics log records room ids (hashes of the channel key). -->
+    <exclude domain="file" path="diag.log" />
+</full-backup-content>

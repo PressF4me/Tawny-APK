@@ -1,0 +1,16 @@
+# Android signing (keep private)
+keystore.properties
+*.jks
+*.keystore
+
+# Build output
+build/
+.gradle/
+*.apk
+*.aab
+local.properties
+
+# Tooling
+node_modules/
+.wrangler/
+.DS_Store
