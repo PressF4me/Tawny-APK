@@ -70,6 +70,15 @@ with devices you own, and re-pair if a code may have leaked.
 If this policy changes materially, the "Last updated" date above will change and
 the new version will ship with an app update.
 
+## Supporting Tawny
+
+The app carries one external link, to **<https://ko-fi.com/tawnyone>**, shown in
+the About screen and on the web client's footer. Following it opens your
+browser; nothing about you is sent there by the app, and no purchase, account or
+contribution changes anything in the app — every feature is available to
+everyone. Any payment page reached that way is operated by Ko-fi under its own
+privacy policy, not by us.
+
 ## Contact
 
 Questions or a data-deletion request: **tawnyapp.radar137@passinbox.com**

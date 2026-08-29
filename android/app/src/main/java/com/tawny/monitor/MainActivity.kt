@@ -429,6 +429,7 @@ class MainActivity : AppCompatActivity() {
             "handheld" -> showHandheldHome()
             "offline" -> showMonitorOffline()
             "diag" -> showDiagnostics()
+            "about" -> showAbout()
             // Only if there is still something to list, else fall through to the
             // normal routing rather than showing an empty home.
             "sessions" -> if (loadRecentSessions().isEmpty()) return false else showSessionsHome()
@@ -1063,8 +1064,7 @@ class MainActivity : AppCompatActivity() {
             )
         })
         outer.addView(link("Copy to clipboard") {
-            getSystemService(android.content.ClipboardManager::class.java)
-                ?.setPrimaryClip(android.content.ClipData.newPlainText("Tawny diagnostics", report))
+            copyToClipboard("Tawny diagnostics", report)
             toast("Copied")
         })
         outer.addView(link("Clear log") {
@@ -1655,9 +1655,137 @@ class MainActivity : AppCompatActivity() {
         // Was pill() reimplemented by hand, at a different size and padding.
         col.addView(ghost("+ Set up a new session") { showRole() })
 
+        // The only two places money is ever mentioned, both below the fold of
+        // the thing the user came here to do. Deliberately not on welcome, role
+        // or pairing: an ask inside the setup funnel reads as a paywall, which
+        // is the exact complaint the whole category earns (docs/DIRECTION.md,
+        // part 2). Nothing here unlocks anything — see [showAbout].
+        col.addView(gap(8))
+        col.addView(link("Support Tawny · help pay for the relay") {
+            openExternal(SUPPORT_URL)
+        })
+        col.addView(link("About Tawny") { showAbout() })
+
         scroll.addView(col)
         root.addView(scroll)
         root.addView(themeToggleView())
+    }
+
+    // ---------------------------------------------------------- about
+
+    /**
+     * Where "Support Tawny" points.
+     *
+     * An external link, opened in the *system browser* — not Play Billing, not a
+     * Custom Tab, and never the app's own WebView (which holds the
+     * [Bridge]). Play's Payments policy carves out a peer-to-peer contribution
+     * that grants "no digital content, service or benefit of any kind": the
+     * moment a supporter gets so much as a badge this has to become an in-app
+     * purchase. So supporters get nothing, on purpose, and the About copy says
+     * so out loud.
+     */
+    private val SUPPORT_URL = "https://ko-fi.com/tawnyone"
+    private val SUPPORT_EMAIL = "tawnyapp.radar137@passinbox.com"
+
+    /** Hand a URL to whatever the user browses with. Never loaded in-app. */
+    private fun openExternal(url: String) {
+        try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            // A phone with no browser at all, or one where the intent is
+            // blocked. Leave the user something they can act on.
+            copyToClipboard("Tawny link", url)
+            toast("No browser to open $url — copied instead")
+        }
+    }
+
+    private fun copyToClipboard(label: String, text: String) {
+        getSystemService(android.content.ClipboardManager::class.java)
+            ?.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
+    }
+
+    /** body() centres its text, which is wrong for a screen of running prose. */
+    private fun aboutBody(s: String) = body(s).apply {
+        gravity = Gravity.START
+        layoutParams = lp(topMargin = 14)
+    }
+
+    /**
+     * What the app is, in plain words.
+     *
+     * There was no About screen at all — the only thing behind a long-press was
+     * the diagnostics hatch — so the app never said what it does with a user's
+     * video anywhere except the Play listing, and a cautious person tapping
+     * "Support Tawny" had no way to check the destination was really ours. This
+     * is that page, and it is where the support link is explained rather than
+     * just offered.
+     */
+    private fun showAbout() {
+        clearScreen()
+        screen = "about"
+        swipeNav(back = { afterSession() }, forward = null)
+
+        val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+        val col = column(scroll = true)
+
+        col.addView(backLink { afterSession() })
+        col.addView(
+            heading(
+                "About Tawny",
+                "Version ${BuildConfig.VERSION_NAME} · build ${BuildConfig.VERSION_CODE}"
+            )
+        )
+        col.addView(aboutBody(
+            "Tawny turns two phones into a private pet monitor. One stays with " +
+                "your pet and sends its camera and microphone; the other watches, " +
+                "listens, and talks back."
+        ))
+        col.addView(aboutBody(
+            "Video and audio travel straight between your own devices, encrypted " +
+                "end to end. Nothing is recorded, there is no account and no " +
+                "sign-up, and no server ever sees your pairing key or a single " +
+                "frame of your video. On your home Wi-Fi nothing leaves the house " +
+                "at all."
+        ))
+
+        col.addView(gap(10))
+        col.addView(link("Support Tawny · ko-fi.com/tawnyone") { openExternal(SUPPORT_URL) })
+        col.addView(aboutBody(
+            "Tawny is free and stays free. Watching from outside your home goes " +
+                "through a small relay, and that relay costs bandwidth every " +
+                "month. If Tawny is useful to you, chipping in keeps it running. " +
+                "Supporters get nothing extra in the app — no badge, no locked " +
+                "features, nothing. That is the point."
+        ))
+
+        col.addView(gap(10))
+        col.addView(link("Email $SUPPORT_EMAIL") {
+            try {
+                startActivity(
+                    Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$SUPPORT_EMAIL"))
+                        .putExtra(
+                            Intent.EXTRA_SUBJECT,
+                            "Tawny ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+                        )
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (e: Exception) {
+                copyToClipboard("Tawny support email", SUPPORT_EMAIL)
+                toast("No email app — address copied")
+            }
+        })
+        col.addView(aboutBody(
+            "Questions, bug reports, or anything that went wrong. If it is a " +
+                "connection problem, long-press the version number on any screen " +
+                "and send the diagnostics log with it."
+        ))
+        col.addView(gap(16))
+
+        scroll.addView(col)
+        root.addView(scroll)
     }
 
     // -------------------------------------------------------- welcome

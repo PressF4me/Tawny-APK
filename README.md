@@ -14,6 +14,19 @@ the job a server would.
 - **Publishing to Google Play:** [`PLAY-SUBMISSION.md`](PLAY-SUBMISSION.md)
 - **Security model & residual risk:** [`SECURITY.md`](SECURITY.md)
 
+## Supporting it
+
+Tawny is free, has no ads, no account, and nothing behind a paywall. The only
+recurring cost is the rendezvous/TURN relay that lets the two phones find each
+other when they are not on the same Wi-Fi.
+
+**<https://ko-fi.com/tawnyone>** — one-off or recurring, and it unlocks nothing
+in the app. That is deliberate: Play's Payments policy only permits an external
+contribution link when it grants no digital benefit of any kind, and "supporters
+get nothing extra" is also the honest version. The same URL is the one shown in
+the app's **About** screen and in the web client's footer — if you see a
+different one anywhere claiming to be us, it isn't.
+
 ---
 
 ## How it connects
