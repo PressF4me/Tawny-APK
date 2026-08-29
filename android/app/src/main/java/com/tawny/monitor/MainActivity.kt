@@ -169,6 +169,8 @@ object Type {
     const val WORDMARK = 46f     // the welcome screen's "Tawny"
     const val WORDMARK_SM = 28f  // the same mark on a secondary screen
     const val TITLE = 27f        // screen title
+    const val PILL = 17f         // button label
+    const val CARD_TITLE = 20f   // title inside a card
     const val DIALOG = 22f       // title inside a card
     const val BODY = 16f
     const val SUB = 15f          // supporting line under a title; also links
@@ -359,9 +361,14 @@ class MainActivity : AppCompatActivity() {
         setContentView(root)
 
         // Keep content clear of the status and navigation bars.
+        // Native screens sit inside the system bars. The live view must not:
+        // padding root while the video WebView is mounted framed every call in
+        // cream — a bar of page colour above the picture and another below it —
+        // instead of letting the video run to the edges under the rail's own
+        // gradient scrim, which is what that gradient is for.
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val b = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(0, b.top, 0, b.bottom)
+            if (isLive) v.setPadding(0, 0, 0, 0) else v.setPadding(0, b.top, 0, b.bottom)
             insets
         }
 
@@ -516,7 +523,13 @@ class MainActivity : AppCompatActivity() {
     private fun handlePairLink(intent: Intent?): Boolean {
         val data = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data ?: return false
         val p = parsePairing(data.toString()) ?: run {
-            toast("That Tawny link is not valid.")
+            themedDialog(
+                title = "That link didn\u2019t work",
+                body = "It looks like a Tawny link but Tawny can\u2019t read it. Ask for a " +
+                    "fresh code from the monitor phone.",
+                primaryLabel = "OK",
+                onPrimary = {}
+            )
             return false
         }
         confirmPairing(p)
@@ -560,26 +573,59 @@ class MainActivity : AppCompatActivity() {
     /** Manual fallback when the camera can't get a clean read. */
     private fun promptPairLink() {
         val input = EditText(this).apply {
-            hint = "tawny://pair?h=…"
+            hint = "tawny://pair?h=\u2026"
             inputType = InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine()
             setTextColor(Hue.TEXT)
             setHintTextColor(Hue.DIM)
+            typeface = uiFont
+            textSize = Type.BODY
+            background = roundRect(Hue.BG, Hue.LINE)
+            setPadding(dp(14), dp(13), dp(14), dp(13))
+            minHeight = dp(48)
+            layoutParams = lp(topMargin = 18)
             clipboardText()?.let { if (it.startsWith("tawny://pair")) setText(it) }
         }
-        val wrap = FrameLayout(this).apply {
-            val m = dp(20); setPadding(m, dp(8), m, 0); addView(input)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Paste the pairing link")
-            .setMessage("On the monitor phone, tap 'Show as link' and send it to yourself.")
-            .setView(wrap)
-            .setPositiveButton("Connect") { _, _ ->
+        themedDialog(
+            title = "Paste the pairing link",
+            body = "On the monitor phone, tap \u201cShow as link\u201d and send it to yourself.",
+            primaryLabel = "Connect",
+            onPrimary = {
                 val p = parsePairing(input.text.toString())
-                if (p == null) toast("That is not a Tawny pairing link.") else joinAsHandheld(p)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+                if (p == null) {
+                    themedDialog(
+                        title = "That link didn\u2019t work",
+                        body = "It doesn\u2019t look like a Tawny pairing link. Copy the whole " +
+                            "thing \u2014 it starts with tawny://pair \u2014 and try again.",
+                        primaryLabel = "Try again",
+                        onPrimary = { promptPairLink() },
+                        secondaryLabel = "Cancel"
+                    )
+                } else joinAsHandheld(p)
+            },
+            secondaryLabel = "Cancel",
+            content = input,
+        )
+    }
+
+    /**
+     * The scanner could not get the camera. It used to leave a black rectangle
+     * on screen with a toast, and two different strings for the same failure —
+     * so the user was stuck looking at nothing. Offer the way in that works.
+     */
+    private fun cameraUnavailable() {
+        Diag.log("shell", "scanner: camera unavailable")
+        stopScanner()
+        themedDialog(
+            title = "The camera is busy",
+            body = "Tawny couldn\u2019t open this phone\u2019s camera \u2014 another app may be " +
+                "using it. Close that app and try again, or paste the monitor\u2019s " +
+                "pairing link instead.",
+            primaryLabel = "Paste a link",
+            onPrimary = { promptPairLink() },
+            secondaryLabel = "Back",
+            onSecondary = { showRole() }
+        )
     }
 
     private fun clipboardText(): String? = try {
@@ -672,6 +718,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Mount a centred column so it still works when it does not fit.
+     *
+     * The manifest allows rotation (`screenOrientation="fullUser"`), and the
+     * welcome, handheld-home and monitor-offline screens each put a large
+     * illustration plus a wordmark, body copy and two buttons in a bare
+     * LinearLayout. In landscape on a normal phone the buttons went off the
+     * bottom of the screen with no way to reach them. `fillViewport` keeps the
+     * content optically centred when there is room, and lets it scroll when
+     * there is not.
+     */
+    private fun mountCentered(col: LinearLayout) {
+        col.layoutParams = FrameLayout.LayoutParams(MP, WC)
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            layoutParams = FrameLayout.LayoutParams(MP, MP)
+            addView(col)
+        }
+        root.addView(scroll)
+    }
+
     private fun gap(h: Int) = Space(this).apply {
         layoutParams = LinearLayout.LayoutParams(MP, dp(h))
     }
@@ -682,16 +750,61 @@ class MainActivity : AppCompatActivity() {
             if (centerH) it.gravity = Gravity.CENTER_HORIZONTAL
         }
 
-    private fun roundRect(fill: Int, stroke: Int) = GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        cornerRadius = dp(3).toFloat()
-        setColor(if (fill == 0) Color.TRANSPARENT else fill)
-        setStroke(dp(1), stroke)
+    private fun roundRect(fill: Int, stroke: Int, radius: Int = Radius.CONTROL) =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(radius).toFloat()
+            setColor(if (fill == 0) Color.TRANSPARENT else fill)
+            setStroke(dp(1), stroke)
+        }
+
+    /**
+     * Wrap a background so the surface actually reacts to a finger.
+     *
+     * There was not one StateListDrawable or ripple in this file: every button,
+     * card and link was a static shape, so a tap produced no feedback at all
+     * until the next screen appeared. Hue.RAISE exists for exactly this tier and
+     * was unused.
+     */
+    private fun pressable(
+        base: android.graphics.drawable.Drawable,
+        radius: Int = Radius.CONTROL,
+        tint: Int = Hue.RAISE,
+    ): android.graphics.drawable.Drawable {
+        val mask = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(radius).toFloat()
+            setColor(Color.WHITE)
+        }
+        return android.graphics.drawable.RippleDrawable(
+            ColorStateList.valueOf(rippleColor(tint)), base, mask
+        )
+    }
+
+    /** A ripple needs alpha; the palette colours are opaque. */
+    private fun rippleColor(c: Int) = (c and 0x00FFFFFF) or 0x55000000
+
+    /** Every primary action should also confirm itself in the hand. */
+    private fun View.tapFeedback(onClick: () -> Unit) {
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { haptic(); onClick() }
     }
 
     /**
      * An on-theme replacement for the stock Material AlertDialog: the same
      * parchment "equipment panel" card the rest of the app uses.
+     */
+    /**
+     * The one dialog in the app.
+     *
+     * There used to be four: this card, two stock Material `AlertDialog`s (one
+     * of them built on the *framework* class rather than the AppCompat one used
+     * everywhere else), and a hand-copied variant in promptRoomName that existed
+     * only because this had nowhere to put an input. `content` is that slot.
+     *
+     * @param content an optional view (a text field, say) placed between the
+     *   body and the buttons.
      */
     private fun themedDialog(
         title: String,
@@ -700,33 +813,40 @@ class MainActivity : AppCompatActivity() {
         onPrimary: () -> Unit,
         secondaryLabel: String? = null,
         onSecondary: (() -> Unit)? = null,
-        cancelable: Boolean = true
+        cancelable: Boolean = true,
+        content: View? = null,
+        onShow: ((AlertDialog) -> Unit)? = null,
     ) {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(4).toFloat()
-                setColor(Hue.PANEL)
-                setStroke(dp(1), Hue.LINE)
-            }
+            background = roundRect(Hue.PANEL, Hue.LINE, Radius.CARD)
             val p = dp(22); setPadding(p, p, p, p)
         }
         card.addView(TextView(this).apply {
             text = title
             setTextColor(Hue.TEXT)
-            textSize = 22f
+            textSize = Type.DIALOG
             typeface = uiFontSemi
+            setLineSpacing(0f, Type.LEAD_TIGHT)
         })
-        card.addView(TextView(this).apply {
-            text = body
-            setTextColor(Hue.DIM)
-            textSize = 15f
-            typeface = uiFont
-            setLineSpacing(0f, 1.4f)
-            setPadding(0, dp(12), 0, 0)
-        })
-        val wrap = FrameLayout(this).apply { val m = dp(16); setPadding(m, m, m, m); addView(card) }
+        if (body.isNotBlank()) {
+            card.addView(TextView(this).apply {
+                text = body
+                setTextColor(Hue.DIM)
+                textSize = Type.SUB
+                typeface = uiFont
+                setLineSpacing(0f, Type.LEAD_BODY)
+                setPadding(0, dp(12), 0, 0)
+            })
+        }
+        if (content != null) card.addView(content)
+
+        // A long body on a small screen used to run off the bottom of the card.
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(card)
+        }
+        val wrap = FrameLayout(this).apply { val m = dp(16); setPadding(m, m, m, m); addView(scroll) }
         val dialog = AlertDialog.Builder(this).setView(wrap).setCancelable(cancelable).create()
         dialog.window?.apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
@@ -737,6 +857,7 @@ class MainActivity : AppCompatActivity() {
             card.addView(link(secondaryLabel) { dialog.dismiss(); onSecondary?.invoke() })
         }
         dialog.show()
+        onShow?.invoke(dialog)
     }
 
     // -------------------------------------------------------- widgets
@@ -804,17 +925,23 @@ class MainActivity : AppCompatActivity() {
         TextView(this).apply {
             text = label
             letterSpacing = 0.04f
-            textSize = 17f
+            textSize = Type.PILL
             typeface = uiFontSemi
             setTextColor(fg)
             gravity = Gravity.CENTER
-            background = roundRect(fill, stroke)
+            // A filled pill ripples light, an outlined one ripples in the accent.
+            background = pressable(
+                roundRect(fill, stroke),
+                tint = if (fill == 0) stroke else Hue.ON_ACCENT
+            )
             setPadding(dp(18), dp(15), dp(18), dp(15))
-            isClickable = true
-            isFocusable = true
             layoutParams = lp(topMargin = 12)
-            setOnClickListener { onClick() }
+            tapFeedback(onClick)
         }
+
+    /** The outlined counterpart to primary(). Was hand-inlined at each use. */
+    private fun ghost(label: String, onClick: () -> Unit) =
+        pill(label, Hue.BERRY, 0, Hue.BERRY, onClick)
 
     private fun primary(label: String, onClick: () -> Unit) =
         pill(label, Hue.ON_ACCENT, Hue.BERRY, Hue.BERRY, onClick)
@@ -822,15 +949,15 @@ class MainActivity : AppCompatActivity() {
     private fun link(label: String, onClick: () -> Unit) = TextView(this).apply {
         text = label
         letterSpacing = 0.02f
-        textSize = 15f
+        textSize = Type.SUB
         typeface = uiFont
         setTextColor(Hue.DIM)
         gravity = Gravity.CENTER
-        setPadding(dp(8), dp(12), dp(8), dp(12))
-        isClickable = true
-        isFocusable = true
+        setPadding(dp(14), dp(12), dp(14), dp(12))
+        minHeight = dp(48)                       // Android's minimum touch target
+        background = pressable(roundRect(0, Color.TRANSPARENT))
         layoutParams = lp(topMargin = 14, centerH = true)
-        setOnClickListener { onClick() }
+        tapFeedback(onClick)
     }
 
     /**
@@ -961,39 +1088,41 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun backLink(onClick: () -> Unit) = TextView(this).apply {
+    /**
+     * @param overCamera draws the glow that keeps the arrow legible on top of a
+     *   live camera preview. It used to be unconditional, which put a 40%-white
+     *   halo around dark text on cream on every ordinary screen — it read as a
+     *   printing defect.
+     */
+    private fun backLink(overCamera: Boolean = false, onClick: () -> Unit) = TextView(this).apply {
         text = "←"
         textSize = 32f
         typeface = uiFontSemi
-        setTextColor(Hue.TEXT)
-        setShadowLayer(6f, 0f, 0f, 0x66FFFFFF)   // stays legible over the camera too
+        setTextColor(if (overCamera) Color.WHITE else Hue.TEXT)
+        if (overCamera) setShadowLayer(6f, 0f, 0f, 0x66000000)
         gravity = Gravity.CENTER
-        setPadding(0, dp(2), dp(18), dp(14))
-        isClickable = true
-        isFocusable = true
+        // Was ~38dp wide and flush to the column edge; 48dp is the minimum.
+        setPadding(dp(6), dp(2), dp(14), dp(10))
+        minWidth = dp(48)
+        minHeight = dp(48)
+        background = pressable(roundRect(0, Color.TRANSPARENT))
         contentDescription = "Back"
         layoutParams = LinearLayout.LayoutParams(WC, WC).also {
             it.gravity = Gravity.START
+            it.leftMargin = -dp(6)               // keep the glyph optically aligned
             it.bottomMargin = dp(2)
         }
-        setOnClickListener { haptic(); onClick() }
+        tapFeedback(onClick)
     }
 
     private fun roleCard(
         tag: String, title: String, blurb: String, kind: String, onClick: () -> Unit
     ): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(3).toFloat()
-            setColor(Hue.PANEL)
-            setStroke(dp(1), Hue.LINE)
-        }
+        background = pressable(roundRect(Hue.PANEL, Hue.LINE), tint = Hue.BERRY)
         setPadding(dp(18), dp(18), dp(18), dp(18))
-        isClickable = true
-        isFocusable = true
         layoutParams = lp(topMargin = 12)
-        setOnClickListener { onClick() }
+        tapFeedback(onClick)
 
         addView(IconView(this@MainActivity, kind).apply {
             layoutParams = LinearLayout.LayoutParams(dp(42), dp(42)).also { it.bottomMargin = dp(8) }
@@ -1001,23 +1130,23 @@ class MainActivity : AppCompatActivity() {
         addView(TextView(this@MainActivity).apply {
             text = tag.uppercase()
             setTextColor(Hue.BERRY)
-            textSize = 13f
+            textSize = Type.LABEL
             letterSpacing = 0.16f
             typeface = uiFontSemi
         })
         addView(TextView(this@MainActivity).apply {
             text = title
             setTextColor(Hue.TEXT)
-            textSize = 20f
+            textSize = Type.CARD_TITLE
             typeface = uiFontSemi
             setPadding(0, dp(4), 0, dp(4))
         })
         addView(TextView(this@MainActivity).apply {
             text = blurb
             setTextColor(Hue.DIM)
-            textSize = 15f
+            textSize = Type.SUB
             typeface = uiFont
-            setLineSpacing(0f, 1.4f)
+            setLineSpacing(0f, Type.LEAD_BODY)
         })
     }
 
@@ -1032,7 +1161,7 @@ class MainActivity : AppCompatActivity() {
         val col = column(scroll = false)
         col.addView(wordmark())
         col.addView(waitingRow(label))
-        root.addView(col)
+        mountCentered(col)
     }
 
     /**
@@ -1044,6 +1173,30 @@ class MainActivity : AppCompatActivity() {
      * by the time this is called a second time, so the fast path stays sync.
      */
     /** The LAN relay would not bind. Offer a retry that re-enters as a Monitor. */
+    /**
+     * Go edge-to-edge for a call and back to the framed layout afterwards. The
+     * bars stay visible (people need the clock and the battery on a monitor
+     * that is left running) but they float over the video instead of cutting
+     * it, and their icons flip to light because the video behind them is dark.
+     */
+    private fun systemBarsOverVideo(over: Boolean) {
+        val bar = if (over) Color.TRANSPARENT else Hue.BG
+        @Suppress("DEPRECATION")
+        window.statusBarColor = bar
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = bar
+        val light = !over && !isNightMode()
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = light
+            isAppearanceLightNavigationBars = light
+        }
+        ViewCompat.requestApplyInsets(root)
+    }
+
+    private fun isNightMode() =
+        (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+
     private fun relayFailed() {
         Diag.log("shell", "signal server failed to bind")
         themedDialog(
@@ -1191,7 +1344,7 @@ class MainActivity : AppCompatActivity() {
         col.addView(TextView(this).apply {
             text = "Tawny"
             setTextColor(Hue.TEXT)
-            textSize = 28f
+            textSize = Type.WORDMARK_SM
             letterSpacing = 0.03f
             typeface = titleFont
             gravity = Gravity.CENTER_HORIZONTAL
@@ -1209,7 +1362,7 @@ class MainActivity : AppCompatActivity() {
         col.addView(TextView(this).apply {
             text = "Pick up where you left off"
             setTextColor(Hue.DIM)
-            textSize = 14f
+            textSize = Type.SUB
             typeface = uiFont
             gravity = Gravity.CENTER_HORIZONTAL
             layoutParams = lp(topMargin = 2, centerH = true)
@@ -1229,14 +1382,17 @@ class MainActivity : AppCompatActivity() {
             val deleteStrip = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE; cornerRadius = dp(16).toFloat()
-                    setColor(0xFFD32F2F.toInt())
-                }
+                // Was Material Red 700 — a stock Google red that appears nowhere
+                // else in a warm strawberry/bronze palette. Hue.LIVE exists for
+                // exactly this and was unused.
+                background = roundRect(Hue.LIVE, Hue.LIVE, Radius.CARD)
                 layoutParams = FrameLayout.LayoutParams(MP, MP)
                 setPadding(0, 0, dp(20), 0)
                 addView(TextView(this@MainActivity).apply {
-                    text = "Delete"; setTextColor(Color.WHITE); textSize = 14f; typeface = uiFontSemi
+                    text = "Delete"
+                    setTextColor(Hue.ON_ACCENT)
+                    textSize = Type.SUB
+                    typeface = uiFontSemi
                 })
             }
             container.addView(deleteStrip)
@@ -1244,65 +1400,75 @@ class MainActivity : AppCompatActivity() {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dp(16).toFloat()
-                    setColor(Hue.PANEL)
-                    setStroke(dp(1), Hue.LINE)
-                }
+                background = pressable(
+                    roundRect(Hue.PANEL, Hue.LINE, Radius.CARD), Radius.CARD, Hue.BERRY
+                )
                 setPadding(dp(16), dp(16), dp(16), dp(16))
                 layoutParams = FrameLayout.LayoutParams(MP, WC)
-                isClickable = true; isFocusable = true
+                isClickable = true; isFocusable = true; isLongClickable = true
             }
 
-            // Swipe-left + long-press touch handler
-            var downX = 0f; var downY = 0f; var swipeRevealed = false
+            // Swipe-left to reveal delete; tap to resume; long-press to rename.
+            //
+            // This listener used to return true from ACTION_DOWN. Android skips
+            // View.onTouchEvent() entirely when a touch listener consumes the
+            // event, and long-press detection lives in onTouchEvent — so the
+            // rename dialog below could never open, and the card's pressed state
+            // never drew either. Return false until an actual horizontal drag
+            // starts, and only then take the gesture over.
+            var downX = 0f; var downY = 0f
+            var swipeRevealed = false
+            var dragging = false
             val swipeThreshold = dp(60).toFloat()
+            val slop = android.view.ViewConfiguration.get(this).scaledTouchSlop
             card.setOnTouchListener { v, event ->
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
-                        downX = event.rawX; downY = event.rawY; true
+                        downX = event.rawX; downY = event.rawY; dragging = false
+                        false        // let the view handle press state + long-press
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val dx = event.rawX - downX
-                        if (dx < -swipeThreshold / 2) {
-                            val clamped = maxOf(dx, -dp(80).toFloat())
-                            v.translationX = clamped
-                        } else if (dx > 0 && v.translationX < 0) {
-                            v.translationX = minOf(0f, v.translationX + dx * 0.4f)
+                        val dy = event.rawY - downY
+                        if (!dragging && abs(dx) > slop && abs(dx) > abs(dy)) {
+                            dragging = true
+                            // Now it is unambiguously a horizontal swipe: cancel
+                            // the pending click/long-press and take the gesture.
+                            v.parent?.requestDisallowInterceptTouchEvent(true)
+                            v.isPressed = false
+                            v.cancelLongPress()
                         }
+                        if (!dragging) return@setOnTouchListener false
+                        if (dx < 0) v.translationX = maxOf(dx, -dp(88).toFloat())
+                        else v.translationX = minOf(0f, (if (swipeRevealed) -dp(88).toFloat() else 0f) + dx)
                         true
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        val dx = event.rawX - downX
-                        val dy = event.rawY - downY
-                        when {
-                            // Tap (small movement) — restore session or dismiss swipe
-                            dx > -swipeThreshold / 2 && abs(dx) < dp(12) && abs(dy) < dp(12) -> {
-                                if (swipeRevealed) {
-                                    v.animate().translationX(0f).setDuration(150).start()
-                                    swipeRevealed = false
-                                } else {
-                                    haptic(); restoreSession(session)
-                                }
-                            }
-                            // Full swipe-left — reveal the delete strip
-                            dx < -swipeThreshold -> {
-                                v.animate().translationX(-dp(88).toFloat()).setDuration(150).start()
-                                swipeRevealed = true
-                            }
-                            // Partial swipe or swipe-right — snap back
-                            else -> {
+                        if (!dragging) {
+                            // A tap on a revealed card just puts it back.
+                            if (swipeRevealed && event.actionMasked == MotionEvent.ACTION_UP) {
                                 v.animate().translationX(0f).setDuration(150).start()
                                 swipeRevealed = false
+                                return@setOnTouchListener true
                             }
+                            return@setOnTouchListener false
                         }
-                        v.performClick()
+                        val dx = event.rawX - downX
+                        if (dx < -swipeThreshold) {
+                            v.animate().translationX(-dp(88).toFloat()).setDuration(150).start()
+                            swipeRevealed = true
+                            haptic()
+                        } else {
+                            v.animate().translationX(0f).setDuration(150).start()
+                            swipeRevealed = false
+                        }
+                        dragging = false
                         true
                     }
                     else -> false
                 }
             }
+            card.setOnClickListener { haptic(); restoreSession(session) }
             deleteStrip.setOnClickListener {
                 haptic()
                 themedDialog(
@@ -1320,51 +1486,15 @@ class MainActivity : AppCompatActivity() {
                     body = "What would you like to do?",
                     primaryLabel = "Edit name",
                     onPrimary = {
-                        val nameInput = EditText(this).apply {
-                            setText(petName)
-                            hint = "Pet's name or room (e.g. Mochi, Living room)"
-                            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
-                            setTextColor(Hue.TEXT); setHintTextColor(Hue.DIM)
-                            textSize = 16f; typeface = uiFont
-                            val p = dp(8); setPadding(p, p, p, p)
-                            background = GradientDrawable().apply {
-                                shape = GradientDrawable.RECTANGLE; cornerRadius = dp(4).toFloat()
-                                setColor(Hue.BG); setStroke(dp(1), Hue.LINE)
-                            }
-                            layoutParams = android.widget.LinearLayout.LayoutParams(MP, WC).apply { topMargin = dp(12) }
+                        askName(
+                            title = "Rename session",
+                            body = "The pet\u2019s name, or the room the monitor is in.",
+                            initial = petName,
+                            primaryLabel = "Save",
+                        ) { n ->
+                            updateRecentSessionName(key, n)
+                            showSessionsHome()
                         }
-                        val dlg = android.app.AlertDialog.Builder(this).setCancelable(true).create()
-                        val editLayout = android.widget.LinearLayout(this).apply {
-                            orientation = android.widget.LinearLayout.VERTICAL
-                            val p = dp(22); setPadding(p, p, p, p)
-                            background = GradientDrawable().apply {
-                                shape = GradientDrawable.RECTANGLE; cornerRadius = dp(4).toFloat()
-                                setColor(Hue.PANEL); setStroke(dp(1), Hue.LINE)
-                            }
-                            addView(TextView(this@MainActivity).apply {
-                                text = "Rename session"
-                                setTextColor(Hue.TEXT); textSize = 20f; typeface = uiFontSemi
-                            })
-                            addView(TextView(this@MainActivity).apply {
-                                text = "Enter the pet's name or the room where the monitor is placed."
-                                setTextColor(Hue.DIM); textSize = 14f; typeface = uiFont
-                                setPadding(0, dp(8), 0, 0); setLineSpacing(0f, 1.4f)
-                            })
-                            addView(nameInput)
-                            addView(primary("Save") {
-                                dlg.dismiss()
-                                val n = nameInput.text.toString().trim().ifBlank { petName }
-                                updateRecentSessionName(key, n)
-                                showSessionsHome()
-                            })
-                            addView(link("Cancel") { dlg.dismiss() })
-                        }
-                        dlg.setView(FrameLayout(this).apply { val m = dp(16); setPadding(m, m, m, m); addView(editLayout) })
-                        dlg.window?.apply {
-                            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-                            setDimAmount(0.82f)
-                        }
-                        dlg.show()
                     },
                     secondaryLabel = "Delete session",
                     onSecondary = {
@@ -1418,123 +1548,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         col.addView(gap(12))
-        col.addView(TextView(this).apply {
-            text = "+ Set up a new session"
-            setTextColor(Hue.BERRY)
-            textSize = 15f
-            typeface = uiFontSemi
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(3).toFloat()
-                setColor(Color.TRANSPARENT)
-                setStroke(dp(1), Hue.BERRY)
-            }
-            setPadding(dp(18), dp(14), dp(18), dp(14))
-            isClickable = true; isFocusable = true
-            layoutParams = lp()
-            setOnClickListener { showRole() }
-        })
+        // Was pill() reimplemented by hand, at a different size and padding.
+        col.addView(ghost("+ Set up a new session") { showRole() })
 
         scroll.addView(col)
         root.addView(scroll)
         root.addView(themeToggleView())
-    }
-
-    // (recentSessionsRow removed — replaced by showSessionsHome)
-    private fun recentSessionsRow_unused(): View? {
-        val sessions = loadRecentSessions()
-        if (sessions.isEmpty()) return null
-
-        val wrapper = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = lp(topMargin = 20)
-            alpha = 0f
-        }
-
-        wrapper.addView(TextView(this).apply {
-            text = "RECENT"
-            setTextColor(Hue.DIM)
-            textSize = 11f
-            letterSpacing = 0.14f
-            typeface = uiFontSemi
-            layoutParams = lp()
-        })
-
-        val hScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            layoutParams = LinearLayout.LayoutParams(MP, WC).also { it.topMargin = dp(8) }
-        }
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 0, dp(8), 0)
-        }
-
-        sessions.forEach { session ->
-            val key = session.optString("channelKey")
-            val role = session.optString("role")
-            val petName = session.optString("petName", "your pet")
-            val roleLabel = if (role == "station") "Monitor" else "Viewer"
-            val timeStr = relativeTime(session.optLong("timestamp", 0L))
-
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dp(12).toFloat()
-                    setColor(Hue.PANEL)
-                    setStroke(dp(1), Hue.LINE)
-                }
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-                layoutParams = LinearLayout.LayoutParams(dp(148), WC).also { it.rightMargin = dp(8) }
-                isClickable = true; isFocusable = true
-                setOnClickListener { haptic(); restoreSession(session) }
-                setOnLongClickListener {
-                    haptic(); deleteRecentSession(key, role); showRole(); true
-                }
-            }
-
-            // Icon + pet name
-            val topRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            topRow.addView(IconView(this@MainActivity, if (role == "station") "camera" else "phone").apply {
-                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).also { it.rightMargin = dp(6) }
-            })
-            topRow.addView(TextView(this@MainActivity).apply {
-                text = petName
-                setTextColor(Hue.TEXT)
-                textSize = 13f
-                typeface = uiFontSemi
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
-            })
-            card.addView(topRow)
-
-            card.addView(TextView(this).apply {
-                text = "$roleLabel · $timeStr"
-                setTextColor(Hue.DIM)
-                textSize = 11f
-                typeface = uiFont
-                setPadding(0, dp(4), 0, 0)
-            })
-
-            row.addView(card)
-        }
-
-        hScroll.addView(row)
-        wrapper.addView(hScroll)
-
-        // Fade in after mount
-        wrapper.post {
-            if (animScale > 0f)
-                wrapper.animate().alpha(1f).setDuration((200 * animScale).toLong()).start()
-            else
-                wrapper.alpha = 1f
-        }
-        return wrapper
     }
 
     // -------------------------------------------------------- welcome
@@ -1562,7 +1581,7 @@ class MainActivity : AppCompatActivity() {
         col.addView(gap(4))
         col.addView(primary("Get started") { showRole() })
         col.addView(link("I want to watch a monitor") { onHandheld() })
-        root.addView(col)
+        mountCentered(col)
         root.addView(themeToggleView())
     }
 
@@ -1579,7 +1598,7 @@ class MainActivity : AppCompatActivity() {
         swipeNav(back = { showWelcome() }, forward = { goLive("viewer") })
         val name = prefs.getString("channelName", "your pet") ?: "your pet"
         val col = column(scroll = false)
-        col.addView(IconView(this, "phone").apply {
+        col.addView(IconView(this, "phone", behind = Hue.BG).apply {
             layoutParams = LinearLayout.LayoutParams(dp(60), dp(60)).also {
                 it.bottomMargin = dp(6)
                 it.gravity = Gravity.CENTER_HORIZONTAL
@@ -1595,7 +1614,7 @@ class MainActivity : AppCompatActivity() {
         col.addView(gap(6))
         col.addView(primary("Watch $name now") { goLive("viewer") })
         col.addView(link("Connect to a different monitor") { onHandheld() })
-        root.addView(col)
+        mountCentered(col)
     }
 
     // -------------------------------------------------------- role choice
@@ -1663,71 +1682,68 @@ class MainActivity : AppCompatActivity() {
      * Built as a bare equipment-panel card so it matches the rest of the app
      * rather than the stock Material dialog.
      */
-    private fun promptRoomName(onName: (String) -> Unit) {
-        val current = prefs.getString("channelName", "")?.takeUnless { it == "Pet camera" || it == "your pet" }.orEmpty()
+    /** A single-line text field styled for [themedDialog]'s content slot. */
+    private fun dialogInput(hint: String, initial: String) = EditText(this).apply {
+        this.hint = hint
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+        filters = arrayOf(android.text.InputFilter.LengthFilter(40))
+        setSingleLine()
+        setText(initial)
+        setSelection(text.length)
+        typeface = uiFont
+        textSize = Type.BODY
+        letterSpacing = 0.02f
+        setTextColor(Hue.TEXT)
+        setHintTextColor(Hue.DIM)
+        background = roundRect(Hue.BG, Hue.LINE)
+        setPadding(dp(14), dp(13), dp(14), dp(13))
+        minHeight = dp(48)
+        layoutParams = lp(topMargin = 18)
+    }
 
-        val input = EditText(this).apply {
-            hint = "Mochi, Bella, Luna…"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
-            filters = arrayOf(android.text.InputFilter.LengthFilter(40))
-            setSingleLine()
-            setText(current)
-            setSelection(text.length)
-            typeface = uiFont
-            textSize = 16f
-            letterSpacing = 0.02f
-            setTextColor(Hue.TEXT)
-            setHintTextColor(Hue.DIM)
-            background = roundRect(Hue.BG, Hue.LINE)
-            setPadding(dp(14), dp(13), dp(14), dp(13))
-            layoutParams = lp(topMargin = 18)
-        }
-
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(4).toFloat()
-                setColor(Hue.PANEL)
-                setStroke(dp(1), Hue.LINE)
-            }
-            val p = dp(22)
-            setPadding(p, p, p, p)
-        }
-        card.addView(TextView(this).apply {
-            text = "What's your pet's name?"
-            setTextColor(Hue.TEXT)
-            textSize = 22f
-            letterSpacing = 0f
-            typeface = uiFontSemi
-        })
-        card.addView(input)
-
-        val wrap = FrameLayout(this).apply {
-            val m = dp(16); setPadding(m, m, m, m); addView(card)
-        }
-        val dialog = AlertDialog.Builder(this).setView(wrap).create()
-        dialog.window?.apply {
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-            setDimAmount(0.82f)
-        }
-
-        val submit = {
-            onName(input.text.toString().trim().ifBlank { "your pet" })
-            dialog.dismiss()
-        }
-        input.setOnEditorActionListener { _, _, _ -> submit(); true }
-
-        card.addView(primary("Continue") { submit() })
-        card.addView(link("Cancel") { dialog.dismiss() })
-
-        // Open with the keyboard up and the cursor waiting.
-        dialog.window?.setSoftInputMode(
-            WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
+    /** Ask for a name. Was a hand-copied second implementation of themedDialog. */
+    private fun askName(
+        title: String,
+        body: String,
+        initial: String,
+        primaryLabel: String,
+        onName: (String) -> Unit,
+    ) {
+        val input = dialogInput("Mochi, Bella, Luna\u2026", initial)
+        var submit: () -> Unit = {}
+        themedDialog(
+            title = title,
+            body = body,
+            primaryLabel = primaryLabel,
+            onPrimary = { onName(input.text.toString().trim().ifBlank { "your pet" }) },
+            secondaryLabel = "Cancel",
+            content = input,
+            onShow = { dialog ->
+                submit = {
+                    dialog.dismiss()
+                    onName(input.text.toString().trim().ifBlank { "your pet" })
+                }
+                input.setOnEditorActionListener { _, _, _ -> submit(); true }
+                // Open with the keyboard up and the cursor waiting.
+                dialog.window?.setSoftInputMode(
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
+                )
+                input.requestFocus()
+            },
         )
-        input.requestFocus()
-        dialog.show()
+    }
+
+    private fun promptRoomName(onName: (String) -> Unit) {
+        val current = prefs.getString("channelName", "")
+            ?.takeUnless { it == "Pet camera" || it == "your pet" }.orEmpty()
+        askName(
+            title = "What\u2019s your pet\u2019s name?",
+            body = "",
+            initial = current,
+            primaryLabel = "Continue",
+            onName = onName,
+        )
     }
 
     private fun startWatcher(ip: String?) = withSignalServer { sigPort ->
@@ -1759,16 +1775,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPairText(payload: String) {
-        AlertDialog.Builder(this)
-            .setTitle("Pairing link")
-            .setMessage(payload)
-            .setPositiveButton("Copy") { _, _ ->
+        themedDialog(
+            title = "Pairing link",
+            body = "Send this to the other phone. Treat it like a key to the camera \u2014 " +
+                "anyone who has it can watch.\n\n" + payload,
+            primaryLabel = "Copy",
+            onPrimary = {
                 val cm = getSystemService(android.content.ClipboardManager::class.java)
                 cm.setPrimaryClip(android.content.ClipData.newPlainText("Tawny pairing", payload))
                 toast("Copied")
-            }
-            .setNegativeButton("Close", null)
-            .show()
+            },
+            secondaryLabel = "Close"
+        )
     }
 
     // -------------------------------------------------------- the handheld
@@ -1808,7 +1826,7 @@ class MainActivity : AppCompatActivity() {
         versionView?.visibility = View.GONE      // camera preview owns the surface
 
         val overlay = column(scroll = false).apply { gravity = Gravity.TOP }
-        overlay.addView(backLink { stopScanner(); showRole() })
+        overlay.addView(backLink(overCamera = true) { stopScanner(); showRole() })
         overlay.addView(TextView(this).apply {
             text = "Scan your monitor's QR code"
             setTextColor(0xFFFFFFFF.toInt())
@@ -1846,8 +1864,8 @@ class MainActivity : AppCompatActivity() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = try { future.get() } catch (e: Exception) {
-                toast("Could not start the camera.")
                 exec.shutdown()
+                cameraUnavailable()
                 return@addListener
             }
             val prev = Preview.Builder().build().also {
@@ -1872,7 +1890,7 @@ class MainActivity : AppCompatActivity() {
                     this, CameraSelector.DEFAULT_BACK_CAMERA, prev, analysis
                 )
             } catch (e: Exception) {
-                toast("Could not open the camera.")
+                cameraUnavailable()
             }
             scannerStop = {
                 try { provider.unbindAll() } catch (e: Exception) {}
@@ -1912,7 +1930,13 @@ class MainActivity : AppCompatActivity() {
     private fun onScanned(raw: String) {
         if (scanHandled) return
         val p = parsePairing(raw) ?: run {
-            toast("That is not a Tawny pairing code.")
+            themedDialog(
+                title = "Not a Tawny code",
+                body = "That QR code isn\u2019t a Tawny pairing code. On the monitor phone, " +
+                    "the code to scan is the one on its pairing screen.",
+                primaryLabel = "Keep scanning",
+                onPrimary = {}
+            )
             return
         }
         scanHandled = true
@@ -2291,7 +2315,7 @@ class MainActivity : AppCompatActivity() {
         clearScreen()
         swipeNav(back = { showHandheldHome() }, forward = null)
         val col = column(scroll = false)
-        col.addView(IconView(this, "phone").apply {
+        col.addView(IconView(this, "phone", behind = Hue.BG).apply {
             layoutParams = LinearLayout.LayoutParams(dp(60), dp(60)).also {
                 it.bottomMargin = dp(6)
                 it.gravity = Gravity.CENTER_HORIZONTAL
@@ -2315,15 +2339,8 @@ class MainActivity : AppCompatActivity() {
         col.addView(gap(8))
         col.addView(primary("Retry") { goLive("viewer") })
         col.addView(link("Go back") { showHandheldHome() })
-        root.addView(col)
+        mountCentered(col)
         root.addView(themeToggleView())
-    }
-
-    /** @suppress kept for internal use by Bridge; real UX now goes through showMonitorOffline */
-    private fun onWatcherUnreachable() {
-        if (isFinishing) return
-        endLive()
-        showMonitorOffline()
     }
 
     // ----------------------------------------------------------- bridge
@@ -2370,7 +2387,7 @@ class MainActivity : AppCompatActivity() {
                         prefs.edit().putString("channelName", name).apply()
                         updateRecentSessionName(prefs.getString("channelKey", null) ?: return@runOnUiThread, name)
                     }
-                    "unreachable" -> onWatcherUnreachable()
+                    "unreachable" -> showMonitorOffline()
                     "error" -> {
                         endLive()
                         if (prefs.getString("role", null) == "viewer") showMonitorOffline()
@@ -2424,6 +2441,7 @@ class MainActivity : AppCompatActivity() {
     private fun beginLive() {
         isLive = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        systemBarsOverVideo(true)
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.mode = AudioManager.MODE_IN_COMMUNICATION
         // Force the loudspeaker. On API 31+ `isSpeakerphoneOn` is deprecated and
@@ -2443,6 +2461,7 @@ class MainActivity : AppCompatActivity() {
     private fun endLive() {
         isLive = false
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        systemBarsOverVideo(false)
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         if (android.os.Build.VERSION.SDK_INT >= 31) {
             runCatching { am.clearCommunicationDevice() }
@@ -2507,9 +2526,21 @@ class MainActivity : AppCompatActivity() {
  * language as the owlet mascot. Body in the accent colour, details punched in
  * the card colour behind it, one tiny accent highlight.
  */
-private class IconView(ctx: Context, private val kind: String) : View(ctx) {
+/**
+ * @param behind the colour actually behind this icon. The cut-out details are
+ *   painted in it, so they read as holes. It used to be hard-coded to
+ *   Hue.PANEL, which is right on a card but wrong on the two screens that put
+ *   the icon straight onto Hue.BG — in dark mode the phone's "screen" and
+ *   "home bar" rendered as visibly lighter brown rectangles and the icon just
+ *   looked broken.
+ */
+private class IconView(
+    ctx: Context,
+    private val kind: String,
+    behind: Int = Hue.PANEL,
+) : View(ctx) {
     private val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Hue.BERRY }
-    private val cut = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Hue.PANEL }
+    private val cut = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = behind }
     private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Hue.BERRY }
 
     private fun rr(c: Canvas, l: Float, t: Float, r: Float, b: Float, rad: Float, p: Paint) =

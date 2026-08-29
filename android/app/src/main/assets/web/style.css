@@ -39,10 +39,11 @@
   --display: "Tawny Display", "Herculanum", "Papyrus", fantasy;
   --text: "Tawny Text", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
           Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mono: var(--text);
 
   --pad: clamp(16px, 4vw, 32px);
   --safe-b: env(safe-area-inset-bottom, 0px);
+  /* hairline between the five live-view control buttons; sits on --panel */
+  --ctl-line: #e6dad3;
 }
 
 /* DARK — "brushed leather", neutral warm-bronze accent (never pink).
@@ -62,6 +63,7 @@
     --live:    #db5a4a;
     --on-accent: #191410;
     --blush:   transparent;
+    --ctl-line: #4a3b2b;
   }
 }
 :root[data-theme="dark"] {
@@ -77,6 +79,7 @@
   --live:    #db5a4a;
   --on-accent: #191410;
   --blush:   transparent;
+  --ctl-line: #4a3b2b;
 }
 
 * { box-sizing: border-box; }
@@ -311,6 +314,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: linear-gradient(#0000008c, transparent 88%);
   text-transform: uppercase;
 }
+/* ...except the pet's own name, which is a proper noun the user typed.
+   "Mochi monitor" was rendering as MOCHI MONITOR. */
+.rail #channel { text-transform: none; }
 
 /* status + channel read as translucent chips over the video */
 .rail-left, .rail-right {
@@ -458,7 +464,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   padding: 13px 4px 15px;
   background: none;
   border: 0;
-  border-right: 1px solid #00000055;
+  border-right: 1px solid var(--ctl-line);
   font-size: 11.5px;
   letter-spacing: .04em;
   text-transform: uppercase;
