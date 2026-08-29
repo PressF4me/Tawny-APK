@@ -20,6 +20,7 @@ const el = {
   local: $('#local'), loader: $('#loader'), peerAudio: $('#peer-audio'),
   peercount: $('#peercount'),
   sas: $('#sas'), sascode: $('#sas-code'), saschip: $('#sas-chip'),
+  sasnote: $('#sas-note'), pausedNote: $('#paused-note'),
   dot: $('#dot'), statusline: $('#statusline'), channel: $('#channel'),
   meter: $('#meter'), dimMeter: $('#dim-meter'), dimmer: $('#dimmer'),
   talkflag: $('#talkflag'), chimes: $('#chimes'), toast: $('#toast'),
@@ -53,9 +54,13 @@ const S = {
   cameras: [], cameraIndex: 0, zoomLevel: 1.0, zoomHardware: false, stationZoomSupported: false
 };
 
-// 1 Watcher + up to 5 Handhelds. Kept in step with server.js MAX_PER_ROOM and
-// LocalWeb.kt MAX_PER_ROOM (both 6) and the rendezvous Durable Object.
+// 1 Monitor + up to 5 Viewers. Kept in step with LocalWeb.kt MAX_PER_ROOM (6)
+// and the rendezvous Durable Object.
 const MAX_VIEWERS = 5;
+
+// Candidates buffered before setRemoteDescription. A real negotiation sends a
+// couple of dozen; anything past this is a peer filling memory.
+const MAX_PENDING_ICE = 64;
 
 // --------------------------------------------------------------- storage
 
@@ -616,6 +621,16 @@ async function sha256hex(s) {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** HMAC-SHA256(secret, msg) as lowercase hex. */
+async function hmacHex(secret, msg) {
+  const k = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  const mac = await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(msg));
+  return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 // ---- short authentication string --------------------------------------------
 // Only meaningful on the internet-relay path: a compromised rendezvous could try
 // to sit in the middle by swapping DTLS certificate fingerprints. Both ends mix
@@ -693,11 +708,27 @@ async function showSas(peer, attempt = 0) {
   // this monitor — the chip stays.
   el.saschip.textContent = code || '—';
   el.saschip.hidden = false;
-  let confirmed = false;
-  try { confirmed = localStorage.getItem(`tawny.sas.${S.channel.id}`) === '1'; } catch {}
+
+  // Remember the code the user actually approved, not merely *that* they
+  // approved once. A boolean hid this panel forever after the first good call,
+  // which is exactly backwards: a rendezvous that swaps DTLS fingerprints on
+  // session #7 would change the code, and nobody would ever be told.
+  S.sasCode = code || null;
+  let saved = null;
+  try { saved = localStorage.getItem(`tawny.sas.${S.channel.id}`); } catch {}
+  const changed = !!code && !!saved && saved !== '1' && saved !== code;
+
   el.sascode.textContent = code || 'unavailable — connection may be tampered with';
-  el.sas.classList.toggle('warn', !code);
-  el.sas.hidden = confirmed && !!code;
+  el.sas.classList.toggle('sas--warn', !code || changed);
+  if (el.sasnote) {
+    el.sasnote.textContent = changed
+      ? 'This monitor\u2019s safety code has CHANGED since you last checked it. '
+        + 'If you did not re-pair or reinstall, stop and disconnect.'
+      : 'Check this code matches the \u201cVerify:\u201d code shown on the Monitor\u2019s screen:';
+  }
+  // Legacy '1' from the old boolean scheme means "approved, code unknown" — ask
+  // once more so we can record the real code.
+  el.sas.hidden = !!code && saved === code;
 }
 
 function wsURLFor(base) {
@@ -720,8 +751,17 @@ function openSignal(base, tag) {
     ws.onopen = async () => {
       entry.retry = 0;
       diag(`${tag} open; hello role=${S.role} ticket=${S.token ? 'yes' : 'MISSING'}`);
-      // First frame: prove admission. The Watcher also hands its ticket hash so
-      // the rendezvous knows which ticket to accept for this room. sha256 only.
+
+      // The LAN leg is plain ws:// on a shared Wi-Fi, so the raw ticket must
+      // never go out on it — anyone sniffing the network would get the room id
+      // (it is in the URL) plus the ticket, which is exactly what the internet
+      // rendezvous admits a viewer on. That pair turned "someone on your Wi-Fi"
+      // into "someone anywhere". The LAN relay challenges us instead; see the
+      // 'challenge' case below.
+      if (tag !== 'cloud') { updateStatus(); return; }
+
+      // Cloud: the ticket rides the first frame, inside TLS. The Monitor also
+      // hands sha256(ticket) so the rendezvous knows which ticket to accept.
       const hello = { type: 'hello' };
       if (S.token) {
         hello.t = S.token;
@@ -732,6 +772,18 @@ function openSignal(base, tag) {
     };
     ws.onmessage = (e) => {
       let m; try { m = JSON.parse(e.data); } catch { return; }
+      // The LAN relay proves we hold the channel key without either side
+      // putting a reusable secret on the wire: it sends a per-connection nonce,
+      // we return HMAC(channel key, nonce). A sniffer sees one response that is
+      // useless on the next connection.
+      if (m.type === 'challenge') {
+        const nonce = String(m.n || '');
+        if (!/^[0-9a-f]{32}$/.test(nonce) || !S.channel?.key) return;
+        hmacHex(S.channel.key, `tawny-lan-v1|${nonce}`)
+          .then((r) => { try { ws.send(JSON.stringify({ type: 'hello', r })); } catch {} })
+          .catch(() => {});
+        return;
+      }
       // Membership traffic only — offer/answer/ice would drown the log.
       if (m.type === 'welcome') diag(`${tag} welcome id=${m.id} peers=${(m.peers || []).length}`);
       else if (m.type === 'peer-joined') diag(`${tag} peer-joined ${m.role || '?'} ${m.id}`);
@@ -795,9 +847,16 @@ function openSignal(base, tag) {
 
 function closeSignal(entry) {
   entry.dead = true;
+  // ws.onclose bails on `entry.dead` before it reaches its own cleanup loop, so
+  // closing a transport on purpose used to strand every peer that was riding
+  // it: dead RTCPeerConnections stayed in S.peers, viewerCount() over-reported
+  // forever, the bitrate ladder throttled the real viewer, the pairing QR
+  // stayed hidden, and after five ghosts every new viewer was refused.
+  for (const p of [...S.peers.values()]) if (p.transport === entry) removePeer(p.id);
   try { entry.ws?.close(); } catch {}
   const i = S.signals.indexOf(entry);
   if (i >= 0) S.signals.splice(i, 1);
+  updateStatus();
 }
 
 function closeAllSignals() {
@@ -929,8 +988,10 @@ function removePeer(id) {
   if (S.featured === id) unfeature(id);
 
   if (S.role === 'viewer' && p.role === 'station') {
-    // Lost the Watcher — clear the picture and wait for it to come back.
+    // Lost the Monitor — clear the picture and wait for it to come back.
     stopMeter();
+    S.remotePaused = false;
+    if (el.pausedNote) el.pausedNote.hidden = true;
     el.talkflag.hidden = true;
     S.remoteStream = null;
     el.remote.srcObject = null;
@@ -951,6 +1012,9 @@ function teardownAll() {
   el.talkflag.hidden = true;
   el.sas.hidden = true;
   el.saschip.hidden = true;
+  S.remotePaused = false;
+  S.captureLost = false;
+  if (el.pausedNote) el.pausedNote.hidden = true;
   // clear digital zoom so transforms don't carry over into the next session
   const remoteEl = document.getElementById('remote');
   if (remoteEl) remoteEl.style.transform = '';
@@ -967,18 +1031,22 @@ function updateStatus() {
   if (S.role === 'viewer') {
     const sp = stationPeer();
     const st = sp?.pc?.connectionState;
+    // A paused Monitor is still "connected" — the picture just stopped. Saying
+    // "Live" over a frozen frame is the lie this whole path exists to stop.
+    if (S.remotePaused && st === 'connected') return status('Monitor paused', 'warn');
     if (st === 'connected') status('Live', 'live');
     else if (st === 'connecting' || st === 'new') status('Connecting', 'on');
     else if (!sp) status('Monitor offline', null);
     else status('Reconnecting', null);
     return;
   }
+  if (S.captureLost) return status('Paused — screen off', 'warn');
   const vs = viewerPeers();
   if (!vs.length) { status('Waiting', null); return; }
   const live = vs.filter((p) => p.pc?.connectionState === 'connected').length;
   status(live
     ? `On air · ${live} watching`
-    : 'Handset connecting', live ? 'live' : 'on');
+    : 'Viewer connecting', live ? 'live' : 'on');
 }
 
 function updatePeerChip() {
@@ -987,7 +1055,7 @@ function updatePeerChip() {
   const n = viewerCount();
   el.peercount.hidden = n === 0;
   el.peercount.textContent = n === 1 ? '1 phone' : `${n} phones`;
-  el.peercount.classList.toggle('warn', n >= 3);
+  el.peercount.classList.toggle('is-busy', n >= 3);
   // Tell the native shell whether to keep the pairing-QR overlay up.
   const state = n > 0 ? 'watching' : 'waiting';
   if (state !== S._peerState) { S._peerState = state; tellNative(state, { n }); }
@@ -1039,6 +1107,13 @@ async function handle(m, entry) {
       removePeer(m.id);
       break;
     case 'offer': {
+      // The cap used to live only on 'peer-joined', so a peer that skipped
+      // straight to an offer was answered unconditionally — and answerPeer
+      // attaches the live camera and microphone. Gate both doors.
+      if (S.role === 'station' && !S.peers.has(m.from) && viewerCount() >= MAX_VIEWERS) {
+        diag(`offer refused: ${MAX_VIEWERS} viewers already`);
+        return;
+      }
       const p = ensurePeer(m.from, S.role === 'station' ? 'viewer' : 'station', entry);
       await answerPeer(p, m.sdp);
       break;
@@ -1057,7 +1132,12 @@ async function handle(m, entry) {
       if (p.pc && p.pc.remoteDescription) {
         try { await p.pc.addIceCandidate(m.candidate); } catch {}
       } else {
-        (p.pendingIce ||= []).push(m.candidate);
+        // Drained only by flushIce() on setRemoteDescription, so a peer that
+        // joins and never offers used to grow this without limit. A real
+        // negotiation is a couple of dozen candidates.
+        const q = (p.pendingIce ||= []);
+        if (q.length >= MAX_PENDING_ICE) { diag(`ice queue full from ${m.from}`); break; }
+        q.push(m.candidate);
       }
       break;
     }
@@ -1094,8 +1174,16 @@ async function handle(m, entry) {
       break;
     }
     case 'meta': {
-      // Viewer receives updated pet name from the Monitor (e.g. after rename).
-      if (S.role !== 'viewer' || !m.petName) break;
+      if (S.role !== 'viewer') break;
+      // The Monitor lost its camera (its screen went off, or the app was
+      // backgrounded). Say so, instead of leaving a frozen frame up.
+      if (typeof m.paused === 'boolean') {
+        S.remotePaused = m.paused;
+        if (el.pausedNote) el.pausedNote.hidden = !m.paused;
+        status(m.paused ? 'Monitor paused' : 'On air', m.paused ? 'warn' : 'live');
+        if (!m.petName) break;
+      }
+      if (!m.petName) break;
       if (S.channel) {
         S.channel.name = m.petName;
         const list = getChannels();
@@ -1546,6 +1634,9 @@ async function start(role) {
       : `Could not open the camera or microphone (${err.name}).`);
   }
 
+  S.captureLost = false;
+  watchLocalTracks();
+
   audioCtx(); // the tap that got us here also unlocks chime playback
   // Camera enumeration only works after getUserMedia grants permission (labels are blank before).
   if (role === 'station') enumerateCameras();
@@ -1582,6 +1673,83 @@ async function start(role) {
   connectAll();
 
   if (role === 'station') openPair();
+}
+
+// ---------------------------------------------------------- capture loss
+//
+// Android revokes the camera (and mutes the mic) as soon as the app is not in
+// the foreground, and there is no foreground service here. Nothing used to
+// notice: the Monitor kept its socket and its peer connections, the rail still
+// read "On air", and every Viewer sat on a frozen last frame forever. These
+// three functions make that state visible and recoverable.
+
+/** Mark the Monitor's capture as lost and tell everyone watching. */
+function onCaptureLost(why) {
+  if (S.role !== 'station' || S.captureLost) return;
+  S.captureLost = true;
+  diag(`capture lost (${why})`);
+  status('Paused — screen off', 'warn');
+  for (const p of S.peers.values()) sig({ type: 'meta', to: p.id, paused: true }, p);
+  tellNative('paused', {});
+}
+
+/** Attach loss handlers to whatever is currently in S.local. */
+function watchLocalTracks() {
+  if (S.role !== 'station' || !S.local) return;
+  for (const t of S.local.getTracks()) {
+    if (t._tawnyWatched) continue;
+    t._tawnyWatched = true;
+    t.addEventListener('ended', () => onCaptureLost(`${t.kind} ended`));
+    t.addEventListener('mute', () => onCaptureLost(`${t.kind} muted`));
+  }
+}
+
+/**
+ * Re-open the camera and microphone after the app comes back, and swap the new
+ * tracks into every live peer connection so viewers recover without re-dialling.
+ */
+async function reacquireLocal() {
+  if (S.role !== 'station' || !S.captureLost || S.reacquiring) return;
+  S.reacquiring = true;
+  try {
+    const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    const fresh = await navigator.mediaDevices.getUserMedia({
+      audio, video: cameraConstraints(),
+    });
+    // Retire the dead tracks, then adopt the new ones into the same stream so
+    // everything already pointed at S.local keeps working.
+    for (const t of S.local ? S.local.getTracks() : []) {
+      try { S.local.removeTrack(t); } catch {}
+      try { t.stop(); } catch {}
+    }
+    if (!S.local) S.local = new MediaStream();
+    for (const t of fresh.getTracks()) S.local.addTrack(t);
+
+    // A sender whose track has ended may report `sender.track === null`, so the
+    // kind comes from the transceiver, which keeps it for the life of the m-line.
+    for (const p of S.peers.values()) {
+      for (const tr of p.pc?.getTransceivers() || []) {
+        const kind = tr.sender?.track?.kind || tr.receiver?.track?.kind;
+        if (!kind) continue;
+        const next = S.local.getTracks().find((t) => t.kind === kind);
+        if (next && tr.sender) { try { await tr.sender.replaceTrack(next); } catch {} }
+      }
+    }
+
+    el.local.srcObject = S.local;
+    startMeter(S.local);
+    watchLocalTracks();
+    S.captureLost = false;
+    diag('capture recovered');
+    for (const p of S.peers.values()) sig({ type: 'meta', to: p.id, paused: false }, p);
+    tellNative('resumed', {});
+    updateStatus();
+  } catch (e) {
+    diag(`capture recovery failed: ${e && e.name}`);
+    status('Paused — tap to resume', 'warn');
+  } finally {
+    S.reacquiring = false;
+  }
 }
 
 async function keepAwake() {
@@ -1775,7 +1943,10 @@ $('#btn-dim').addEventListener('click', () => { el.dimmer.hidden = false; });
 el.dimmer.addEventListener('click', () => { el.dimmer.hidden = true; });
 
 $('#sas-ok')?.addEventListener('click', () => {
-  try { localStorage.setItem(`tawny.sas.${S.channel?.id}`, '1'); } catch {}
+  // Store the approved code itself so a later change re-raises this panel.
+  if (S.sasCode) {
+    try { localStorage.setItem(`tawny.sas.${S.channel?.id}`, S.sasCode); } catch {}
+  }
   el.sas.hidden = true;
 });
 $('#sas-no')?.addEventListener('click', hangUp);
@@ -1909,12 +2080,21 @@ window.frentalkStart = window.tawnyStart;
 })();
 
 window.addEventListener('tawny:background', () => {
-  if (S.role === 'station') status('Backgrounded', null);
+  // "Backgrounded" was a developer word rendered straight into the live rail.
+  // Say what it means for the person watching.
+  if (S.role === 'station') status('Paused — screen off', 'warn');
 });
 
 window.addEventListener('tawny:foreground', () => {
   reopenAfterRestore();
+  reacquireLocal();
   if (!el.live.hidden && S.peers.size) updateStatus();
+});
+
+// The same loss happens without the native shell (a browser tab going hidden),
+// so recover on the page's own visibility signal too.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') reacquireLocal();
 });
 
 // `pagehide` fires on backgrounding too (persisted: true), and the page comes

@@ -342,7 +342,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--berry);
   letter-spacing: .1em;
 }
-#peercount.warn { color: var(--live); border-color: var(--live); }
+#peercount.is-busy { color: var(--live); border-color: var(--live); }
 .sas-chip { color: var(--sky); border: 1px solid var(--line); border-radius: 2px; padding: 1px 6px; letter-spacing: .12em; }
 
 #peer-audio { position: absolute; width: 0; height: 0; overflow: hidden; }
@@ -370,6 +370,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
   margin-bottom: 12px;
 }
 .sas-actions { display: flex; gap: 8px; }
+
+/* The generic `.warn` rule below has the same specificity and wins on source
+   order, so it used to replace the card's dark background while leaving
+   `.sas`'s near-white text alone — an invisible warning in the one state this
+   card exists for. Scoped modifier instead. */
+.sas--warn { border-color: var(--live); box-shadow: 0 0 0 1px var(--live); }
+.sas--warn .sas-code { color: #ffb9ae; }
 .sas-actions .wide { flex: 1; margin: 0; }
 
 .dot {
@@ -381,6 +388,26 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .dot.on   { background: var(--berry); box-shadow: 0 0 8px var(--berry); }
 .dot.live { background: var(--live);  box-shadow: 0 0 8px var(--live);
             animation: breathe 2s ease-in-out infinite; }
+/* capture paused: steady amber, deliberately not the breathing "live" dot */
+.dot.warn { background: #e0a63c; box-shadow: 0 0 8px #e0a63c; }
+
+/* Shown to a Viewer over the last frame when the Monitor loses its camera, so a
+   frozen picture is never mistaken for a live one. */
+.paused-note {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(84vw, 340px);
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  background: rgba(14, 15, 20, .82);
+  border: 1px solid rgba(224, 166, 60, .55);
+  color: #f3efe8;
+  text-align: center;
+}
+.paused-note strong { font-size: 15px; color: #e0a63c; }
+.paused-note span { font-size: 13px; line-height: 1.5; color: #cfd3dc; }
 
 @keyframes breathe { 50% { opacity: .35; } }
 

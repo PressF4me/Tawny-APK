@@ -271,6 +271,12 @@
       </div>
     </div>
 
+    <div id="paused-note" class="paused-note" hidden>
+      <strong>The monitor is paused</strong>
+      <span>Its screen turned off or the app moved to the background. The picture
+        resumes on its own when the monitor phone is woken.</span>
+    </div>
+
     <div id="talkflag" class="talkflag" hidden>Listening to you</div>
 
     <!-- Lens selector — shown when the monitor has multiple cameras -->
@@ -279,7 +285,7 @@
     <div id="zoom-chip" class="zoom-chip" hidden></div>
 
     <div id="sas" class="sas" hidden>
-      <p>Check this code matches the "Verify:" code shown on the Monitor's screen:</p>
+      <p id="sas-note">Check this code matches the &ldquo;Verify:&rdquo; code shown on the Monitor&rsquo;s screen:</p>
       <strong id="sas-code" class="sas-code"></strong>
       <div class="sas-actions">
         <button id="sas-ok" type="button" class="wide primary">Looks right</button>

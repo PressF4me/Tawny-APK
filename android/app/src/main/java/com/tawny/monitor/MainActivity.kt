@@ -1878,7 +1878,11 @@ class MainActivity : AppCompatActivity() {
     /** Returns the bound port, or -1 if the relay could not start. */
     private fun ensureSignalServer(): Int {
         signalServer?.let { return it.boundPort }
-        val s = SignalServer(prefs.getInt("sigPort", 8820)).apply {
+        // The relay proves each LAN peer holds the channel key before letting it
+        // into the room; read the key fresh so a re-pair takes effect at once.
+        val s = SignalServer(prefs.getInt("sigPort", 8820)) {
+            prefs.getString("channelKey", null)
+        }.apply {
             isReuseAddr = true
             start()
         }
@@ -2196,10 +2200,15 @@ class MainActivity : AppCompatActivity() {
                         if (prefs.getString("role", null) == "station") stopServers()
                         afterSession()
                     }
-                    // Watcher: a Handheld connected / all disconnected — show or
+                    // Monitor: a Viewer connected / all disconnected — show or
                     // hide the pairing-QR overlay over the live view.
                     "watching" -> pairOverlay?.visibility = View.GONE
                     "waiting" -> pairOverlay?.visibility = View.VISIBLE
+                    // The OS took the camera back (screen off / backgrounded).
+                    // The page handles the UX; record it so the diagnostics log
+                    // can explain a "it froze" report after the fact.
+                    "paused" -> Diag.log("shell", "capture paused — monitor left the foreground")
+                    "resumed" -> Diag.log("shell", "capture resumed")
                     // Theme changed from the in-session web toggle.
                     "theme" -> {
                         val mode = obj.optString("mode")
