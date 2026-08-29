@@ -135,6 +135,7 @@ ports — they dial the relay outbound.
 |---|---|
 | `GET /healthz` | `{ ok: true }` |
 | `GET /config.json` | `{ stun, turnMode, authRequired:false }` (CORS `*`) |
+| `GET /privacy` | the privacy policy as a static page — the URL to give Play |
 | `GET /turn?room=&t=` | short-lived `{ iceServers, ttl }` or 404 |
 | `GET /ws?room=&role=&t=` | signaling relay → per-room actor |
 

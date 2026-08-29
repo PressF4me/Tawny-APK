@@ -6,6 +6,7 @@
 //
 //   GET /healthz              liveness
 //   GET /config.json          { stun, turnMode, authRequired:false }  (CORS *)
+//   GET /privacy              the privacy policy, as a static HTML page
 //   GET /turn?room=&t=        short-lived TURN credentials             (CORS *)
 //   GET /ws?room=&role=&t=    signaling relay  ->  Room Durable Object
 //
@@ -16,6 +17,7 @@
 //   STUN_URLS, TURN_MODE, ALLOWED_ORIGINS
 
 export { Room } from './room.js';
+import { privacyResponse } from './privacy.js';
 
 const ROOM_RE = /^[a-f0-9]{32}$/;
 const TICKET_RE = /^[A-Za-z0-9_-]{8,64}$/;
@@ -127,6 +129,16 @@ export default {
         { stun: list(env.STUN_URLS), turnMode: env.TURN_MODE || 'auto', authRequired: false },
         200, cors()
       );
+    }
+
+    // Play requires a publicly reachable HTTPS privacy policy before it will
+    // accept a submission. This service is already public, already on HTTPS,
+    // and already has to stay up for the app to work off-Wi-Fi — so it serves
+    // the page itself rather than adding a GitHub Pages account to the list of
+    // things that must not rot. Static, subresource-free and cacheable; see
+    // privacy.js. `/privacy/` too, because that is what people type.
+    if (url.pathname === '/privacy' || url.pathname === '/privacy/') {
+      return privacyResponse();
     }
 
     if (url.pathname === '/turn') {

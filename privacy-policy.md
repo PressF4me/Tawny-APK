@@ -83,8 +83,11 @@ privacy policy, not by us.
 
 Questions or a data-deletion request: **tawnyapp.radar137@passinbox.com**
 
-The published copy of this policy is `~/Documents/Tawny ship/privacy-policy/index.html`;
-keep the two in step if you edit one.
+This file is the source text. The **published** copy is
+`rendezvous/privacy.js`, which the rendezvous Worker serves at `GET /privacy` —
+that is the URL Play Console gets. (`~/Documents/Tawny ship/privacy-policy/
+index.html` is an older standalone copy, kept only as a GitHub Pages fallback.)
+Edit one and update the others, and bump "Last updated" in all of them.
 
 There is generally nothing for us to delete, because we do not collect or store
 your personal data. Clearing the app's data (Android Settings → Apps → Tawny →

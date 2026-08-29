@@ -10,6 +10,7 @@ import { join, extname, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash, createHmac } from 'node:crypto';
 import { WebSocketServer } from 'ws';
+import { PRIVACY_HTML, PRIVACY_HEADERS } from './rendezvous/privacy.js';
 
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -148,6 +149,15 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === '/healthz') {
     return json(res, 200, { ok: true, channels: rooms.size, clients: wss.clients.size });
+  }
+  // Parity with the rendezvous Worker, so a self-hoster has the same URL to
+  // point at. It carries its own headers rather than secureHeaders(): the page
+  // is a single body with an inline <style> and no subresources, which the
+  // app's `default-src 'none'; style-src 'self'` CSP would block.
+  if (url.pathname === '/privacy' || url.pathname === '/privacy/') {
+    const body = Buffer.from(PRIVACY_HTML);
+    res.writeHead(200, { ...PRIVACY_HEADERS, 'content-length': body.length });
+    return res.end(req.method === 'HEAD' ? undefined : body);
   }
   if (url.pathname === '/turn') {
     const room = String(url.searchParams.get('room') || '');

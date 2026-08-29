@@ -13,6 +13,13 @@
 // carries the ticket `t`; the Watcher's carries `hashT = sha256(t)`.
 //
 // Env: STUN_URLS, TURN_MODE, ALLOWED_ORIGINS, TURN_STATIC_SECRET, TURN_URLS
+//
+// No longer strictly one file: it imports the privacy page from ../privacy.js
+// so the Worker and this do not drift into two policies. `deployctl deploy`
+// follows the import; if you are pasting this into the Deno Deploy playground,
+// paste privacy.js above it and drop the import line.
+
+import { privacyResponse } from "../privacy.js";
 
 const ROOM_RE = /^[a-f0-9]{32}$/;
 const TICKET_RE = /^[A-Za-z0-9_-]{8,64}$/;
@@ -112,6 +119,10 @@ Deno.serve(async (req) => {
 
   if (req.method === "OPTIONS") return new Response(null, { headers: cors() });
   if (url.pathname === "/healthz") return json({ ok: true });
+  // Same page the Worker serves — see ../privacy.js for why it lives here.
+  if (url.pathname === "/privacy" || url.pathname === "/privacy/") {
+    return privacyResponse();
+  }
   if (url.pathname === "/config.json") {
     return json(
       { stun: list(env("STUN_URLS")), turnMode: env("TURN_MODE") || "auto", authRequired: false },

@@ -51,11 +51,12 @@ public/vendor/           qrcode-generator (MIT), vendored for offline use
 server.js                self-host reference relay (Node) — signalling + /turn + static
 rendezvous/              Cloudflare Worker + Durable Object for the remote path
   worker.js room.js wrangler.toml
+  privacy.js             the privacy policy page, served at GET /privacy
   deno/main.ts           single-file alternative for Deno Deploy
   README.md              deploy steps (Cloudflare / Deno / self-hosted coturn)
 desktop/                 optional Linux desktop launcher for the web client
 PLAY-SUBMISSION.md       Google Play checklist + pre-review audit
-privacy-policy.md        privacy policy text (host it, link it in Play Console)
+privacy-policy.md        privacy policy source text (published from rendezvous/privacy.js)
 docs/                    data-safety answers, store listing copy, reviewer notes
 SECURITY.md              threat model, hardening, residual risk
 ```
