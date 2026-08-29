@@ -1,7 +1,9 @@
 # Play Store listing
 
-**The finished, submission-ready copy and artwork live outside this repository,
-in `~/Documents/Tawny ship/`.** That pack is what gets pasted into Play Console.
+**The listing text and every console answer now live in
+[`play-submission-runbook.md`](play-submission-runbook.md), in this repository.**
+Only the artwork stays in the local pack `~/Documents/Tawny ship/`, because it is
+binary — and the icon regenerates from `public/icon.svg` anyway.
 
 This file used to hold a second copy of the listing text, and it drifted badly:
 by the time anyone read it again it specified an ink-and-saffron palette that
@@ -13,15 +15,15 @@ points at the one place they are maintained.
 
 | What | Where |
 |---|---|
-| App name, short + full description | `~/Documents/Tawny ship/listing/` |
-| Category, tags, contact, declarations | `~/Documents/Tawny ship/listing/category-and-contact.md` |
-| Data safety answers | `~/Documents/Tawny ship/listing/data-safety-answers.md` |
-| Content rating answers | `~/Documents/Tawny ship/listing/content-rating-answers.md` |
-| Reviewer / app-access instructions | `~/Documents/Tawny ship/listing/review-notes.md` |
-| Icon, feature graphic, screenshots | `~/Documents/Tawny ship/graphics/` |
-| Privacy policy page + hosting steps | `~/Documents/Tawny ship/privacy-policy/` |
-| Upload-key and release-build steps | `~/Documents/Tawny ship/build/KEYSTORE.md` |
-| Ordered submission runbook | `~/Documents/Tawny ship/README.md` |
+| App name, short + full description | `play-submission-runbook.md` § step 5 |
+| Category, tags, contact, declarations | `play-submission-runbook.md` §§ 5–6 |
+| Data safety answers | `play-submission-runbook.md` § step 6 |
+| Content rating answers | `play-submission-runbook.md` § step 6 |
+| Reviewer / app-access instructions | `play-submission-runbook.md` § step 6 |
+| Upload-key and release-build steps | `play-submission-runbook.md` §§ 1, 3 |
+| Ordered submission runbook | `play-submission-runbook.md` |
+| Privacy policy page | `../rendezvous/privacy.js`, served at `GET /privacy` |
+| Icon, feature graphic, screenshots | `~/Documents/Tawny ship/graphics/` (binary; not in git) |
 
 ## The one thing worth keeping here: the real palette
 

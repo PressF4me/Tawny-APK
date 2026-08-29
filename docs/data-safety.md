@@ -1,6 +1,7 @@
 # Play Console — Data safety
 
-**Maintained in `~/Documents/Tawny ship/listing/data-safety-answers.md`.**
+**Maintained in [`play-submission-runbook.md`](play-submission-runbook.md), step
+6, "Data safety".**
 
 Note for whoever fills the form: this build ships a rendezvous URL
 (`tawny.rendezvousUrl` in `android/local.properties`, baked into

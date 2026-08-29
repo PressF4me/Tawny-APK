@@ -57,7 +57,7 @@ rendezvous/              Cloudflare Worker + Durable Object for the remote path
 desktop/                 optional Linux desktop launcher for the web client
 PLAY-SUBMISSION.md       Google Play checklist + pre-review audit
 privacy-policy.md        privacy policy source text (published from rendezvous/privacy.js)
-docs/                    data-safety answers, store listing copy, reviewer notes
+docs/                    DIRECTION.md (strategy), play-submission-runbook.md, listing notes
 SECURITY.md              threat model, hardening, residual risk
 ```
 
