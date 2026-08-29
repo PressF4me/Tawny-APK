@@ -277,6 +277,9 @@ class MainActivity : AppCompatActivity() {
     private val uiFont by lazy { Typeface.createFromAsset(assets, "fonts/Mukta-Regular.ttf") }
     private val uiFontSemi by lazy { Typeface.createFromAsset(assets, "fonts/Mukta-SemiBold.ttf") }
 
+    /** Text stops being comfortable to read much past this. */
+    private val CONTENT_MAX_DP = 440
+
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     private val d get() = resources.displayMetrics.density
@@ -717,13 +720,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * The standard content column, capped at a comfortable reading width.
+     *
+     * Without the cap the layout is MATCH_PARENT everywhere, which is fine on a
+     * phone in portrait and poor everywhere else: in landscape, and on the
+     * tablets this app is offered to (every `uses-feature` is optional), body
+     * copy ran the full width of the screen and a primary button stretched to
+     * 2400px. `body(maxW = 300)` could not help — a TextView's maxWidth loses to
+     * a MATCH_PARENT parent.
+     */
     private fun column(scroll: Boolean): LinearLayout {
         val pad = dp(24)
+        val w = minOf(resources.displayMetrics.widthPixels, dp(CONTENT_MAX_DP))
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
             if (!scroll) gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(MP, if (scroll) WC else MP)
+            layoutParams = FrameLayout.LayoutParams(w, if (scroll) WC else MP).also {
+                it.gravity = Gravity.CENTER_HORIZONTAL
+            }
         }
     }
 
@@ -739,7 +755,10 @@ class MainActivity : AppCompatActivity() {
      * there is not.
      */
     private fun mountCentered(col: LinearLayout) {
-        col.layoutParams = FrameLayout.LayoutParams(MP, WC)
+        val w = minOf(resources.displayMetrics.widthPixels, dp(CONTENT_MAX_DP))
+        col.layoutParams = FrameLayout.LayoutParams(w, WC).also {
+            it.gravity = Gravity.CENTER_HORIZONTAL
+        }
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
