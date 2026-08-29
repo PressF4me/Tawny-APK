@@ -1,7 +1,7 @@
 # Tawny — Pet Monitor
 
 Turn two phones into a private pet camera. One phone stays with the pet (**the
-Watcher**) and streams its camera and microphone; the other (**the Handheld**)
+Monitor**) and streams its camera and microphone; the other (**the Viewer**)
 watches, listens, talks back, and rings a chime. Pairing is a photo of a QR
 code — no account, no sign-up.
 
@@ -20,7 +20,7 @@ the job a server would.
 
 | Situation | Path | Server involved |
 |---|---|---|
-| Both phones on the same Wi-Fi | The Watcher runs a tiny signalling relay on the LAN; the Handheld connects straight to it. | none — it's the Watcher phone |
+| Both phones on the same Wi-Fi | The Monitor runs a tiny signalling relay on the LAN; the Viewer connects straight to it. | none — it's the Monitor phone |
 | Phones on different networks *(optional build)* | Both phones dial **out** to a small **rendezvous** service that only introduces them. If they can't reach each other directly, an encrypted **TURN** relay forwards the media (it can't read it). | one small always-on service you deploy — see `rendezvous/` |
 
 No inbound ports are opened on either phone in any configuration.

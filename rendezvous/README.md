@@ -5,7 +5,7 @@ a signaling *introducer* only — it never sees a video frame and never sees the
 channel key. Devices only ever dial **out** to it over `wss:443`, so no inbound
 port is opened on any phone.
 
-At home, on the same Wi-Fi, this is not used at all: the Watcher's own embedded
+At home, on the same Wi-Fi, this is not used at all: the Monitor's own embedded
 LAN relay carries the session and nothing leaves the house.
 
 Two ways to run it, both free at pet-monitor scale. **Cloudflare is the
@@ -95,7 +95,7 @@ exactly as before.
 
 `deno/main.ts` is a single-file port. Deno Deploy's free tier includes
 WebSockets and a custom domain. It has **no per-room actor**, so pin one region
-(so two Handhelds always land on the same isolate) — set it in the Deno Deploy
+(so two Viewers always land on the same isolate) — set it in the Deno Deploy
 project settings. Same `/config.json`, `/turn`, `/ws` surface. Deploy by linking
 the repo or `deployctl deploy --project=tawny-rendezvous deno/main.ts`.
 
@@ -139,8 +139,8 @@ ports — they dial the relay outbound.
 | `GET /ws?room=&role=&t=` | signaling relay → per-room actor |
 
 `room` is `sha256("tawny-room-v1|" + channelKey)` truncated to 32 hex, computed
-on the device. `t` is a per-pairing admission ticket: the Watcher registers
-`sha256(t)` for its room on connect; a Handheld must present the matching `t`.
+on the device. `t` is a per-pairing admission ticket: the Monitor registers
+`sha256(t)` for its room on connect; a Viewer must present the matching `t`.
 The ticket is admission + abuse control — it is **not** what protects the media
 (that is the 128-bit channel key, which never reaches this service).
 

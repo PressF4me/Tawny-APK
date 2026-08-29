@@ -80,10 +80,10 @@ launch with `-camera-back virtualscene`.
 
 ## Testing without two phones
 
-- The Watcher path is fully reachable on one device: welcome → The Watcher →
+- The Monitor path is fully reachable on one device: welcome → The Monitor →
   allow → name → QR screen.
 - On the pairing screen, **Show as link** reveals the `tawny://pair?…` text.
-  Feed it to a Handheld with **Paste a link instead**, or from a shell:
+  Feed it to a Viewer with **Paste a link instead**, or from a shell:
   ```sh
   adb shell "am start -a android.intent.action.VIEW -d 'tawny://pair?k=KEY&n=Pet%20camera&h=IP:PORT'"
   ```
@@ -92,7 +92,7 @@ launch with `-camera-back virtualscene`.
 
 ## Background / screen-off
 
-Camera and mic run **only while the app is foregrounded**. The Watcher keeps the
+Camera and mic run **only while the app is foregrounded**. The Monitor keeps the
 screen on and has a near-black "dim" mode for a phone on a charger. A native
 foreground-service mode for true screen-off streaming would need a libwebrtc
 capture path plus the Play `camera|microphone` FGS declaration — not in 1.0.
