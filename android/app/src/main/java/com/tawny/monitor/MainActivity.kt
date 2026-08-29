@@ -229,7 +229,10 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var root: FrameLayout
     private var web: WebView? = null
-    private var pairOverlay: View? = null   // QR shown over the Watcher's live view while waiting
+    private var pairOverlay: View? = null
+    /** The user asked to see the camera instead of the pairing code. */
+    private var pairOverlayHidden = false
+    private var pairChip: View? = null   // QR shown over the Watcher's live view while waiting
     private var isLive = false
 
     private var scene: PetSceneView? = null
@@ -370,6 +373,8 @@ class MainActivity : AppCompatActivity() {
             val b = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             if (videoIsBehindBars()) v.setPadding(0, 0, 0, 0)
             else v.setPadding(0, b.top, 0, b.bottom)
+            lastInsets = b.top to b.bottom
+            pushSafeInsets()
             insets
         }
 
@@ -686,6 +691,9 @@ class MainActivity : AppCompatActivity() {
         swipeNav(null, null)
         (pairOverlay?.parent as? ViewGroup)?.removeView(pairOverlay)
         pairOverlay = null
+        (pairChip?.parent as? ViewGroup)?.removeView(pairChip)
+        pairChip = null
+        pairOverlayHidden = false
         web?.let {
             (it.parent as? ViewGroup)?.removeView(it)
             it.loadUrl("about:blank")
@@ -1191,6 +1199,69 @@ class MainActivity : AppCompatActivity() {
      * WebView, so keying this off `isLive` alone put white status-bar icons on
      * a cream background — the clock all but disappeared.
      */
+    /** Reveal the live camera; leave one obvious way back to the code. */
+    private fun hidePairOverlay() {
+        pairOverlayHidden = true
+        pairOverlay?.visibility = View.GONE
+        showPairChip()
+        refreshSystemBars()
+    }
+
+    private fun showPairOverlay() {
+        pairOverlayHidden = false
+        pairChip?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        pairChip = null
+        pairOverlay?.visibility = View.VISIBLE
+        refreshSystemBars()
+    }
+
+    /** A small chip over the video: the way back to the pairing code. */
+    private fun showPairChip() {
+        if (pairChip != null) return
+        val chip = TextView(this).apply {
+            text = "Show pairing code"
+            textSize = Type.LABEL
+            typeface = uiFontSemi
+            letterSpacing = 0.06f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = pressable(roundRect(0x99000000.toInt(), 0x33FFFFFF))
+            setPadding(dp(14), dp(9), dp(14), dp(9))
+            minHeight = dp(44)
+            tapFeedback { showPairOverlay() }
+        }
+        val lp = FrameLayout.LayoutParams(WC, WC).also {
+            it.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            // Clear of the page's own status rail, which sits under the system
+            // bar inset plus its own padding.
+            it.topMargin = (lastInsets.first) + dp(64)
+        }
+        pairChip = chip
+        root.addView(chip, lp)
+    }
+
+    private var lastInsets: Pair<Int, Int> = 0 to 0
+
+    /**
+     * Hand the page the real window insets.
+     *
+     * The live view runs edge-to-edge under the system bars, but a WebView
+     * inside an app never reports `env(safe-area-inset-*)` — so the control
+     * rail was drawn at y=0, straight through the clock and the status icons.
+     * The shell knows the numbers; the page just needs to be told.
+     */
+    private fun pushSafeInsets() {
+        val w = web ?: return
+        val (top, bottom) = lastInsets
+        val t = if (videoIsBehindBars()) (top / d).toInt() else 0
+        val b = if (videoIsBehindBars()) (bottom / d).toInt() else 0
+        w.evaluateJavascript(
+            "document.documentElement.style.setProperty('--safe-t','${t}px');" +
+                "document.documentElement.style.setProperty('--safe-b','${b}px');",
+            null
+        )
+    }
+
     private fun refreshSystemBars() {
         val over = videoIsBehindBars()
         val bar = if (over) Color.TRANSPARENT else Hue.BG
@@ -1203,6 +1274,7 @@ class MainActivity : AppCompatActivity() {
             isAppearanceLightStatusBars = light
             isAppearanceLightNavigationBars = light
         }
+        pushSafeInsets()
         ViewCompat.requestApplyInsets(root)
     }
 
@@ -2202,6 +2274,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(v: WebView, u: String) {
                 if (kicked) return
                 kicked = true
+                pushSafeInsets()      // before the page paints its control rail
                 v.evaluateJavascript(
                     "window.tawnyStart && window.tawnyStart(" +
                         "${jsStr(role)},${jsStr(key)},${jsStr(name)}," +
@@ -2279,6 +2352,10 @@ class MainActivity : AppCompatActivity() {
             )
         )
         col.addView(waitingRow("Waiting for a viewer to connect"))
+        // You cannot aim a pet camera through a full-screen QR code. Let the
+        // person setting the Monitor up check the framing without giving up the
+        // pairing screen.
+        col.addView(link("See what the camera sees") { hidePairOverlay() })
         col.addView(link("Show as link") { showPairText(payload) })
         col.addView(link("Rename this monitor") {
             promptRoomName { newName ->
@@ -2387,8 +2464,19 @@ class MainActivity : AppCompatActivity() {
                     }
                     // Monitor: a Viewer connected / all disconnected — show or
                     // hide the pairing-QR overlay over the live view.
-                    "watching" -> { pairOverlay?.visibility = View.GONE; refreshSystemBars() }
-                    "waiting" -> { pairOverlay?.visibility = View.VISIBLE; refreshSystemBars() }
+                    "watching" -> {
+                        // Someone is actually watching: the code is done with,
+                        // and so is the chip that offers to bring it back.
+                        pairOverlayHidden = false
+                        pairChip?.let { c -> (c.parent as? ViewGroup)?.removeView(c) }
+                        pairChip = null
+                        pairOverlay?.visibility = View.GONE
+                        refreshSystemBars()
+                    }
+                    "waiting" -> {
+                        if (!pairOverlayHidden) pairOverlay?.visibility = View.VISIBLE
+                        refreshSystemBars()
+                    }
                     // The OS took the camera back (screen off / backgrounded).
                     // The page handles the UX; record it so the diagnostics log
                     // can explain a "it froze" report after the fact.
