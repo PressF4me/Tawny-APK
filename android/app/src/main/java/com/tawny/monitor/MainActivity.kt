@@ -368,7 +368,8 @@ class MainActivity : AppCompatActivity() {
         // gradient scrim, which is what that gradient is for.
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val b = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            if (isLive) v.setPadding(0, 0, 0, 0) else v.setPadding(0, b.top, 0, b.bottom)
+            if (videoIsBehindBars()) v.setPadding(0, 0, 0, 0)
+            else v.setPadding(0, b.top, 0, b.bottom)
             insets
         }
 
@@ -1179,7 +1180,19 @@ class MainActivity : AppCompatActivity() {
      * that is left running) but they float over the video instead of cutting
      * it, and their icons flip to light because the video behind them is dark.
      */
-    private fun systemBarsOverVideo(over: Boolean) {
+    /** True when the video itself is what is under the system bars. */
+    private fun videoIsBehindBars() =
+        isLive && pairOverlay?.visibility != View.VISIBLE
+
+    /**
+     * Edge-to-edge over the video, framed everywhere else.
+     *
+     * The pairing QR is a full-screen cream sheet mounted *over* the live
+     * WebView, so keying this off `isLive` alone put white status-bar icons on
+     * a cream background — the clock all but disappeared.
+     */
+    private fun refreshSystemBars() {
+        val over = videoIsBehindBars()
         val bar = if (over) Color.TRANSPARENT else Hue.BG
         @Suppress("DEPRECATION")
         window.statusBarColor = bar
@@ -1573,7 +1586,7 @@ class MainActivity : AppCompatActivity() {
         col.addView(wordmark())
         col.addView(
             body(
-                "Watch your pet from anywhere in the world. " +
+                "Keep an eye on your pet from the next room or across town. " +
                     "Two phones, no accounts — just open the app and connect.",
                 maxW = 300
             )
@@ -1638,9 +1651,9 @@ class MainActivity : AppCompatActivity() {
         )
         col.addView(
             roleCard(
-                "The Viewer", "Watch from anywhere",
-                "Check in on your pet from this phone — at home, at work, " +
-                    "or anywhere in the world.",
+                "The Viewer", "Watch from this phone",
+                "Check in on your pet from here — around the house on Wi-Fi, " +
+                    "or from out and about.",
                 "phone"
             ) { onHandheld() }
         )
@@ -2221,6 +2234,7 @@ class MainActivity : AppCompatActivity() {
         if (pairPayload != null) {
             pairOverlay = buildPairOverlay(name, pairPayload)
             root.addView(pairOverlay, FrameLayout.LayoutParams(MP, MP))
+            refreshSystemBars()   // a cream sheet is now over the video
         }
         // Station live view: swipe / back ends the session.
         if (role == "station") swipeNav(back = { confirmEndCall() }, forward = null)
@@ -2234,6 +2248,12 @@ class MainActivity : AppCompatActivity() {
         val scroll = ScrollView(this).apply {
             layoutParams = FrameLayout.LayoutParams(MP, MP)
             setBackgroundColor(Hue.BG)
+            // root is unpadded while live, so this sheet carries its own insets.
+            ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
+                val b = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                v.setPadding(0, b.top, 0, b.bottom)
+                insets
+            }
         }
         val col = column(scroll = true).apply { gravity = Gravity.CENTER_HORIZONTAL }
         col.addView(backLink { confirmEndCall() })
@@ -2253,8 +2273,8 @@ class MainActivity : AppCompatActivity() {
         }
         col.addView(
             body(
-                "On the other phone, open Tawny and tap Watch your pet. Point " +
-                    "its camera at this code to connect — from anywhere in the world.",
+                "On the other phone, open Tawny and tap \u201cI want to watch a " +
+                    "monitor\u201d, then point its camera at this code.",
                 maxW = 300
             )
         )
@@ -2367,8 +2387,8 @@ class MainActivity : AppCompatActivity() {
                     }
                     // Monitor: a Viewer connected / all disconnected — show or
                     // hide the pairing-QR overlay over the live view.
-                    "watching" -> pairOverlay?.visibility = View.GONE
-                    "waiting" -> pairOverlay?.visibility = View.VISIBLE
+                    "watching" -> { pairOverlay?.visibility = View.GONE; refreshSystemBars() }
+                    "waiting" -> { pairOverlay?.visibility = View.VISIBLE; refreshSystemBars() }
                     // The OS took the camera back (screen off / backgrounded).
                     // The page handles the UX; record it so the diagnostics log
                     // can explain a "it froze" report after the fact.
@@ -2441,7 +2461,7 @@ class MainActivity : AppCompatActivity() {
     private fun beginLive() {
         isLive = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        systemBarsOverVideo(true)
+        refreshSystemBars()
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.mode = AudioManager.MODE_IN_COMMUNICATION
         // Force the loudspeaker. On API 31+ `isSpeakerphoneOn` is deprecated and
@@ -2461,7 +2481,7 @@ class MainActivity : AppCompatActivity() {
     private fun endLive() {
         isLive = false
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        systemBarsOverVideo(false)
+        refreshSystemBars()
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         if (android.os.Build.VERSION.SDK_INT >= 31) {
             runCatching { am.clearCommunicationDevice() }
