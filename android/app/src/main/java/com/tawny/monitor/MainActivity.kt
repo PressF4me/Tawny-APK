@@ -183,9 +183,24 @@ object Type {
 }
 
 /** One radius language. 3-4dp "equipment panel" everywhere; nothing rounder. */
+/**
+ * One radius language, three tiers.
+ *
+ * This used to be 4dp cards on 3dp controls — near-square, which read as
+ * "equipment panel" in the abstract and as "unfinished" on a real screen full
+ * of soft illustrated animals. The whole app is warm parchment, a brush
+ * wordmark and plush critters; boxes with 3dp corners were the one hard-edged
+ * thing in it.
+ *
+ * The tiers exist so the softening stays a system rather than a pile of local
+ * tweaks: a surface that *holds* things is rounder than a control you press,
+ * which is rounder than a chip floating over video. Keep that order if these
+ * ever move again.
+ */
 object Radius {
-    const val CARD = 4      // dp
-    const val CONTROL = 3   // dp
+    const val CARD = 16     // dp — surfaces that hold content: cards, panels, dialogs
+    const val CONTROL = 11  // dp — things you press or type into: pills, inputs
+    const val CHIP = 7      // dp — small overlays sitting on top of the camera
 }
 
 object Hue {
@@ -990,18 +1005,50 @@ class MainActivity : AppCompatActivity() {
         tapFeedback(onClick)
     }
 
-    /** Press feedback with weight: dips to 97% under the finger, springs back
-     *  with a small overshoot on release. Non-consuming, so the click still
-     *  fires and the ripple still draws. */
-    private fun pressScale(v: View) {
-        v.setOnTouchListener { view, e ->
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN ->
-                    view.animate().scaleX(0.97f).scaleY(0.97f).setDuration(90).start()
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                    view.animate().scaleX(1f).scaleY(1f).setDuration(240)
-                        .setInterpolator(android.view.animation.OvershootInterpolator(2.6f))
+    /**
+     * Press feedback for a meta row.
+     *
+     * The two rows used to share one treatment — ripple plus a flat 97% squeeze
+     * — so "Support Tawny" and "About Tawny" read as the same control printed
+     * twice. Three things now differ, and they are deliberately the *only*
+     * three: these sit below the fold under a live pet list and an animated
+     * scene, and must not compete with either.
+     *
+     *  1. the row still dips, but only to 98.5% — the icon and the glyph now
+     *     carry the motion, so the slab moving as well would be noise;
+     *  2. the icon reacts in character: a double-thump for the heart, one soft
+     *     swell for anything else ([IconView.beat]);
+     *  3. the trailing glyph nudges the way it points — "↗" up and out of the
+     *     row because it leaves the app, "›" straight along because it does not.
+     *
+     * Non-consuming, so the click still fires and the ripple still draws.
+     * Everything is scaled by [animScale], so "remove animations" stops it dead.
+     */
+    private fun metaPress(row: View, icon: IconView, trail: View, kind: String, glyph: String) {
+        val leaves = glyph == "↗"
+        val nx = dp(if (leaves) 3 else 4).toFloat()
+        val ny = if (leaves) -dp(3).toFloat() else 0f
+        row.setOnTouchListener { v, e ->
+            val a = animScale
+            if (a > 0f) when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.animate().scaleX(0.985f).scaleY(0.985f)
+                        .setDuration((90 * a).toLong()).start()
+                    trail.animate().translationX(nx).translationY(ny)
+                        .setDuration((140 * a).toLong())
+                        .setInterpolator(android.view.animation.DecelerateInterpolator())
                         .start()
+                    icon.beat(kind == "heart", a)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.animate().scaleX(1f).scaleY(1f).setDuration((260 * a).toLong())
+                        .setInterpolator(android.view.animation.OvershootInterpolator(2.2f))
+                        .start()
+                    trail.animate().translationX(0f).translationY(0f)
+                        .setDuration((340 * a).toLong())
+                        .setInterpolator(android.view.animation.OvershootInterpolator(3.0f))
+                        .start()
+                }
             }
             false
         }
@@ -1023,9 +1070,22 @@ class MainActivity : AppCompatActivity() {
         val ph = dp(16); val pv = dp(15)
         setPadding(ph, pv, ph, pv)
         minimumHeight = dp(54)
-        addView(IconView(this@MainActivity, kind, behind = Hue.PANEL).apply {
+        // Held rather than added inline: metaPress animates both of them, and
+        // the beat needs the IconView's own type, not a bare View.
+        //
+        // Only the heart carries the accent. "About" and "Email us" are neutral
+        // errands, and painting their glyphs the same berry as the one row that
+        // is actually asking for something flattened all three into a stack of
+        // equally-loud buttons — the glyph shouted while the label beside it sat
+        // in plain body colour. Tinting them DIM lines each glyph up with its
+        // own label and trailing chevron, so the accent means something again.
+        val icon = IconView(
+            this@MainActivity, kind, behind = Hue.PANEL,
+            tint = if (kind == "heart") Hue.BERRY else Hue.DIM,
+        ).apply {
             layoutParams = LinearLayout.LayoutParams(dp(19), dp(19))
-        })
+        }
+        addView(icon)
         addView(LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(13) }
@@ -1047,20 +1107,32 @@ class MainActivity : AppCompatActivity() {
                 setPadding(0, dp(2), 0, 0)
             })
         })
-        addView(TextView(this@MainActivity).apply {
+        val glyph = TextView(this@MainActivity).apply {
             text = trail
             setTextColor(Hue.DIM)
             textSize = 18f
             typeface = uiFontSemi
-        })
+        }
+        addView(glyph)
         isClickable = true; isFocusable = true
-        pressScale(this)
+        metaPress(this, icon, glyph, kind, trail)
         setOnClickListener { haptic(); onClick() }
     }
 
-    /** One rounded panel grouping the meta rows, hairline-divided. Sits well
-     *  clear of whatever is above it — it is a change of subject, not another
-     *  item in the same list. */
+    /**
+     * One rounded panel grouping the meta rows, hairline-divided. Sits well
+     * clear of whatever is above it — it is a change of subject, not another
+     * item in the same list.
+     *
+     * The rows rise and fade in on a stagger. It is a small thing, but it is
+     * what stops the panel reading as a dead slab of two identical lines: the
+     * eye gets told there are two of them, in order, and then it is over. Kept
+     * to ~9dp and a third of a second — this is below the fold, under a list of
+     * live sessions and an animated scene, and it must not pull rank on either.
+     * Skipped entirely when the system animator scale is 0 ("remove
+     * animations"), which also leaves alpha at 1 so nothing can strand
+     * invisible.
+     */
     private fun metaPanel(vararg rows: View) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = roundRect(Hue.PANEL, Hue.LINE, Radius.CARD)
@@ -1072,6 +1144,16 @@ class MainActivity : AppCompatActivity() {
                 setBackgroundColor(Hue.LINE)
             })
             addView(r)
+        }
+        val a = animScale
+        if (a > 0f) rows.forEachIndexed { i, r ->
+            r.alpha = 0f
+            r.translationY = dp(9).toFloat()
+            r.animate().alpha(1f).translationY(0f)
+                .setStartDelay(((70 * i + 90) * a).toLong())
+                .setDuration((320 * a).toLong())
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.7f))
+                .start()
         }
     }
 
@@ -1120,8 +1202,8 @@ class MainActivity : AppCompatActivity() {
         // must not wrap, so the log pans in both directions.
         val vScroll = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(MP, 0, 1f).also { it.topMargin = dp(12) }
-            background = roundRect(Hue.PANEL, Hue.LINE)
-            val p = dp(10); setPadding(p, p, p, p)
+            background = roundRect(Hue.PANEL, Hue.LINE, Radius.CARD)
+            val p = dp(12); setPadding(p, p, p, p)
         }
         vScroll.addView(HorizontalScrollView(this).apply {
             layoutParams = FrameLayout.LayoutParams(MP, WC)
@@ -1298,7 +1380,7 @@ class MainActivity : AppCompatActivity() {
         tag: String, title: String, blurb: String, kind: String, onClick: () -> Unit
     ): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = pressable(roundRect(Hue.PANEL, Hue.LINE), tint = Hue.BERRY)
+        background = pressable(roundRect(Hue.PANEL, Hue.LINE, Radius.CARD), Radius.CARD, Hue.BERRY)
         setPadding(dp(18), dp(18), dp(18), dp(18))
         layoutParams = lp(topMargin = 12)
         tapFeedback(onClick)
@@ -1395,7 +1477,7 @@ class MainActivity : AppCompatActivity() {
             letterSpacing = 0.06f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
-            background = pressable(roundRect(0x99000000.toInt(), 0x33FFFFFF))
+            background = pressable(roundRect(0x99000000.toInt(), 0x33FFFFFF, Radius.CHIP), Radius.CHIP)
             setPadding(dp(14), dp(9), dp(14), dp(9))
             minHeight = dp(44)
             tapFeedback { showPairOverlay() }
@@ -2974,10 +3056,46 @@ private class IconView(
     ctx: Context,
     private val kind: String,
     behind: Int = Hue.PANEL,
+    tint: Int = Hue.BERRY,
 ) : View(ctx) {
-    private val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Hue.BERRY }
+    private val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = tint }
     private val cut = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = behind }
-    private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Hue.BERRY }
+    private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = tint }
+
+    /** Glyph scale about its own centre; 1f at rest. Driven by [beat]. */
+    private var pulse = 1f
+    private var beatAnim: ValueAnimator? = null
+
+    /**
+     * React to a press.
+     *
+     * @param strong a real double-thump — the heart on "Support Tawny", which
+     *   is the one row where a bit of warmth is the whole point. Everything
+     *   else gets a single soft swell, so the rows do not read as one control
+     *   repeated twice.
+     * @param scale the system animator scale; 0 means "remove animations" is on
+     *   and nothing should move.
+     */
+    fun beat(strong: Boolean, scale: Float) {
+        if (scale <= 0f) return
+        beatAnim?.cancel()
+        // Interpolated evenly through the keyframes: swell, relax, smaller
+        // swell, settle — the shape of a heartbeat rather than a bounce.
+        val frames = if (strong) floatArrayOf(1f, 1.28f, 1.03f, 1.15f, 1f)
+                     else floatArrayOf(1f, 1.11f, 1f)
+        beatAnim = ValueAnimator.ofFloat(*frames).apply {
+            duration = ((if (strong) 520 else 260) * scale).toLong()
+            interpolator = LinearInterpolator()
+            addUpdateListener { pulse = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        beatAnim?.cancel()
+        beatAnim = null
+        super.onDetachedFromWindow()
+    }
 
     private fun rr(c: Canvas, l: Float, t: Float, r: Float, b: Float, rad: Float, p: Paint) =
         c.drawRoundRect(RectF(l, t, r, b), rad, rad, p)
@@ -2986,6 +3104,8 @@ private class IconView(
         val s = min(width, height) / 48f
         canvas.save()
         canvas.scale(s, s)
+        // The glyph is authored in a 48x48 box, so the beat pivots on its middle.
+        if (pulse != 1f) canvas.scale(pulse, pulse, 24f, 24f)
         when (kind) {
             "camera" -> {
                 rr(canvas, 12f, 9f, 25f, 16f, 3f, body)          // viewfinder hump
