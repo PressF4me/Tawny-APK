@@ -990,6 +990,89 @@ class MainActivity : AppCompatActivity() {
         tapFeedback(onClick)
     }
 
+    /** Press feedback with weight: dips to 97% under the finger, springs back
+     *  with a small overshoot on release. Non-consuming, so the click still
+     *  fires and the ripple still draws. */
+    private fun pressScale(v: View) {
+        v.setOnTouchListener { view, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN ->
+                    view.animate().scaleX(0.97f).scaleY(0.97f).setDuration(90).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(240)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(2.6f))
+                        .start()
+            }
+            false
+        }
+    }
+
+    /**
+     * A secondary "meta" row — icon, label, trailing glyph — on the app's own
+     * card surface. Used for the Support / About / contact links, which were
+     * bare grey text before and read as an afterthought next to the styled
+     * cards around them.
+     */
+    private fun metaRow(
+        kind: String, label: String, fg: Int, trail: String,
+        sub: String? = null, onClick: () -> Unit,
+    ) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = pressable(roundRect(0, Color.TRANSPARENT, 0), 0, Hue.BERRY)
+        val ph = dp(16); val pv = dp(15)
+        setPadding(ph, pv, ph, pv)
+        minimumHeight = dp(54)
+        addView(IconView(this@MainActivity, kind, behind = Hue.PANEL).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(19), dp(19))
+        })
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(13) }
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                setTextColor(fg)
+                textSize = Type.SUB
+                typeface = uiFontSemi
+                letterSpacing = 0.01f
+                maxLines = 1
+            })
+            if (sub != null) addView(TextView(this@MainActivity).apply {
+                text = sub
+                setTextColor(Hue.DIM)
+                textSize = 12.5f
+                typeface = uiFont
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                setPadding(0, dp(2), 0, 0)
+            })
+        })
+        addView(TextView(this@MainActivity).apply {
+            text = trail
+            setTextColor(Hue.DIM)
+            textSize = 18f
+            typeface = uiFontSemi
+        })
+        isClickable = true; isFocusable = true
+        pressScale(this)
+        setOnClickListener { haptic(); onClick() }
+    }
+
+    /** One rounded panel grouping the meta rows, hairline-divided. */
+    private fun metaPanel(vararg rows: View) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = roundRect(Hue.PANEL, Hue.LINE, Radius.CARD)
+        clipToOutline = true
+        layoutParams = lp(topMargin = 16)
+        rows.forEachIndexed { i, r ->
+            if (i > 0) addView(View(this@MainActivity).apply {
+                layoutParams = LinearLayout.LayoutParams(MP, dp(1))
+                setBackgroundColor(Hue.LINE)
+            })
+            addView(r)
+        }
+    }
+
     /**
      * Tiny build stamp in the bottom-left of every native screen. It exists so
      * you can glance at each phone and see they are all running the same
@@ -1661,11 +1744,11 @@ class MainActivity : AppCompatActivity() {
         // or pairing: an ask inside the setup funnel reads as a paywall, which
         // is the exact complaint the whole category earns (docs/DIRECTION.md,
         // part 2). Nothing here unlocks anything — see [showAbout].
-        col.addView(gap(8))
-        col.addView(link("Support Tawny · help pay for the relay") {
-            openExternal(SUPPORT_URL)
-        })
-        col.addView(link("About Tawny") { showAbout() })
+        col.addView(gap(4))
+        col.addView(metaPanel(
+            metaRow("heart", "Support Tawny", Hue.BERRY, "↗") { openExternal(SUPPORT_URL) },
+            metaRow("info", "About Tawny", Hue.TEXT, "›") { showAbout() },
+        ))
 
         scroll.addView(col)
         root.addView(scroll)
@@ -1752,8 +1835,6 @@ class MainActivity : AppCompatActivity() {
                 "at all."
         ))
 
-        col.addView(gap(10))
-        col.addView(link("Support Tawny · ko-fi.com/tawnyone") { openExternal(SUPPORT_URL) })
         col.addView(aboutBody(
             "Tawny is free and stays free. Watching from outside your home goes " +
                 "through a small relay, and that relay costs bandwidth every " +
@@ -1761,23 +1842,26 @@ class MainActivity : AppCompatActivity() {
                 "Supporters get nothing extra in the app — no badge, no locked " +
                 "features, nothing. That is the point."
         ))
-
-        col.addView(gap(10))
-        col.addView(link("Email $SUPPORT_EMAIL") {
-            try {
-                startActivity(
-                    Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$SUPPORT_EMAIL"))
-                        .putExtra(
-                            Intent.EXTRA_SUBJECT,
-                            "Tawny ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
-                        )
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            } catch (e: Exception) {
-                copyToClipboard("Tawny support email", SUPPORT_EMAIL)
-                toast("No email app — address copied")
-            }
-        })
+        col.addView(metaPanel(
+            metaRow("heart", "Support Tawny", Hue.BERRY, "↗", sub = "ko-fi.com/tawnyone") {
+                openExternal(SUPPORT_URL)
+            },
+            metaRow("mail", "Email us", Hue.TEXT, "↗", sub = SUPPORT_EMAIL) {
+                try {
+                    startActivity(
+                        Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$SUPPORT_EMAIL"))
+                            .putExtra(
+                                Intent.EXTRA_SUBJECT,
+                                "Tawny ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+                            )
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (e: Exception) {
+                    copyToClipboard("Tawny support email", SUPPORT_EMAIL)
+                    toast("No email app — address copied")
+                }
+            },
+        ))
         col.addView(aboutBody(
             "Questions, bug reports, or anything that went wrong. If it is a " +
                 "connection problem, long-press the version number on any screen " +
@@ -2836,18 +2920,46 @@ private class IconView(
         val s = min(width, height) / 48f
         canvas.save()
         canvas.scale(s, s)
-        if (kind == "camera") {
-            rr(canvas, 12f, 9f, 25f, 16f, 3f, body)          // viewfinder hump
-            rr(canvas, 5f, 14f, 43f, 39f, 6f, body)          // body
-            canvas.drawCircle(24f, 26.5f, 8f, cut)           // lens well
-            canvas.drawCircle(24f, 26.5f, 4.2f, dot)         // lens
-            canvas.drawCircle(21.6f, 24.1f, 1.5f, cut)       // glint
-            canvas.drawCircle(37f, 19.5f, 1.8f, cut)         // flash
-        } else {
-            rr(canvas, 13f, 4f, 35f, 44f, 6f, body)          // handset
-            rr(canvas, 16.5f, 9.5f, 31.5f, 35.5f, 3f, cut)   // screen
-            rr(canvas, 20.5f, 39.2f, 27.5f, 41.2f, 1f, cut)  // home bar
-            canvas.drawCircle(24f, 6.6f, 1f, cut)            // earpiece
+        when (kind) {
+            "camera" -> {
+                rr(canvas, 12f, 9f, 25f, 16f, 3f, body)          // viewfinder hump
+                rr(canvas, 5f, 14f, 43f, 39f, 6f, body)          // body
+                canvas.drawCircle(24f, 26.5f, 8f, cut)           // lens well
+                canvas.drawCircle(24f, 26.5f, 4.2f, dot)         // lens
+                canvas.drawCircle(21.6f, 24.1f, 1.5f, cut)       // glint
+                canvas.drawCircle(37f, 19.5f, 1.8f, cut)         // flash
+            }
+            "heart" -> {
+                val h = Path().apply {
+                    moveTo(24f, 41f)
+                    cubicTo(6f, 27f, 5f, 14f, 15f, 12f)
+                    cubicTo(21f, 11f, 24f, 15f, 24f, 18.5f)
+                    cubicTo(24f, 15f, 27f, 11f, 33f, 12f)
+                    cubicTo(43f, 14f, 42f, 27f, 24f, 41f)
+                    close()
+                }
+                canvas.drawPath(h, body)
+                canvas.drawCircle(17.5f, 17f, 2.4f, cut)         // shine
+            }
+            "info" -> {
+                canvas.drawCircle(24f, 24f, 20f, body)
+                canvas.drawCircle(24f, 15.5f, 2.7f, cut)         // dot
+                rr(canvas, 21.4f, 20.5f, 26.6f, 34f, 2.6f, cut)  // stem
+            }
+            "mail" -> {
+                rr(canvas, 6f, 11f, 42f, 37f, 5f, body)          // envelope
+                val flap = Path().apply {
+                    moveTo(8f, 13.5f); lineTo(24f, 26f); lineTo(40f, 13.5f)
+                    lineTo(38f, 12f); lineTo(24f, 22.5f); lineTo(10f, 12f); close()
+                }
+                canvas.drawPath(flap, cut)
+            }
+            else -> {                                            // "phone"
+                rr(canvas, 13f, 4f, 35f, 44f, 6f, body)          // handset
+                rr(canvas, 16.5f, 9.5f, 31.5f, 35.5f, 3f, cut)   // screen
+                rr(canvas, 20.5f, 39.2f, 27.5f, 41.2f, 1f, cut)  // home bar
+                canvas.drawCircle(24f, 6.6f, 1f, cut)            // earpiece
+            }
         }
         canvas.restore()
     }
