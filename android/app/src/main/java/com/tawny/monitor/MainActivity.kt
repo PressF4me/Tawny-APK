@@ -446,6 +446,7 @@ class MainActivity : AppCompatActivity() {
             "offline" -> showMonitorOffline()
             "diag" -> showDiagnostics()
             "about" -> showAbout()
+            "lntip" -> showLightningTip()
             // Only if there is still something to list, else fall through to the
             // normal routing rather than showing an empty home.
             "sessions" -> if (loadRecentSessions().isEmpty()) return false else showSessionsHome()
@@ -1016,8 +1017,9 @@ class MainActivity : AppCompatActivity() {
      *
      *  1. the row still dips, but only to 98.5% — the icon and the glyph now
      *     carry the motion, so the slab moving as well would be noise;
-     *  2. the icon reacts in character: a double-thump for the heart, one soft
-     *     swell for anything else ([IconView.beat]);
+     *  2. the icon reacts in character: a double-thump for the heart, a single
+     *     hard zap for the lightning bolt ([IconView.strike]), one soft swell
+     *     for anything else ([IconView.beat]);
      *  3. the trailing glyph nudges the way it points — "↗" up and out of the
      *     row because it leaves the app, "›" straight along because it does not.
      *
@@ -1041,7 +1043,7 @@ class MainActivity : AppCompatActivity() {
                         .setDuration((140 * a).toLong())
                         .setInterpolator(android.view.animation.DecelerateInterpolator())
                         .start()
-                    icon.beat(kind == "heart", a)
+                    if (kind == "bolt") icon.strike(a) else icon.beat(kind == "heart", a)
                     wipe?.sweep(1f, a)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -1081,15 +1083,23 @@ class MainActivity : AppCompatActivity() {
         // Held rather than added inline: metaPress animates both of them, and
         // the beat needs the IconView's own type, not a bare View.
         //
-        // Only the heart carries the accent. "About" and "Email us" are neutral
-        // errands, and painting their glyphs the same berry as the one row that
-        // is actually asking for something flattened all three into a stack of
-        // equally-loud buttons — the glyph shouted while the label beside it sat
-        // in plain body colour. Tinting them DIM lines each glyph up with its
-        // own label and trailing chevron, so the accent means something again.
+        // Only the rows that are *asking* for something carry an accent.
+        // "About" and "Email us" are neutral errands, and painting their glyphs
+        // the same berry as the rows that do ask flattened them all into a
+        // stack of equally-loud buttons — the glyph shouted while the label
+        // beside it sat in plain body colour. Tinting them DIM lines each glyph
+        // up with its own label and trailing chevron.
+        //
+        // The two asks then get one accent each, because they are two different
+        // offers and not one repeated: the Ko-fi heart is BERRY, the Lightning
+        // bolt is SKY. Same panel, same shape, unmistakably not the same thing.
         val icon = IconView(
             this@MainActivity, kind, behind = Hue.PANEL,
-            tint = if (kind == "heart") Hue.BERRY else Hue.DIM,
+            tint = when (kind) {
+                "heart" -> Hue.BERRY
+                "bolt" -> Hue.SKY
+                else -> Hue.DIM
+            },
         ).apply {
             layoutParams = LinearLayout.LayoutParams(dp(19), dp(19))
         }
@@ -1914,6 +1924,9 @@ class MainActivity : AppCompatActivity() {
             metaRow("heart", "Support Tawny", Hue.BERRY, "↗", reveal = "ko-fi.com") {
                 openExternal(SUPPORT_URL)
             },
+            metaRow("bolt", "Tip in Bitcoin", Hue.SKY, "›") {
+                lnFromAbout = false; showLightningTip()
+            },
             metaRow("info", "About Tawny", Hue.TEXT, "›") { showAbout() },
         ))
 
@@ -1936,6 +1949,23 @@ class MainActivity : AppCompatActivity() {
      * so out loud.
      */
     private val SUPPORT_URL = "https://ko-fi.com/tawnyone"
+
+    /**
+     * The same contribution, over Bitcoin's Lightning network.
+     *
+     * [LN_ADDRESS] is a Lightning Address: a wallet resolves it over LNURL-pay
+     * at `strike.me/.well-known/lnurlp/loustrikes` and negotiates the amount
+     * itself. Tawny never presets a figure and never handles a key, an invoice
+     * or a satoshi.
+     *
+     * [LN_URI] is what actually gets opened — the `lightning:` scheme every
+     * current wallet registers for. [LN_WEB_URL] is only the fallback for a
+     * phone with no wallet at all; on its own it draws a QR code, which is no
+     * use to the person most likely to tap this: someone holding one phone.
+     */
+    private val LN_ADDRESS = "loustrikes@strike.me"
+    private val LN_URI = "lightning:$LN_ADDRESS"
+    private val LN_WEB_URL = "https://strike.me/@loustrikes"
     private val SUPPORT_EMAIL = "tawnyapp.radar137@passinbox.com"
 
     /** Hand a URL to whatever the user browses with. Never loaded in-app. */
@@ -2013,6 +2043,9 @@ class MainActivity : AppCompatActivity() {
             metaRow("heart", "Support Tawny", Hue.BERRY, "↗", sub = "ko-fi.com/tawnyone") {
                 openExternal(SUPPORT_URL)
             },
+            metaRow("bolt", "Tip in Bitcoin", Hue.SKY, "›", sub = LN_ADDRESS) {
+                lnFromAbout = true; showLightningTip()
+            },
             metaRow("mail", "Email us", Hue.TEXT, "↗", sub = SUPPORT_EMAIL) {
                 try {
                     startActivity(
@@ -2052,6 +2085,139 @@ class MainActivity : AppCompatActivity() {
 
         scroll.addView(col)
         root.addView(scroll)
+    }
+
+    // ---------------------------------------------------- lightning tip
+
+    /** Which screen the tip flow was opened from, so back returns there. */
+    private var lnFromAbout = false
+
+    /**
+     * Bitcoin over Lightning — the Ko-fi contribution, in the other currency.
+     *
+     * This deliberately does NOT open `strike.me/@loustrikes`. That page draws
+     * a QR code, and a QR code is useless to the person most likely to tap this
+     * row: someone holding the single phone they would also be paying from.
+     * So the row lands here, and "Open in wallet" hands the payment off with a
+     * `lightning:` URI — the scheme every current wallet registers for (Phoenix,
+     * Zeus, Wallet of Satoshi, Breez, Blink, Muun, Strike…). Android opens the
+     * one that is installed, or offers a chooser. `startActivity` is not
+     * subject to package-visibility filtering, so this needs no `<queries>`
+     * entry and no guessing about which wallet is there.
+     *
+     * The amount is agreed inside the wallet. Tawny never presets one, and
+     * never touches a key, an invoice or a satoshi.
+     *
+     * TODO: BOLT12 offer if Lou runs a node that supports it — static,
+     * reusable, no LNURL server in the middle, and better for privacy. Strike
+     * does not issue one today, so a Lightning Address it is.
+     *
+     * Policy-wise this is the Ko-fi link again: an external hand-off that
+     * unlocks nothing, grants nothing, and involves no Play Billing.
+     *
+     * @param noWallet the second state, entered when the intent found nothing
+     *   to open. Never a dead end: the address stays, a QR appears for a phone
+     *   that does have a wallet, and the web page is one tap away.
+     */
+    private fun showLightningTip(noWallet: Boolean = false) {
+        clearScreen()
+        screen = "lntip"
+        val back = { if (lnFromAbout) showAbout() else afterSession() }
+        swipeNav(back = back, forward = null)
+
+        val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+        val col = column(scroll = true).apply { gravity = Gravity.CENTER_HORIZONTAL }
+        col.addView(backLink { back() })
+
+        // The same glyph as the row that got you here, at size — and it takes
+        // the same zap when you press the button.
+        val bolt = IconView(this, "bolt", behind = Hue.BG, tint = Hue.SKY).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).also {
+                it.topMargin = dp(10)
+                it.gravity = Gravity.CENTER_HORIZONTAL
+            }
+        }
+        col.addView(bolt)
+        col.addView(heading(
+            "Lightning tip",
+            "Opens your Lightning wallet. No account, and the sats go straight " +
+                "to Tawny.",
+            center = true,
+        ))
+
+        if (!noWallet) {
+            col.addView(pill("Open in wallet", Hue.ON_ACCENT, Hue.SKY, Hue.SKY) {
+                bolt.strike(animScale)
+                openLightning()
+            })
+        } else {
+            col.addView(body(
+                "No Lightning wallet on this phone. Copy the address into one, " +
+                    "or scan this from a phone that has one.",
+                maxW = 320,
+            ))
+        }
+
+        col.addView(TextView(this).apply {
+            text = LN_ADDRESS
+            typeface = Typeface.MONOSPACE
+            textSize = 14f
+            setTextColor(Hue.TEXT)
+            gravity = Gravity.CENTER
+            letterSpacing = 0.02f
+            setTextIsSelectable(true)
+            background = roundRect(Hue.PANEL, Hue.LINE, Radius.CARD)
+            setPadding(dp(14), dp(13), dp(14), dp(13))
+            layoutParams = lp(topMargin = 18)
+        })
+        col.addView(link("Copy address") {
+            copyToClipboard("Tawny Lightning address", LN_ADDRESS)
+            toast("Copied $LN_ADDRESS")
+        })
+
+        if (noWallet) {
+            val qr = ImageView(this).apply {
+                val s = dp(190)
+                layoutParams = LinearLayout.LayoutParams(s, s).also {
+                    it.topMargin = dp(6)
+                    it.gravity = Gravity.CENTER_HORIZONTAL
+                }
+            }
+            col.addView(qr)
+            // Encoding is not free and this is a plain navigation, so keep it
+            // off the UI thread like the pairing QR does.
+            io.execute {
+                val bmp = try { qrBitmap(LN_URI, 480) } catch (e: Exception) { null }
+                runOnUiThread { if (bmp != null && qr.isAttachedToWindow) qr.setImageBitmap(bmp) }
+            }
+            col.addView(link("Open strike.me in a browser") { openExternal(LN_WEB_URL) })
+        }
+
+        col.addView(body(
+            "Tipping unlocks nothing — no badge, no features, nothing. It goes " +
+                "towards the relay that lets you watch from outside the house.",
+            maxW = 320,
+        ))
+        col.addView(gap(16))
+
+        scroll.addView(col)
+        root.addView(scroll)
+    }
+
+    /** Hand the tip to a wallet app, or fall back to the no-wallet screen. */
+    private fun openLightning() {
+        try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(LN_URI))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: android.content.ActivityNotFoundException) {
+            Diag.log("shell", "lightning: nothing registered for $LN_URI")
+            showLightningTip(noWallet = true)
+        } catch (e: Exception) {
+            copyToClipboard("Tawny Lightning address", LN_ADDRESS)
+            toast("Couldn't open a wallet — address copied")
+        }
     }
 
     // -------------------------------------------------------- welcome
@@ -3158,10 +3324,19 @@ private class IconView(
     private val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = tint }
     private val cut = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = behind }
     private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = tint }
+    /** The strike's bloom — an expanding ring of the glyph's own colour. */
+    private val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = tint }
+    /** ...and the glyph washing toward the surface behind it, so the flash
+     *  reads the same on white card stock as it does on brushed leather. */
+    private val wash = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = behind }
 
     /** Glyph scale about its own centre; 1f at rest. Driven by [beat]. */
     private var pulse = 1f
-    private var beatAnim: ValueAnimator? = null
+    /** 0..1 strike intensity; 1f at the instant of the zap. Driven by [strike]. */
+    private var flash = 0f
+    /** Sideways jitter in 48-box units, also [strike]'s. */
+    private var jolt = 0f
+    private var pressAnim: ValueAnimator? = null
 
     /**
      * React to a press.
@@ -3175,12 +3350,13 @@ private class IconView(
      */
     fun beat(strong: Boolean, scale: Float) {
         if (scale <= 0f) return
-        beatAnim?.cancel()
+        pressAnim?.cancel()
+        flash = 0f; jolt = 0f
         // Interpolated evenly through the keyframes: swell, relax, smaller
         // swell, settle — the shape of a heartbeat rather than a bounce.
         val frames = if (strong) floatArrayOf(1f, 1.28f, 1.03f, 1.15f, 1f)
                      else floatArrayOf(1f, 1.11f, 1f)
-        beatAnim = ValueAnimator.ofFloat(*frames).apply {
+        pressAnim = ValueAnimator.ofFloat(*frames).apply {
             duration = ((if (strong) 520 else 260) * scale).toLong()
             interpolator = LinearInterpolator()
             addUpdateListener { pulse = it.animatedValue as Float; invalidate() }
@@ -3188,9 +3364,54 @@ private class IconView(
         }
     }
 
+    /**
+     * The lightning row's press — one zap, and it is over.
+     *
+     * Deliberately nothing like [beat] or the label's wipe. Where the heart
+     * swells (a *slow* thing getting bigger) this is fast and it does not
+     * change size at all: the glyph blooms and shakes in place, then is still.
+     * Three parts on one 380ms timeline:
+     *
+     *  - ATTACK. `flash` goes 0→1 in the first 9% — about one frame — because a
+     *    strike that ramps in is a glow, not a strike. The decay is a squared
+     *    falloff over the rest, which is the shape light actually leaves at.
+     *  - BLOOM. A ring of the glyph's own colour, drawn *behind* the bolt,
+     *    starting tight and expanding as it fades. At the same time the bolt is
+     *    over-painted with the surface colour behind it, so it blinks out
+     *    toward the card rather than toward white — the same read in the light
+     *    palette and the dark one, which a white core flash would not give.
+     *  - JOLT. Two damped sideways oscillations of under 2 units, done by 40%
+     *    through. Enough to feel struck; not enough to look broken.
+     *
+     * These rows sit below the fold under a live session list and an animated
+     * scene, so the whole thing is small, single-shot, and over in a third of a
+     * second. Scaled by the animator setting like everything else; 0 does
+     * nothing at all.
+     */
+    fun strike(scale: Float) {
+        if (scale <= 0f) return
+        pressAnim?.cancel()
+        pulse = 1f
+        pressAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = (380 * scale).toLong()
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                val p = it.animatedValue as Float
+                flash = if (p < 0.09f) p / 0.09f else {
+                    val q = (1f - p) / 0.91f
+                    q * q
+                }
+                jolt = if (p >= 0.42f) 0f
+                       else sin(p * 15.0f) * 1.7f * (1f - p / 0.42f)
+                invalidate()
+            }
+            start()
+        }
+    }
+
     override fun onDetachedFromWindow() {
-        beatAnim?.cancel()
-        beatAnim = null
+        pressAnim?.cancel()
+        pressAnim = null
         super.onDetachedFromWindow()
     }
 
@@ -3223,6 +3444,34 @@ private class IconView(
                 }
                 canvas.drawPath(h, body)
                 canvas.drawCircle(17.5f, 17f, 2.4f, cut)         // shine
+            }
+            "bolt" -> {
+                // Lightning — the Bitcoin/Lightning tip row. Same construction
+                // as the heart: one filled path in `body`, one `cut` detail.
+                if (jolt != 0f) canvas.translate(jolt, 0f)
+                val b = Path().apply {
+                    moveTo(30f, 3.5f)      // apex
+                    lineTo(11.5f, 26.5f)   // down the leading edge
+                    lineTo(22f, 26.5f)     // inner notch
+                    lineTo(18f, 44.5f)     // bottom tip
+                    lineTo(36.5f, 21.5f)
+                    lineTo(26f, 21.5f)
+                    close()
+                }
+                if (flash > 0f) {
+                    // Tight at the peak, expanding as it fades.
+                    halo.alpha = (100f * flash).toInt()
+                    canvas.drawCircle(23f, 24f, 8f + 17f * (1f - flash), halo)
+                }
+                canvas.drawPath(b, body)
+                canvas.drawPath(Path().apply {                   // rim highlight
+                    moveTo(28.4f, 9f); lineTo(24.8f, 19f)
+                    lineTo(22.6f, 19f); lineTo(26.6f, 9f); close()
+                }, cut)
+                if (flash > 0f) {
+                    wash.alpha = (150f * flash).toInt()
+                    canvas.drawPath(b, wash)
+                }
             }
             "info" -> {
                 canvas.drawCircle(24f, 24f, 20f, body)

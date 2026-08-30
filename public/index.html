@@ -192,9 +192,45 @@
     Video and audio travel straight between your devices. The server only
     introduces them, and never learns a channel key.
     <br>
-    Tawny is free and unlocks nothing for money.
-    <a href="https://ko-fi.com/tawnyone" target="_blank" rel="noopener noreferrer"
-      >Support Tawny</a> to help pay for the relay.
+    Tawny is free and unlocks nothing for money — chipping in only helps pay for
+    the relay.
+
+    <!-- Hand-rolled, first-party buttons. The official Ko-fi widget is a
+         third-party <script> plus an inline init, and this page runs inside the
+         WebView that also owns the TawnyNative bridge under a strict
+         `script-src 'self'` CSP (SECURITY.md, "WebView hardening"). Loading it
+         would mean allowing a remote origin and 'unsafe-inline' in there — a
+         real regression to buy a button we can draw ourselves. -->
+    <span class="tips">
+      <a class="tip tip-kofi" href="https://ko-fi.com/tawnyone"
+         target="_blank" rel="noopener noreferrer">
+        <span class="tip-mark">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 7.3C9.1 5.3 8.5 3.9 9.3 3c.6-.7 1.8-.5 2.7.6.9-1.1 2.1-1.3 2.7-.6.8.9.2 2.3-2.7 4.3z"/>
+            <path d="M3.8 9.2h12.4v6.6a4.8 4.8 0 0 1-4.8 4.8H8.6a4.8 4.8 0 0 1-4.8-4.8z"/>
+            <path d="M16.7 10.6h1.1a3.2 3.2 0 0 1 0 6.4h-1.1v-2h1a1.2 1.2 0 0 0 0-2.4h-1z"/>
+            <path d="M3.1 21.1h13.8a.85.85 0 0 1 0 1.7H3.1a.85.85 0 0 1 0-1.7z"/>
+          </svg>
+        </span>
+        <span class="tip-label">
+          <span class="tip-base">Support Tawny on Ko-fi</span>
+          <span class="tip-alt" aria-hidden="true">ko-fi.com</span>
+        </span>
+      </a>
+
+      <a class="tip tip-bolt" href="https://strike.me/@loustrikes"
+         target="_blank" rel="noopener noreferrer">
+        <span class="tip-mark">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M15 1.8 5.8 13.2h5.2L9 22.2l9.2-11.4H13z"/>
+          </svg>
+        </span>
+        <span class="tip-label">
+          <span class="tip-base">Tip in Bitcoin</span>
+          <span class="tip-alt" aria-hidden="true">strike.me</span>
+        </span>
+      </a>
+    </span>
   </footer>
 </main>
 

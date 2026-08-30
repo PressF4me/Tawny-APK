@@ -31,6 +31,7 @@
   --berry:   #d24b6d;   /* strawberry — primary accent */
   --berry-d: #a83c58;
   --sky:     #5b93b8;   /* secondary accent */
+  --sky-d:   #41708f;   /* ...and its deeper fill, the --berry-d of the sky */
   --live:    #d8452f;
   --stage:   #0c0d12;   /* live-video ground — always dark */
   --blush:   #fdecef;   /* faint top-of-page glow (light only) */
@@ -66,6 +67,7 @@
     --berry:   #c79b64;   /* aged brass / tan — the primary accent in dark mode */
     --berry-d: #a67f4c;
     --sky:     #a6b489;   /* muted sage */
+    --sky-d:   #8a9770;
     --live:    #db5a4a;
     --on-accent: #191410;
     --blush:   transparent;
@@ -82,6 +84,7 @@
   --berry:   #c79b64;
   --berry-d: #a67f4c;
   --sky:     #a6b489;
+  --sky-d:   #8a9770;
   --live:    #db5a4a;
   --on-accent: #191410;
   --blush:   transparent;
@@ -211,13 +214,167 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .fine { color: var(--dim); font-size: 11.5px; margin: 0; }
 
-/* The only anchor in the app, so it had no styling at all and rendered as
-   default browser blue-and-underline in the middle of a warm palette. */
-.fine a {
+/* Running-text links in the fine print. It used to be the only anchor in the
+   app, so it had no styling at all and rendered as default browser
+   blue-and-underline in the middle of a warm palette. The tip buttons below
+   are anchors too, and are styled as buttons instead — hence the :not(). */
+.fine a:not(.tip) {
   color: var(--berry);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* --------------------------------------------------------- tip buttons
+ *
+ * Ko-fi and Lightning, drawn locally.
+ *
+ * NOT the official Ko-fi widget. That is a remote <script> from
+ * storage.ko-fi.com plus an inline `kofiwidget2.init(...)` call, and this page
+ * ships inside the WebView that also owns the TawnyNative JS bridge under
+ * `default-src 'none'; script-src 'self'` (see SECURITY.md, "WebView
+ * hardening"). Dropping it in means allowing a third-party origin AND
+ * 'unsafe-inline' in the one document where a script injection reaches native
+ * code — an actual security regression, traded for a button. So: two anchors,
+ * an inline SVG mark each, and our own palette.
+ *
+ * If someone later builds a real hosted marketing page, outside the app and
+ * outside this CSP, the official widget's parameters are:
+ *   brand blue #72a4f2, widget/page id A6N425ZWFE, script Widget_2.js.
+ * Do not bring any of that back in here.
+ *
+ * The motion is the native app's, ported: the fill sweeps left-to-right from a
+ * scaleX(0) origin and a second label is revealed under it in lockstep — the
+ * CSS twin of MainActivity's WipeLabel, down to sizing the label box to the
+ * wider of the two strings so nothing reflows. On press each mark then plays
+ * its own character, exactly as IconView does: the Ko-fi heart double-thumps
+ * (beat()), the bolt takes one hard zap with a bloom behind it (strike()).
+ * The global prefers-reduced-motion block above collapses all of it.
+ */
+
+.tips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.tip {
+  --tip: var(--berry);
+  --tip-deep: var(--berry-d);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 15px;
+  border: 1px solid var(--tip);
+  border-radius: 11px;   /* the app's CONTROL radius */
+  color: var(--tip-deep);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tip-bolt { --tip: var(--sky); --tip-deep: var(--sky-d); }
+
+/* The wipe. Covers the resting label; the revealed one rides on top of it. */
+.tip::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--tip-deep);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform .3s cubic-bezier(.15, .75, .3, 1);
+}
+
+.tip:hover::before,
+.tip:focus-visible::before,
+.tip:active::before { transform: scaleX(1); }
+
+.tip-mark {
+  position: relative;
+  z-index: 2;          /* the mark stays legible on top of the fill */
+  display: inline-flex;
+  width: 17px;
+  height: 17px;
+  transition: color .14s ease-out;
+}
+
+.tip-mark svg { width: 100%; height: 100%; fill: currentColor; }
+
+.tip:hover .tip-mark,
+.tip:focus-visible .tip-mark,
+.tip:active .tip-mark { color: var(--on-accent); }
+
+/* Both strings share one grid cell, so the button is sized by the wider of
+   them and the swap never moves anything. */
+.tip-label {
+  position: relative;
+  display: inline-grid;
+  white-space: nowrap;
+}
+
+.tip-base, .tip-alt { grid-area: 1 / 1; }
+.tip-base { position: relative; z-index: 0; }
+
+.tip-alt {
+  position: relative;
+  z-index: 2;
+  color: var(--on-accent);
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path .3s cubic-bezier(.15, .75, .3, 1);
+}
+
+.tip:hover .tip-alt,
+.tip:focus-visible .tip-alt,
+.tip:active .tip-alt { clip-path: inset(0 0 0 0); }
+
+.tip:focus-visible { outline: 2px solid var(--tip); outline-offset: 2px; }
+
+/* The press. One shot each, in character — see IconView.beat / IconView.strike. */
+@keyframes tip-beat {
+  0%   { transform: scale(1); }
+  22%  { transform: scale(1.28); }
+  45%  { transform: scale(1.03); }
+  68%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+@keyframes tip-zap {
+  0%   { transform: translateX(0);      opacity: 1; }
+  7%   { transform: translateX(1.7px);  opacity: .3; }
+  18%  { transform: translateX(-1.5px); opacity: .55; }
+  30%  { transform: translateX(1px);    opacity: .76; }
+  42%  { transform: translateX(0);      opacity: .9; }
+  100% { transform: translateX(0);      opacity: 1; }
+}
+
+/* ...and the bloom the bolt leaves behind it. */
+.tip-mark::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  /* the lighter accent over the deeper fill, so it blooms bright in both
+     palettes — currentColor would go near-black under the dark theme */
+  background: var(--tip);
+  opacity: 0;
+  pointer-events: none;
+}
+
+@keyframes tip-bloom {
+  0%   { transform: scale(.55); opacity: .45; }
+  100% { transform: scale(2);   opacity: 0; }
+}
+
+.tip-kofi:active .tip-mark svg { animation: tip-beat .52s linear; }
+.tip-bolt:active .tip-mark svg { animation: tip-zap .38s linear; }
+.tip-bolt:active .tip-mark::after { animation: tip-bloom .38s ease-out; }
 
 /* ------------------------------------------------------------- live */
 
