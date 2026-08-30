@@ -4,7 +4,8 @@ _Written 2026-08-29. Audience: Opus, who owns the changes. This points a
 direction; it is not a task list to follow literally. Nothing here was
 implemented — every item is Opus's call to scope, sequence, and revise._
 
-Tawny today: v0.2.0 / code 9. Native Kotlin shell (`MainActivity.kt`, ~3250 LOC,
+Tawny when this was written: v0.2.0 / code 9 (now v0.3.1 / code 11, targetSdk 36).
+Native Kotlin shell (`MainActivity.kt`, ~3250 LOC,
 all programmatic views) + a WebView web client (`public/`, bundled in the APK)
 that owns the WebRTC stack. Two roles — **Monitor** (stays with the pet, streams
 cam+mic) and **Viewer** (watches, talk-back, chime, snapshot). Pairing is a QR /
