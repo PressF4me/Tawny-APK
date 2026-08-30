@@ -74,7 +74,7 @@
      browser build. */
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
-  /* hairline between the five live-view control buttons; sits on --panel */
+  /* hairline around the live-view control keys; sits on --panel */
   --ctl-line: #e6dad3;
 }
 
@@ -867,8 +867,30 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* a muted mic is a warning, not a preference */
 #btn-mute[aria-pressed="true"] { --acc: var(--live); --acc-d: var(--live); }
 
+/* The monitor's light. --alert is the one warm amber that is fixed in both
+   palettes, which is what a lit LED should read as — and it stays clear of the
+   berry/brass every other key borrows. The beam only exists while the light
+   does, the same trick #btn-mute plays with its slash. */
+#btn-torch { --acc: var(--alert); --acc-d: var(--alert); }
+.ctl .ico .beam { display: none; }
+.ctl[aria-pressed="true"] .ico .beam { display: block; }
+
 .ctl:disabled { opacity: .35; cursor: default; }
 .ctl:disabled .ico { transform: none; }
+
+/* Unavailable rather than disabled: the monitor's camera has no light, or it
+   is on its front lens. The key looks inert but still takes the tap, because
+   the tap is what surfaces the one-line reason (see updateTorchUI) — a key
+   that silently swallows the press is how a control comes to look broken. */
+.ctl.is-unavailable { opacity: .35; }
+.ctl.is-unavailable:hover { color: var(--dim); }
+.ctl.is-unavailable:hover .ico::before { background: var(--raise); }
+.ctl.is-unavailable:active .ico { transform: none; }
+.ctl.is-unavailable:active .ico::before {
+  background: var(--raise);
+  border-color: var(--ctl-line);
+}
+.ctl.is-unavailable:active .ico::after { animation: none; }
 
 /* held: hold-to-talk. Filled in --live, and a slow halo behind the plate says
    the microphone is open without moving anything but a scale and an alpha. */
@@ -1075,6 +1097,15 @@ body.dimmed #theme-toggle { display: none; }
   border-radius: 2px;
   font-size: 12px;
   max-width: min(90vw, 420px);
+}
+
+/* The Viewer's row carries six keys now that the monitor's light is one of
+   them. On a small handset that is about 55px a key, so the labels give up a
+   little tracking rather than wrapping the row to two lines. */
+@media (max-width: 400px) {
+  .controls { gap: 2px; }
+  .ctl { font-size: 10.5px; letter-spacing: .02em; }
+  .ctl .ico { max-width: 52px; }
 }
 
 @media (min-width: 720px) {

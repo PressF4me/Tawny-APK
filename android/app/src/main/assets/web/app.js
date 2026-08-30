@@ -54,6 +54,9 @@ const S = {
   wake: null, meterStop: null, ac: null, closing: false, dimmed: false,
   editing: null, scanStop: null, pending: null,
   featured: null,
+  // Torch. On the Monitor these are the truth; on a Viewer they are the last
+  // thing the Monitor said, and nothing else is ever rendered.
+  torchOn: false, torchSupported: false, torchFacing: null, torchTimer: null,
   cameras: [], cameraIndex: 0, zoomLevel: 1.0, zoomHardware: false, stationZoomSupported: false
 };
 
@@ -92,6 +95,16 @@ const POWER = {
   captureFps: 15,
   meterHz: 4
 };
+
+// How long the Monitor's light stays on before it gives up on being needed.
+//
+// The torch is by a wide margin the most expensive thing this app can ask of
+// the Monitor: an LED at full current, and the heat it dumps into a phone that
+// is already holding a camera open and encoding video for hours on a charger.
+// Someone who lights the room to check on the pet is looking for ten seconds,
+// not all night — so a light nobody turned back off turns itself off, and every
+// Viewer's key updates to match.
+const TORCH_MAX_MS = 5 * 60 * 1000;
 
 // --------------------------------------------------------------- storage
 
@@ -1209,6 +1222,16 @@ function removePeer(id) {
     el.remoteAudio.srcObject = null;
     el.remote.hidden = true;
     el.loader.hidden = false;
+    // Nothing is authoritative any more, so the key goes inert rather than
+    // sitting lit over a stream that is gone.
+    S.torchOn = false;
+    S.torchSupported = false;
+    updateTorchUI();
+  }
+  // Monitor: the last Viewer left. Nobody is looking, so nothing justifies
+  // holding an LED on in an empty room.
+  if (S.role === 'station' && S.torchOn && !viewerCount()) {
+    setTorch(false, 'no viewers left');
   }
   retuneAll();
   updatePeerChip();
@@ -1431,6 +1454,25 @@ async function handle(m, entry) {
       }
       break;
     }
+    case 'torch': {
+      if (S.role === 'station') {
+        // Peer-controlled, and it drives hardware. Only a real boolean does
+        // anything, and it is rate-limited the same way the lens command is so
+        // a Viewer cannot strobe the Monitor's LED.
+        if (typeof m.on !== 'boolean') break;
+        const now = Date.now();
+        if (now - (handle._torchAt || 0) < 400) break;
+        handle._torchAt = now;
+        setTorch(m.on, `viewer ${m.from}`);
+        break;
+      }
+      // Viewer: the Monitor is authoritative. Render this, nothing else.
+      S.torchOn = !!m.on;
+      S.torchSupported = !!m.supported;
+      S.torchFacing = typeof m.facing === 'string' ? m.facing : null;
+      updateTorchUI();
+      break;
+    }
     case 'bye':
       removePeer(m.from);
       if (!S.peers.size) status(S.role === 'viewer' ? 'Call ended' : 'Waiting', null);
@@ -1635,6 +1677,12 @@ async function answerPeer(peer, sdp) {
   if (S.role === 'station' && S.channel?.name) {
     sig({ type: 'meta', petName: S.channel.name, to: peer.id }, peer);
   }
+  // And the light: a Viewer joining a session where the room is already lit
+  // must show a lit key, not an "off" one over an obviously lit picture.
+  if (S.role === 'station') {
+    S.torchSupported = torchCapable();
+    sig({ ...torchState(), to: peer.id }, peer);
+  }
 }
 
 // Per-Handheld uplink budget. One encode per viewer on a mid-range phone, so the
@@ -1701,6 +1749,127 @@ function retuneAll() {
   for (const p of viewerPeers()) tuneVideoSender(p);
 }
 
+// ------------------------------------------------------------------ torch
+//
+// The person watching from the other room can turn the Monitor phone's camera
+// light on to see a pet in the dark. It is driven as a constraint on the very
+// video track WebRTC is already sending — never a second getUserMedia and
+// never the native CameraManager — so there is nothing for it to collide with:
+// the camera is already open, and the light is one more knob on it.
+//
+// Every phone disagrees about whether that knob exists. Front cameras almost
+// never have it, plenty of rear ones don't expose it to the browser, and the
+// emulator has no LED at all. So the Monitor is the only thing that decides:
+// it reads `getCapabilities().torch` off the live track and broadcasts an
+// authoritative {on, supported, facing} to every Viewer. A Viewer never
+// guesses, never assumes, and renders only what it was told.
+
+const localVideoTrack = () => S.local?.getVideoTracks?.()[0] || null;
+
+/** Does the track we are *currently sending* expose a controllable light? */
+function torchCapable() {
+  const t = localVideoTrack();
+  if (!t || t.readyState !== 'live') return false;
+  try { return t.getCapabilities?.().torch === true; } catch { return false; }
+}
+
+const torchState = () => ({
+  type: 'torch', on: S.torchOn, supported: S.torchSupported, facing: S.facing
+});
+
+function broadcastTorch() {
+  if (S.role !== 'station') return;
+  for (const p of viewerPeers()) sig({ ...torchState(), to: p.id }, p);
+}
+
+/** Re-read the capability off the live track and tell everyone watching. */
+function refreshTorchSupport() {
+  if (S.role !== 'station') return;
+  S.torchSupported = torchCapable();
+  if (!S.torchSupported) S.torchOn = false;
+  broadcastTorch();
+}
+
+/**
+ * Push the light constraint at the live track.
+ *
+ * `advanced` is the only form Chromium honours for torch, and this is kept a
+ * *separate* applyConstraints call from the resolution/framerate one on
+ * purpose — applyConstraints replaces the whole constraint set it is given, so
+ * folding the two together means whichever ran last wins and the other is lost.
+ */
+async function pushTorch(on) {
+  const t = localVideoTrack();
+  if (!t) return false;
+  try { await t.applyConstraints({ advanced: [{ torch: !!on }] }); return true; }
+  catch (e) { diag(`torch apply failed: ${e && e.name}`); return false; }
+}
+
+async function setTorch(on, why) {
+  if (S.role !== 'station') return;
+  on = !!on;
+  clearTimeout(S.torchTimer);
+  S.torchTimer = null;
+  S.torchSupported = torchCapable();
+  if (on && !S.torchSupported) { S.torchOn = false; broadcastTorch(); return; }
+  // Turning it *off* is still attempted when the capability has already gone
+  // with the track — a stale "on" must never be the last thing a Viewer was
+  // told, and a failed off must never latch. But on a phone whose camera has
+  // no light and that we never lit, there is physically nothing to put out;
+  // pushing anyway just earns an OverconstrainedError in the diagnostics on
+  // every single session end, which is noise that hides real faults.
+  const worthPushing = on || S.torchOn || S.torchSupported;
+  const ok = worthPushing ? await pushTorch(on) : false;
+  S.torchOn = on && ok;
+  if (S.torchOn) {
+    S.torchTimer = setTimeout(() => {
+      setTorch(false, 'auto-off');
+      toast('Light turned off to save the battery.');
+    }, TORCH_MAX_MS);
+  }
+  diag(`torch ${S.torchOn ? 'on' : 'off'}${why ? ` (${why})` : ''}`);
+  broadcastTorch();
+}
+
+/**
+ * Dim mode re-constrains this same track (see setDim) to drop the capture to
+ * the power budget — and, per the note in pushTorch, that call replaces the
+ * whole constraint set including `advanced`. Without re-asserting here the
+ * light went out the moment the Monitor dozed. Torch has nothing to do with
+ * screen brightness and should keep burning while the phone's panel is black.
+ */
+async function reassertTorch() {
+  if (S.role === 'station' && S.torchOn) await pushTorch(true);
+}
+
+/** The one-line reason the key is inert, in the user's terms rather than ours. */
+function torchHint() {
+  if (!stationPeer()) return 'No monitor connected yet.';
+  if (S.torchFacing === 'user') return 'Switch the monitor to its back camera.';
+  return "The monitor's camera has no light.";
+}
+
+function updateTorchUI() {
+  const btn = $('#btn-torch');
+  if (!btn || S.role !== 'viewer') return;
+  const ok = !!S.torchSupported;
+  // Deliberately not the `disabled` attribute: an inert key that swallows the
+  // tap leaves the user with no way to find out *why* it is inert, which is
+  // exactly how a control comes to look broken. It wears the disabled styling
+  // and answers with the reason when pressed.
+  btn.classList.toggle('is-unavailable', !ok);
+  btn.setAttribute('aria-disabled', ok ? 'false' : 'true');
+  press(btn, ok && S.torchOn);
+  btn.querySelector('span:last-child').textContent =
+    ok && S.torchOn ? 'Light on' : 'Light';
+  btn.title = ok ? '' : torchHint();
+}
+
+// The native shell ends sessions by its own route too (the "End the call?"
+// dialog, onDestroy). Releasing the camera drops the light with it, but this
+// is the explicit off so nothing rests on that side effect.
+window.tawnyTorchOff = () => { setTorch(false, 'native shell'); };
+
 // --------------------------------------------------------- zoom & lens
 
 async function enumerateCameras() {
@@ -1755,6 +1924,9 @@ function applyDigitalZoomViewer(level) {
 async function switchLens(index) {
   const cam = S.cameras[index];
   if (!cam) return;
+  // Same rule as the flip: the light belongs to the lens that is open, so it
+  // goes out before that lens does and is re-derived for the new one.
+  await setTorch(false, 'lens switch');
   try {
     const ns = await navigator.mediaDevices.getUserMedia({
       video: { deviceId: { exact: cam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -1773,6 +1945,7 @@ async function switchLens(index) {
     S.cameraIndex = index;
     S.zoomLevel = 1.0;
     updateLensUI();
+    refreshTorchSupport();
   } catch { toast('Could not switch lens.'); }
 }
 
@@ -1907,6 +2080,14 @@ async function start(role) {
   }
 
   S.captureLost = false;
+  // A fresh session starts dark on both sides. The Monitor works out whether
+  // its camera even has a light once the track is live; the Viewer waits to be
+  // told and shows the key inert until it is.
+  S.torchOn = false;
+  S.torchSupported = role === 'station' && torchCapable();
+  S.torchFacing = null;
+  clearTimeout(S.torchTimer);
+  S.torchTimer = null;
   watchLocalTracks();
 
   audioCtx(); // the tap that got us here also unlocks chime playback
@@ -1939,6 +2120,7 @@ async function start(role) {
     for (const t of S.local.getAudioTracks()) t.enabled = false; // push-to-talk
     el.cViewer.hidden = false;
     el.cStation.hidden = true;
+    updateTorchUI();
   }
 
   // Rail label: the room name the user gave, with "monitor" appended.
@@ -1967,7 +2149,14 @@ function onCaptureLost(why) {
   S.captureLost = true;
   diag(`capture lost (${why})`);
   status('Paused — screen off', 'warn');
+  // The camera has been taken back, so the light went with it. Say so, or every
+  // Viewer keeps a lit key over a room that is now dark.
+  clearTimeout(S.torchTimer);
+  S.torchTimer = null;
+  S.torchOn = false;
+  S.torchSupported = false;
   for (const p of S.peers.values()) sig({ type: 'meta', to: p.id, paused: true }, p);
+  broadcastTorch();
   tellNative('paused', {});
 }
 
@@ -2019,6 +2208,9 @@ async function reacquireLocal() {
     watchLocalTracks();
     S.captureLost = false;
     diag('capture recovered');
+    // A brand-new track: the light is off, and whether it can come back on is
+    // a question about this track, not the dead one.
+    refreshTorchSupport();
     for (const p of S.peers.values()) sig({ type: 'meta', to: p.id, paused: false }, p);
     tellNative('resumed', {});
     updateStatus();
@@ -2042,6 +2234,10 @@ async function keepAwake() {
 function hangUp() {
   S.closing = true;
   setDim(false);   // never leave the live screen with the backlight pinned down
+  // ...and never walk away from a phone with its light still burning. Stopping
+  // the tracks below releases the camera and drops the torch with it; this is
+  // the explicit off, so nothing depends on that side effect.
+  setTorch(false, 'session ended');
   for (const p of S.peers.values()) sig({ type: 'bye', to: p.id }, p);
   teardownAll();
   closeAllSignals();
@@ -2098,6 +2294,18 @@ el.chimes.addEventListener('click', (e) => {
   sig({ type: 'chime', to: sp.id, sound }, sp);
   el.chimes.hidden = true;
   press($('#btn-chime'), false);
+});
+
+$('#btn-torch')?.addEventListener('click', () => {
+  if (S.role !== 'viewer') return;
+  const sp = stationPeer();
+  if (!sp) return toast('No monitor connected yet.');
+  if (!S.torchSupported) return toast(torchHint());
+  const want = !S.torchOn;
+  sig({ type: 'torch', to: sp.id, on: want }, sp);
+  // The press state moves now so the key feels connected to the thumb; the
+  // Monitor's reply lands within a frame or two and is what actually sets it.
+  press($('#btn-torch'), want);
 });
 
 $('#btn-cam').addEventListener('click', async () => {
@@ -2171,6 +2379,10 @@ $('#btn-flip').addEventListener('click', async () => {
   btn.disabled = true;
 
   const want = S.facing === 'environment' ? 'user' : 'environment';
+  // Put the light out on the camera we are about to close. The far side of a
+  // flip is usually the front camera, which has no torch at all, so the state
+  // is re-derived and re-broadcast once the new track is in (below).
+  await setTorch(false, 'camera flip');
   // Free the current camera first. Most phones refuse to open the second
   // camera while the first is still held — which is exactly what made "flip"
   // report "only one camera".
@@ -2206,6 +2418,9 @@ $('#btn-flip').addEventListener('click', async () => {
     const sender = p.pc?.getSenders().find((s) => s.track?.kind === 'video');
     if (sender) { try { await sender.replaceTrack(track); } catch {} }
   }
+  // New camera, new answer to "does this one have a light?" — and S.facing has
+  // moved, so the Viewer's hint can now say which way to flip it back.
+  refreshTorchSupport();
   toast(S.facing === 'user' ? 'Front camera' : 'Rear camera');
   btn.disabled = false;
 });
@@ -2249,6 +2464,9 @@ async function setDim(on) {
         : cameraConstraints());
     } catch {}
   }
+  // That call just replaced the track's whole constraint set, `advanced` and
+  // all. The light is independent of the screen and stays on through a doze.
+  await reassertTorch();
   for (const peer of S.peers.values()) tuneVideoSender(peer);
   diag(`dim ${on ? 'on' : 'off'}`);
 }
