@@ -20,14 +20,12 @@ new_sqlite_classes = ["Room"]
 binding = "RL"
 id = "a8cb27e35c234a54b3a15f5ea6118b76"
 
-# Diagnostic reports from the in-app "Send to Tawny" button. To enable:
-#   wrangler kv namespace create REPORTS
-# then uncomment the two lines below with the printed id and redeploy. While
-# this is commented out, /report just 404s and the app falls back to its
-# share sheet — nothing breaks.
-# [[kv_namespaces]]
-# binding = "REPORTS"
-# id = "PASTE_REPORTS_NAMESPACE_ID"
+# Diagnostic reports from the in-app "Send to Tawny" button. If this binding is
+# removed, /report just 404s and the app falls back to its share sheet — nothing
+# breaks. Also needs the REPORT_KEY secret (see below) for GET /report/pull.
+[[kv_namespaces]]
+binding = "REPORTS"
+id = "d4f70cb39ee04b8f807437e78b021320"
 
 # Atomic per-IP rate limiting. The KV counter below is a read-modify-write
 # against an eventually-consistent store, so a burst walks through it; this
