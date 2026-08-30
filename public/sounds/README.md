@@ -7,37 +7,42 @@ runtime — nothing is streamed and nothing is downloaded at use time.
 
 ## The set
 
-| Slug | File | Length | Source |
-|---|---|---|---|
-| `bark` | `bark.ogg` | 1.6 s | recording — `_src/dog toy - dog.mp3` (3 hits) |
-| `pspsps` | `pspsps.ogg` | 1.5 s | recording — `_src/pspsps cat.ogg` (1.32–2.86 s) |
-| `meow` | `meow.ogg` | 0.8 s | recording — `_src/Meow - cat.ogg` |
-| `goodboy` | `goodboy.ogg` | 0.8 s | recording — `_src/goodboy - dog.mp3` |
-| `bell` | `bell.ogg` | 1.8 s | FM synthesis (no source file) |
+| Slug | Button | File | Length | Source |
+|---|---|---|---|---|
+| `bark` | "Dog toy" | `bark.ogg` | 1.6 s | `_src/dog toy - dog.mp3`, 3 hits |
+| `pspsps` | "Psp psp psp" | `pspsps.ogg` | 1.2 s | `_src/pspspsp - cat.wav`, 0.80–2.05 s, high-passed |
+| `meow` | "Meow" | `meow.ogg` | 1.1 s | `_src/meow - cat.wav`, the 4th meow (5.35–6.40 s) |
+| `goodboy` | "Good boy" | `goodboy.ogg` | 0.8 s | `_src/goodboy - dog.mp3` |
+| `bell` | "Bell" | `bell.ogg` | 1.8 s | FM synthesis (no source file) |
 
 `_src/` holds the original recordings the first four are trimmed and normalised
 from. It is the master copy — edit those, or the trim windows in
 `tools/gen-chimes.sh`, and re-run that script to rebuild the whole set. `_src/`
 is excluded from the APK.
 
-## ⚠️ Licensing — two of the four are not clear to ship
+## Licensing — one clip needs a credit line
 
-| `_src/` file | Origin | Licence | Verdict |
+| `_src/` file | Origin | Licence | Attribution |
 |---|---|---|---|
-| `dog toy - dog.mp3` | Pixabay Sound Effects #5987 (`film-special-effects-dog-toy`) | Pixabay Content License — commercial use OK, no attribution | ✅ ship |
-| `goodboy - dog.mp3` | Pixabay Sound Effects #352699 (`people-good-boy-male-voice-praise`) | Pixabay Content License | ✅ ship |
-| `Meow - cat.ogg` | Wikimedia Commons `File:Meow.ogg`, by Dan Crosby | **CC-BY-SA 3.0** — requires a credit line *and* the clip stays under CC-BY-SA (share-alike) | ⚠️ replace, or add an in-app credit + keep the file offered under CC-BY-SA |
-| `pspsps cat.ogg` | 101soundboards.com (user upload "adekgobiet") | none stated; 101soundboards hosts user uploads with no cleared rights and its terms restrict commercial reuse | 🔴 replace |
+| `dog toy - dog.mp3` | Pixabay Sound Effects #5987 (`film-special-effects-dog-toy`) | Pixabay Content License — commercial OK | not required |
+| `goodboy - dog.mp3` | Pixabay Sound Effects #352699 (`people-good-boy-male-voice-praise`) | Pixabay Content License | not required |
+| `meow - cat.wav` | freesound.org **582745** "Stereo cat complaint" by *itinerantmonk108* | **CC0** | not required |
+| `pspspsp - cat.wav` | freesound.org **654284** "Female calling a cat" by *Jolindi* | **CC BY 4.0** | **required** — see below |
 
-**Pixabay:** its Content License allows use in a commercial app with no
-attribution. You cannot resell the sound as a standalone file or use it to train
-a model — neither applies here. Keep a copy of the download page for your
-records.
+**Pixabay Content License:** fine to bundle in a commercial app, no attribution.
+Cannot be resold as a standalone file or used for ML training — neither applies
+here. Keep the download page for your records.
 
-**Replace `pspsps` and (ideally) `meow`** with CC0: **freesound.org** filtered to
-*License → Creative Commons 0*, or **Pixabay Sound Effects**. Drop the new file
-into `_src/`, update the trim window in `tools/gen-chimes.sh` if needed, re-run
-it, rebuild, commit both copies.
+**CC BY 4.0 (the `pspsps` clip):** shippable, but you must credit the author
+somewhere reachable in the app. Add this to the About screen's credits:
+
+> "Psp psp psp" sound by Jolindi — freesound.org/s/654284/ — CC BY 4.0
+
+Modifying the clip (the trim + high-pass + gain here) is allowed; the credit is
+the only obligation, and unlike CC BY-SA there is no share-alike clause pulling
+anything else in. If you would rather carry no attribution at all, replace
+`_src/pspspsp - cat.wav` with a CC0 alternative (freesound.org filtered to
+*License → Creative Commons 0*) and re-run `tools/gen-chimes.sh`.
 
 ## Format
 

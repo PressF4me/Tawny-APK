@@ -28,21 +28,25 @@ ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libvorbis || {
 enc=(-c:a libvorbis -q:a 3 -ac 1 -ar 32000 -y)
 
 # Trim dead air off both ends, tuck in short fades, level to a consistent
-# loudness, catch peaks. Args before the function name are extra ffmpeg input
-# options (e.g. -ss / -to to cut a segment out of a longer take).
+# loudness, catch peaks. $3 is an optional extra filter chain spliced in before
+# the loudness stage (e.g. a highpass for a quiet, hissy source); the rest of
+# the args are ffmpeg input options (-ss / -to to cut a segment out).
 proc() {
-  local slug="$1" infile="$2"; shift 2
+  local slug="$1" infile="$2" pre="$3"; shift 3
   ffmpeg -hide_banner -loglevel error "$@" -i "$src/$infile" -ac 1 -ar 32000 \
-    -af "areverse,silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.04:detection=peak,afade=t=in:st=0:d=0.025,areverse,silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.03:detection=peak,afade=t=in:st=0:d=0.012,loudnorm=I=-15:TP=-1.5:LRA=11,alimiter=limit=0.92" \
+    -af "areverse,silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.04:detection=peak,afade=t=in:st=0:d=0.025,areverse,silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.03:detection=peak,afade=t=in:st=0:d=0.012,${pre},loudnorm=I=-15:TP=-1.5:LRA=11,alimiter=limit=0.92" \
     "${enc[@]}" "$out/$slug.ogg"
   printf '  %-9s <- %s\n' "$slug" "$infile"
 }
 
 if [ -d "$src" ]; then
-  proc bark    "dog toy - dog.mp3"  -ss 0    -to 1.75
-  proc pspsps  "pspsps cat.ogg"     -ss 1.32 -to 2.86
-  proc meow    "Meow - cat.ogg"
-  proc goodboy "goodboy - dog.mp3"
+  proc bark    "dog toy - dog.mp3"   anull                -ss 0    -to 1.75
+  proc meow    "meow - cat.wav"      anull                -ss 5.35 -to 6.40
+  proc goodboy "goodboy - dog.mp3"   anull
+  # pspsps source is recorded very quietly and is pure sibilance, so roll off
+  # everything below 1.5 kHz before the +40 dB of make-up gain lifts the hum
+  # with it.
+  proc pspsps  "pspspsp - cat.wav"   "highpass=f=1500"    -ss 0.80 -to 2.05
 else
   echo "  (public/sounds/_src/ missing — skipping the recorded clips)" >&2
 fi
