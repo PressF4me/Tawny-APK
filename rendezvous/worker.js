@@ -118,7 +118,7 @@ async function turnCreds(env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors() });
@@ -169,7 +169,7 @@ export default {
       if (!originOk(request, env)) return json({ error: 'forbidden' }, 403, cors());
       const ip = request.headers.get('CF-Connecting-IP') || '';
       if (await rateLimited(env, ip)) return json({ error: 'slow down' }, 429, cors());
-      return postReport(request, env);
+      return postReport(request, env, ctx);
     }
     if (url.pathname === '/report/pull') {
       return pullReports(request, env, url);

@@ -50,7 +50,7 @@ fi
 
 # quick summary: time · version · model · android · first line of the log
 if command -v jq >/dev/null; then
-  jq -r '"  \(.ts)  v\(.v) (\(.c))  \(.model) / Android \(.android)  \(.country)\n    \((.log|split("\n"))[0])"' "$TMP"
+  jq -r '"  \(.ts)  v\(.v) (\(.c))  \(.model) / Android \(.android)\n    \((.log|split("\n"))[0])"' "$TMP"
 else
   echo "  (install jq for a readable summary; raw NDJSON is in $OUT)"
 fi
