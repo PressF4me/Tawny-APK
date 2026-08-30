@@ -47,7 +47,17 @@ patched code** under `wrangler dev`.
 ## `rendezvous-squat.mjs` — the other direction
 
 Proves the key-commitment does not let an attacker permanently claim an *idle*
-room, which would be a worse failure than the bug it fixes. 4/4 locally.
+room, which would be a worse failure than the bug it fixes.
+
+```bash
+node tools/probes/rendezvous-squat.mjs                       # deployed worker
+node tools/probes/rendezvous-squat.mjs ws://127.0.0.1:8787   # wrangler dev
+```
+
+**4/4 against the deployed Worker on 2026-08-29.** If every assertion fails with
+close code `1006`, you are almost certainly pointed at a `wrangler dev` that is
+not running — check the URL it prints on the first line before believing a
+regression.
 
 ## `turn-credentials.mjs` — is TURN actually on?
 

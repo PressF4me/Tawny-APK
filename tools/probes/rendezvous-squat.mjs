@@ -1,7 +1,11 @@
 // Does the new key-commitment let an attacker permanently claim an IDLE room?
 // (i.e. one whose Monitor is not currently connected.) It must not.
 import { webcrypto as crypto } from 'node:crypto';
-const BASE = process.argv[2] || 'ws://127.0.0.1:8787';
+// Default to the deployed Worker, like the other rendezvous probes. It used to
+// default to wrangler dev, so running it with no argument against a machine
+// with no `wrangler dev` up scored 1/4 with every socket closing 1006 — which
+// reads exactly like a real regression and is not one. Pass a URL to override.
+const BASE = process.argv[2] || 'wss://tawny-rendezvous.tawny1.workers.dev';
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
 const sha = async (s) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
 const roomFor = async (k) => (await sha(`tawny-room-v1|${k}`)).slice(0, 32);
