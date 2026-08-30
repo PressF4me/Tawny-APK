@@ -71,6 +71,12 @@ const MAX_PENDING_ICE = 64;
 // How long a Viewer waits for a picture before saying something useful.
 const CONNECT_TIMEOUT_MS = 25000;
 
+// How many times a Monitor re-dials the internet relay after it refuses the
+// room, before calling it unreachable. The refusal is usually this phone's own
+// dropped socket still being counted as a live Monitor; backing off 1, 2, 4, 8,
+// 15, 15s covers roughly the window that takes to clear.
+const STATION_CLOUD_RETRIES = 6;
+
 // ------------------------------------------------------------ power budget
 //
 // The Monitor is a phone left on a charger for hours, often an old handset
@@ -953,7 +959,11 @@ function wsURLFor(base) {
 }
 
 function openSignal(base, tag) {
-  const entry = { tag, ws: null, retry: 0, dead: false };
+  // `retry` counts failures to *reach* the relay and is reset the moment a
+  // socket opens. `refused` counts admissions the relay turned down, which
+  // happen after the socket is open — so it needs its own counter, cleared only
+  // by an actual welcome, or a Monitor bounced by a ghost would re-dial forever.
+  const entry = { tag, ws: null, retry: 0, refused: 0, dead: false };
   S.signals.push(entry);
   const dial = () => {
     if (entry.dead || S.closing) return;
@@ -1003,7 +1013,10 @@ function openSignal(base, tag) {
         return;
       }
       // Membership traffic only — offer/answer/ice would drown the log.
-      if (m.type === 'welcome') diag(`${tag} welcome id=${m.id} peers=${(m.peers || []).length}`);
+      if (m.type === 'welcome') {
+        entry.refused = 0;
+        diag(`${tag} welcome id=${m.id} peers=${(m.peers || []).length}`);
+      }
       else if (m.type === 'peer-joined') diag(`${tag} peer-joined ${m.role || '?'} ${m.id}`);
       else if (m.type === 'peer-left') diag(`${tag} peer-left ${m.id}`);
       handle(m, entry).catch(console.error);
@@ -1012,10 +1025,38 @@ function openSignal(base, tag) {
       diag(`${tag} close ${ev.code}${ev.reason ? ' "' + ev.reason + '"' : ''} retry=${entry.retry}`);
       if (entry.dead || S.closing) return;
 
+      // The relay handed this room to a device that proved the channel key —
+      // the same pairing, on another phone. Terminal, but not a fault, and not
+      // something to retry into: two Monitors racing for one room is exactly
+      // what the code prevents.
+      if (ev.code === 4005) {
+        diag(`${tag} replaced by another monitor on this channel`);
+        closeSignal(entry);
+        if (S.role === 'station') toast('This monitor was taken over by another device.');
+        return;
+      }
+
       // Fatal close codes: for a Handheld (one transport) the session is over;
       // for the Watcher, a bad cloud socket must NOT tear down a healthy LAN one.
       if (ev.code === 4003 || ev.code === 4004 || ev.code === 4008) {
         if (S.role === 'station') {
+          // ...but not immediately fatal on the cloud leg. When this phone's
+          // radio blips, the socket dies without a close handshake and the
+          // relay cannot tell the corpse from a live Monitor for minutes: this
+          // device re-hosting its own room was told 4004 "monitor already
+          // running" by its own ghost, and gave up for good. The ghost clears
+          // on its own, and against a relay that has the owner-reclaim it
+          // clears on the first retry — so back off and try again first.
+          const retryable = tag === 'cloud' && ev.code !== 4003 &&
+            entry.refused < STATION_CLOUD_RETRIES;
+          if (retryable) {
+            if (entry.refused === 0) toast('Reconnecting to the internet relay…');
+            const wait = Math.min(1000 * 2 ** entry.refused++, 15000);
+            diag(`${tag} refused ${ev.code} — retry ${entry.refused}/${STATION_CLOUD_RETRIES} in ${wait}ms`);
+            updateStatus();
+            setTimeout(dial, wait);
+            return;
+          }
           // A dead cloud leg used to be completely silent here: the Monitor sat
           // on its healthy LAN socket showing "Waiting", while every Handheld
           // off the Wi-Fi was being turned away at the relay.
