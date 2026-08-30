@@ -17,8 +17,10 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.Environment
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.provider.Settings
@@ -272,6 +274,10 @@ class MainActivity : AppCompatActivity() {
     private var isLive = false
     /** Dim mode is showing, so the backlight is pinned near-black. */
     private var isDimmed = false
+
+    /** Held for the length of a session; see acquireSessionLocks(). */
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     private var scene: PetSceneView? = null
     private var playScene: PlayfulSceneView? = null   // the animated critters on sessions home
@@ -3253,6 +3259,66 @@ class MainActivity : AppCompatActivity() {
     //  * haptics. The vibrator is the most expensive actuator on the phone per
     //    millisecond of use, and during a session nobody is holding it.
 
+    /**
+     * Keep the CPU and the Wi-Fi radio awake for the length of a session.
+     *
+     * FLAG_KEEP_SCREEN_ON is not enough. On an LCD tablet, dim mode pins the
+     * backlight to almost nothing, the panel goes genuinely dark, and the
+     * platform starts treating the device as idle anyway: nine seconds after
+     * dim was tapped on the T10Pro the relay socket died 1006, every reconnect
+     * failed the same way, and a minute later DNS itself could not resolve a
+     * host. The radio had been parked underneath a session that was still, as
+     * far as the user was concerned, running.
+     *
+     *  * WifiLock — FULL_LOW_LATENCY where it exists, high-performance below —
+     *    stops Wi-Fi power-save from parking the link. Needs no permission.
+     *  * A partial WakeLock keeps the CPU scheduled so the WebRTC and signalling
+     *    threads still run when the screen is dark. This is what WAKE_LOCK is
+     *    for, and why it went back into the manifest.
+     *
+     * Both are Activity-scoped: acquired when a session starts, released the
+     * moment it ends or the Activity is destroyed, so nothing survives the app
+     * being closed and no foreground service is implied. Surviving the screen
+     * being *actually* off is a different problem and still belongs to the
+     * foreground-service / libwebrtc work in docs/DIRECTION.md §1A — this only
+     * stops a session the user can see from having its radio taken away.
+     */
+    private fun acquireSessionLocks() {
+        if (wakeLock == null) {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            wakeLock = runCatching {
+                pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "tawny:session")?.apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }.getOrNull()
+        }
+        if (wifiLock == null) {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            val mode = if (android.os.Build.VERSION.SDK_INT >= 29) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                @Suppress("DEPRECATION") WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            wifiLock = runCatching {
+                wm?.createWifiLock(mode, "tawny:session")?.apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }.getOrNull()
+        }
+        Diag.log("power", "session locks: wake=${wakeLock != null} wifi=${wifiLock != null}")
+    }
+
+    private fun releaseSessionLocks() {
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+        runCatching { wifiLock?.takeIf { it.isHeld }?.release() }
+        val had = wakeLock != null || wifiLock != null
+        wakeLock = null
+        wifiLock = null
+        if (had) Diag.log("power", "session locks released")
+    }
+
     /** Pin the backlight near-black for dim mode, or hand it back to the system. */
     private fun applyDim(on: Boolean) {
         if (isDimmed == on) return
@@ -3333,6 +3399,7 @@ class MainActivity : AppCompatActivity() {
     private fun beginLive() {
         isLive = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        acquireSessionLocks()
         val hz = applyLowRefreshRate()
         Diag.log("power", "live — refresh " + (hz?.let { "→ ${it}Hz" } ?: "already lowest"))
         refreshSystemBars()
@@ -3364,6 +3431,7 @@ class MainActivity : AppCompatActivity() {
         // whose screen is pinned black with no live screen to tap.
         applyDim(false)
         restoreRefreshRate()
+        releaseSessionLocks()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         refreshSystemBars()
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -3418,6 +3486,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         endLive()
+        releaseSessionLocks()   // belt and braces: nothing may outlive the Activity
         stopScanner()
         stopServers()
         scene?.stop()
