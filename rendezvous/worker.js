@@ -18,6 +18,7 @@
 
 export { Room } from './room.js';
 import { privacyResponse } from './privacy.js';
+import { postReport, pullReports } from './reports.js';
 
 const ROOM_RE = /^[a-f0-9]{32}$/;
 const TICKET_RE = /^[A-Za-z0-9_-]{8,64}$/;
@@ -159,6 +160,19 @@ export default {
       const creds = await turnCreds(env);
       if (!creds) return json({ error: 'no turn configured' }, 404, cors());
       return json(creds, 200, cors());
+    }
+
+    // Diagnostic reports from the in-app "Send to Tawny" button. Intake is
+    // rate-limited and origin-checked like the rest; the read side is gated by
+    // a shared key. Both 404 cleanly if the REPORTS KV namespace is unbound.
+    if (url.pathname === '/report' && request.method === 'POST') {
+      if (!originOk(request, env)) return json({ error: 'forbidden' }, 403, cors());
+      const ip = request.headers.get('CF-Connecting-IP') || '';
+      if (await rateLimited(env, ip)) return json({ error: 'slow down' }, 429, cors());
+      return postReport(request, env);
+    }
+    if (url.pathname === '/report/pull') {
+      return pullReports(request, env, url);
     }
 
     if (url.pathname === '/ws') {

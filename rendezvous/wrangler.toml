@@ -20,6 +20,15 @@ new_sqlite_classes = ["Room"]
 binding = "RL"
 id = "a8cb27e35c234a54b3a15f5ea6118b76"
 
+# Diagnostic reports from the in-app "Send to Tawny" button. To enable:
+#   wrangler kv namespace create REPORTS
+# then uncomment the two lines below with the printed id and redeploy. While
+# this is commented out, /report just 404s and the app falls back to its
+# share sheet — nothing breaks.
+# [[kv_namespaces]]
+# binding = "REPORTS"
+# id = "PASTE_REPORTS_NAMESPACE_ID"
+
 # Atomic per-IP rate limiting. The KV counter below is a read-modify-write
 # against an eventually-consistent store, so a burst walks through it; this
 # binding is the real limit and the KV path is only a fallback.
@@ -40,6 +49,8 @@ TURN_MODE = "auto"
 ALLOWED_ORIGINS = ""
 
 # --- secrets (do NOT put these here; use `wrangler secret put NAME`) ----------
+# Read key for GET /report/pull — a long random string:
+#   wrangler secret put REPORT_KEY
 # Preferred — Cloudflare Realtime TURN:
 #   wrangler secret put TURN_KEY_ID
 #   wrangler secret put TURN_API_TOKEN
