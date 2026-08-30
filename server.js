@@ -218,11 +218,15 @@ function json(res, code, obj) {
 /** @type {Map<string, Map<string, import('ws').WebSocket>>} */
 const rooms = new Map();
 const perIP = new Map();
-// room -> { hashT, exp }. Zero-secret admission: the Watcher's {type:'hello'}
-// carries sha256(ticket); a Handheld's hello must carry the matching ticket.
+// room -> { hashT, auth, exp }. Zero-secret admission: the Watcher's
+// {type:'hello'} carries sha256(ticket); a Handheld's hello must carry the
+// matching ticket. `auth` is sha256("tawny-auth-v1|" + channel key) when the
+// Watcher offered it — proof of the key, which this server stores but can never
+// derive, and the only thing that lets a Watcher reclaim its own room.
 // Set REQUIRE_TICKET=off for a bare LAN-style deployment with no tickets.
 const tickets = new Map();
 const sha256hex = (s) => createHash('sha256').update(String(s)).digest('hex');
+const HEX64 = /^[a-f0-9]{64}$/;
 const TICKET_TTL = 24 * 60 * 60_000;
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MSG });
 
@@ -271,24 +275,51 @@ wss.on('connection', (ws, req, ctx) => {
     let rec = tickets.get(room);
     if (rec && Date.now() > rec.exp) { tickets.delete(room); rec = null; }
 
+    if (!rooms.has(room)) rooms.set(room, new Map());
+    const peers = rooms.get(room);
+    const proof = typeof msg.a === 'string' && HEX64.test(msg.a) ? msg.a : null;
+
+    // Capacity first: nothing that gets rejected may change stored state. See
+    // rendezvous/room.js — registering the ticket for a socket that is then
+    // turned away let a caller who knew only the room id re-key the channel on
+    // its way out, locking every paired Handheld to 4008 until the TTL expired.
+    if (peers.size >= MAX_PER_ROOM) return ws.close(4003, 'channel full');
+    let evict = [];
+    if (role === 'station') {
+      const stations = [...peers.values()].filter((p) => p.meta.role === 'station');
+      if (stations.length >= MAX_STATIONS) {
+        // A Watcher whose network dropped is still on the books until the
+        // heartbeat notices. Only the holder of the channel key may take the
+        // room back from it; everyone else keeps getting 4004.
+        if (!(rec?.auth && proof === rec.auth)) return ws.close(4004, 'monitor already running');
+        evict = stations;
+      }
+    }
+
+    let register = null;
     if (role === 'viewer') {
       if (REQUIRE_TICKET && (!rec || sha256hex(msg.t) !== rec.hashT)) return ws.close(4008, 'pairing expired');
     } else { // station
-      if (rec) {
+      if (rec?.auth && proof && proof !== rec.auth) return ws.close(4008, 'wrong channel key');
+      const mayRekey = proof !== null || !rec?.auth;
+      const hashT = typeof msg.hashT === 'string' && HEX64.test(msg.hashT) ? msg.hashT : null;
+      if (hashT && mayRekey) {
+        register = { hashT, auth: proof || rec?.auth || null, exp: Date.now() + TICKET_TTL };
+      } else if (rec) {
         if (sha256hex(msg.t) !== rec.hashT) return ws.close(4008, 'pairing expired');
-      } else if (typeof msg.hashT === 'string' && /^[a-f0-9]{64}$/.test(msg.hashT)) {
-        tickets.set(room, { hashT: msg.hashT, exp: Date.now() + TICKET_TTL });
       } else if (REQUIRE_TICKET) {
         return ws.close(4008, 'no pairing ticket');
       }
     }
 
-    if (!rooms.has(room)) rooms.set(room, new Map());
-    const peers = rooms.get(room);
-    if (peers.size >= MAX_PER_ROOM) return ws.close(4003, 'channel full');
-    if (role === 'station' &&
-        [...peers.values()].some((p) => p.meta.role === 'station')) {
-      return ws.close(4004, 'monitor already running');
+    // Admitted. Only now may the ticket move, or a sitting Watcher be hung up
+    // on — and the evicted peer leaves the map here rather than whenever its
+    // close event lands, so it is not in the welcome we are about to send.
+    if (register) tickets.set(room, register);
+    for (const p of evict) {
+      peers.delete(p.meta.id);
+      for (const peer of peers.values()) send(peer, { type: 'peer-left', id: p.meta.id });
+      p.close(4005, 'replaced by owner');
     }
 
     ws.meta.pending = false;

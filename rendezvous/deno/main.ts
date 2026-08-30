@@ -39,7 +39,9 @@ const list = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
 
 type Peer = { id: string; role: string; ws: WebSocket };
 const rooms = new Map<string, Map<string, Peer>>();
-const tickets = new Map<string, { hashT: string; exp: number }>();
+// `auth` is sha256("tawny-auth-v1|" + channel key): proof the sender holds the
+// key, which this relay stores but can never derive. Older rooms have none.
+const tickets = new Map<string, { hashT: string; auth: string | null; exp: number }>();
 
 const bus = new BroadcastChannel("tawny");
 bus.onmessage = (e) => fanout(e.data, true);
@@ -156,23 +158,50 @@ Deno.serve(async (req) => {
 
   const admit = async (msg: any) => {
     const rec = ticketFor(room);
+    const peers = rooms.get(room) ?? new Map<string, Peer>();
+    rooms.set(room, peers);
+    const proof = typeof msg.a === "string" && HEX64.test(msg.a) ? msg.a : null;
+
+    // Capacity first: nothing that gets rejected may change stored state. See
+    // ../room.js — registering a ticket for a socket that is then turned away
+    // let a caller who knew only the room id re-key the channel on its way out.
+    if (peers.size >= MAX_PER_ROOM) { socket.close(4003, "channel full"); return; }
+    let evict: Peer[] = [];
+    if (role === "station") {
+      const stations = [...peers.values()].filter((p) => p.role === "station");
+      if (stations.length >= MAX_STATIONS) {
+        // A Monitor whose radio dropped can still be on the books here. Only
+        // the holder of the channel key may take the room back from it; every
+        // other caller keeps getting 4004, which is the anti-squat guard.
+        if (!(rec?.auth && proof === rec.auth)) {
+          socket.close(4004, "monitor already running"); return;
+        }
+        evict = stations;
+      }
+    }
+
+    let register: { hashT: string; auth: string | null } | null = null;
     if (role === "viewer") {
       if (!rec || (await sha256hex(msg.t)) !== rec.hashT) { socket.close(4008, "pairing expired"); return; }
     } else {
-      if (rec) {
+      if (rec?.auth && proof && proof !== rec.auth) { socket.close(4008, "wrong channel key"); return; }
+      const mayRekey = proof !== null || !rec?.auth;
+      const hashT = typeof msg.hashT === "string" && HEX64.test(msg.hashT) ? msg.hashT : null;
+      if (hashT && mayRekey) {
+        register = { hashT, auth: proof || rec?.auth || null };
+      } else if (rec) {
         if ((await sha256hex(msg.t)) !== rec.hashT) { socket.close(4008, "pairing expired"); return; }
-      } else if (typeof msg.hashT === "string" && HEX64.test(msg.hashT)) {
-        tickets.set(room, { hashT: msg.hashT, exp: Date.now() + TICKET_TTL });
       } else {
         socket.close(4008, "no pairing ticket"); return;
       }
     }
 
-    const peers = rooms.get(room) ?? new Map<string, Peer>();
-    rooms.set(room, peers);
-    if (peers.size >= MAX_PER_ROOM) { socket.close(4003, "channel full"); return; }
-    if (role === "station" && [...peers.values()].some((p) => p.role === "station")) {
-      socket.close(4004, "monitor already running"); return;
+    // Admitted. Only now may stored state change, or a sitting Monitor go.
+    if (register) tickets.set(room, { ...register, exp: Date.now() + TICKET_TTL });
+    for (const p of evict) {
+      peers.delete(p.id);
+      fanout({ room, kind: "announce", except: p.id, msg: { type: "peer-left", id: p.id } });
+      try { p.ws.close(4005, "replaced by owner"); } catch { /* already gone */ }
     }
 
     joined = true;

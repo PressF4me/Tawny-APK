@@ -133,9 +133,37 @@ export class Room {
 
       // 1. Capacity first — a refused socket must be a no-op.
       if (here.length >= MAX_PER_ROOM) { ws.close(4003, 'channel full'); return; }
-      if (meta.role === 'station' &&
-          here.filter((w) => w.deserializeAttachment()?.role === 'station').length >= MAX_STATIONS) {
-        ws.close(4004, 'monitor already running'); return;
+
+      // The Monitor's own key beats a ghost Monitor.
+      //
+      // A phone whose radio drops loses its socket without a close handshake.
+      // Hibernation keeps that dead socket in getWebSockets() until a ping or
+      // TCP timeout notices — minutes — and for all of that window the same
+      // device, re-hosting the same pairing, was told 4004 "monitor already
+      // running" by its own corpse. Observed in the field: cloud close 1006,
+      // then a hard lockout two minutes later.
+      //
+      // So: a station that *proves the channel key* — sha256("tawny-auth-v1|"
+      // + key), which the relay stores but can never derive — may take its room
+      // back, and the sitting station is closed with 4005 instead. Anyone else
+      // still gets 4004, unchanged: this is strictly `claimed === rec.auth`,
+      // never "the room has no auth on file, so anything goes". A room claimed
+      // by an older shell that stored no auth keeps the old behaviour, because
+      // there the 4004 IS the anti-squat guard.
+      //
+      // The eviction itself is deferred to step 3. Rejections below it must
+      // stay no-ops, and hanging up on the live Monitor for a caller we then
+      // turn away would leave the room with no Monitor at all.
+      let evict = [];
+      if (meta.role === 'station') {
+        const stations = here.filter((w) => w.deserializeAttachment()?.role === 'station');
+        if (stations.length >= MAX_STATIONS) {
+          const proof = typeof msg.a === 'string' && HEX64.test(msg.a) ? msg.a : null;
+          if (!(rec?.auth && proof === rec.auth)) {
+            ws.close(4004, 'monitor already running'); return;
+          }
+          evict = stations;
+        }
       }
 
       // 2. Then prove admission.
@@ -190,14 +218,26 @@ export class Room {
         await this.state.storage.setAlarm(Date.now() + TICKET_TTL_MS + 60_000);
       }
 
+      // The owner reclaim, now that nothing below can reject this socket. A
+      // server-initiated close does not run webSocketClose(), so the departure
+      // is announced here and the evicted sockets are dropped from the peer
+      // list by hand rather than trusted to leave getWebSockets() in time.
+      const gone = new Set(evict);
+      const peers = here.filter((w) => !gone.has(w));
+      for (const w of evict) {
+        const m = w.deserializeAttachment();
+        if (m?.id) for (const p of peers) send(p, { type: 'peer-left', id: m.id });
+        try { w.close(4005, 'replaced by owner'); } catch {}
+      }
+
       const id = hex(crypto.getRandomValues(new Uint8Array(6)));
       ws.serializeAttachment({ id, role: meta.role });
       send(ws, {
         type: 'welcome', id, role: meta.role,
-        peers: here.map((w) => w.deserializeAttachment()).filter(Boolean)
+        peers: peers.map((w) => w.deserializeAttachment()).filter(Boolean)
           .map((m) => ({ id: m.id, role: m.role }))
       });
-      for (const w of here) send(w, { type: 'peer-joined', id, role: meta.role });
+      for (const w of peers) send(w, { type: 'peer-joined', id, role: meta.role });
       return;
     }
 
@@ -221,6 +261,14 @@ export class Room {
   }
 
   async alarm() {
+    // Nothing here can reap a *station* that died without a close handshake:
+    // a hibernating socket that will never speak again is indistinguishable
+    // from the product's whole premise — a Monitor plugged in, left alone, and
+    // silent for hours. Telling them apart would mean an app-level heartbeat on
+    // both ends, i.e. waking that idle phone's radio on a timer forever, to buy
+    // back a window the admission path now handles for free: the owner proves
+    // the channel key and takes the room back (see 4005 above).
+
     // Sweep sockets that connected and never said hello.
     const cutoff = Date.now() - ADMIT_TIMEOUT_MS;
     for (const w of this.state.getWebSockets()) {
