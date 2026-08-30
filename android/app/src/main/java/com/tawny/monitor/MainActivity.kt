@@ -3097,14 +3097,14 @@ private class WipeLabel(
     private val lead = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Hue.ON_ACCENT; alpha = 70
     }
+    private val textW = maxOf(baseP.measureText(base), altP.measureText(alt))
     private var wipe = 0f
     private var anim: ValueAnimator? = null
 
     override fun onMeasure(wSpec: Int, hSpec: Int) {
-        val w = maxOf(baseP.measureText(base), altP.measureText(alt))
         val fm = baseP.fontMetrics
         setMeasuredDimension(
-            resolveSize((w + 1f).toInt(), wSpec),
+            resolveSize((textW + 1f).toInt(), wSpec),
             resolveSize((fm.descent - fm.ascent + 1f).toInt(), hSpec),
         )
     }
@@ -3113,7 +3113,10 @@ private class WipeLabel(
         val by = -baseP.fontMetrics.ascent
         c.drawText(base, 0f, by, baseP)
         if (wipe <= 0f) return
-        val x = wipe * width
+        // Sweep only across the text, plus a rounded cap — not the whole laid-out
+        // width, which in a weighted row would flash the entire slab.
+        val end = textW + height * 0.55f
+        val x = wipe * end
         c.save()
         c.clipRect(0f, 0f, x, height.toFloat())
         val pad = height * 0.12f
