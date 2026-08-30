@@ -1782,6 +1782,20 @@ class MainActivity : AppCompatActivity() {
                 "connection problem, long-press the version number on any screen " +
                 "and send the diagnostics log with it."
         ))
+
+        col.addView(gap(10))
+        // CC BY 4.0 on the "psp psp psp" clip is the only sound licence that
+        // needs a credit; the rest are here so it does not read as an oddity.
+        col.addView(aboutBody(
+            "Chime sounds: “Psp psp psp” is “Female calling a " +
+                "cat” by Jolindi, trimmed and filtered, used under CC BY 4.0 " +
+                "(creativecommons.org/licenses/by/4.0). “Meow” is CC0. " +
+                "The dog-toy and “good boy” sounds are from Pixabay. " +
+                "The bell is synthesised."
+        ))
+        col.addView(link("freesound.org/s/654284") {
+            openExternal("https://freesound.org/s/654284/")
+        })
         col.addView(gap(16))
 
         scroll.addView(col)
