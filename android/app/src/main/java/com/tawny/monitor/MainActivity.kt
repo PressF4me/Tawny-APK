@@ -1058,12 +1058,14 @@ class MainActivity : AppCompatActivity() {
         setOnClickListener { haptic(); onClick() }
     }
 
-    /** One rounded panel grouping the meta rows, hairline-divided. */
+    /** One rounded panel grouping the meta rows, hairline-divided. Sits well
+     *  clear of whatever is above it — it is a change of subject, not another
+     *  item in the same list. */
     private fun metaPanel(vararg rows: View) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = roundRect(Hue.PANEL, Hue.LINE, Radius.CARD)
         clipToOutline = true
-        layoutParams = lp(topMargin = 16)
+        layoutParams = lp(topMargin = 34)
         rows.forEachIndexed { i, r ->
             if (i > 0) addView(View(this@MainActivity).apply {
                 layoutParams = LinearLayout.LayoutParams(MP, dp(1))
@@ -1135,7 +1137,7 @@ class MainActivity : AppCompatActivity() {
         })
         outer.addView(vScroll)
 
-        outer.addView(primary("Send report") {
+        val shareOut = {
             startActivity(
                 Intent.createChooser(
                     Intent(Intent.ACTION_SEND).apply {
@@ -1146,7 +1148,23 @@ class MainActivity : AppCompatActivity() {
                     "Send Tawny diagnostics"
                 )
             )
-        })
+        }
+        if (BuildConfig.RENDEZVOUS_URL.isNotBlank()) {
+            outer.addView(primary("Send to Tawny") { sendReport(report, shareOut) })
+            outer.addView(TextView(this).apply {
+                text = "Sends the log above plus this phone's model and Android " +
+                    "version — nothing else. No account, no location."
+                setTextColor(Hue.DIM)
+                textSize = 12.5f
+                typeface = uiFont
+                gravity = Gravity.CENTER
+                setLineSpacing(0f, 1.35f)
+                layoutParams = lp(topMargin = 8, centerH = true).also { it.leftMargin = dp(12); it.rightMargin = dp(12) }
+            })
+            outer.addView(link("Send another way") { shareOut() })
+        } else {
+            outer.addView(primary("Send report") { shareOut() })
+        }
         outer.addView(link("Copy to clipboard") {
             copyToClipboard("Tawny diagnostics", report)
             toast("Copied")
@@ -1161,6 +1179,55 @@ class MainActivity : AppCompatActivity() {
             )
         })
         root.addView(outer)
+    }
+
+    /**
+     * POST the diagnostics log to the rendezvous Worker's /report endpoint,
+     * where it is stacked in KV for the developer to pull. Runs off the UI
+     * thread; on any failure it hands back to [onFail] (the share sheet) so a
+     * report is never simply lost.
+     */
+    private fun sendReport(log: String, onFail: () -> Unit) {
+        val base = BuildConfig.RENDEZVOUS_URL
+            .replaceFirst(Regex("^ws", RegexOption.IGNORE_CASE), "http")
+            .trimEnd('/')
+        if (base.isBlank()) { onFail(); return }
+        toast("Sending…")
+        io.execute {
+            val ok = try {
+                val payload = org.json.JSONObject().apply {
+                    put("v", BuildConfig.VERSION_NAME)
+                    put("c", BuildConfig.VERSION_CODE.toString())
+                    put("model", android.os.Build.MODEL ?: "")
+                    put("android", android.os.Build.VERSION.RELEASE ?: "")
+                    put("id", randToken(6))
+                    put("log", log)
+                }.toString().toByteArray(Charsets.UTF_8)
+                val conn = (java.net.URL("$base/report").openConnection()
+                        as java.net.HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                }
+                conn.outputStream.use { it.write(payload) }
+                val code = conn.responseCode
+                conn.disconnect()
+                code in 200..299
+            } catch (e: Exception) {
+                Diag.log("shell", "report POST failed: ${e.javaClass.simpleName} ${e.message}")
+                false
+            }
+            runOnUiThread {
+                if (ok) {
+                    toast("Sent — thank you")
+                } else {
+                    toast("Couldn't reach Tawny — pick another way")
+                    onFail()
+                }
+            }
+        }
     }
 
     /** Small round Light ↔ Dark toggle, pinned top-right of the screen. */
@@ -1744,7 +1811,6 @@ class MainActivity : AppCompatActivity() {
         // or pairing: an ask inside the setup funnel reads as a paywall, which
         // is the exact complaint the whole category earns (docs/DIRECTION.md,
         // part 2). Nothing here unlocks anything — see [showAbout].
-        col.addView(gap(4))
         col.addView(metaPanel(
             metaRow("heart", "Support Tawny", Hue.BERRY, "↗") { openExternal(SUPPORT_URL) },
             metaRow("info", "About Tawny", Hue.TEXT, "›") { showAbout() },
