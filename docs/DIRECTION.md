@@ -43,16 +43,28 @@ taking regardless: a persistent notification while a session is live
 (`POST_NOTIFICATIONS`), which is the honest signal that a phone is acting as a
 camera.
 
-### B. TURN is not provisioned
+### B. TURN — ✅ RESOLVED (provisioned on Cloudflare Realtime)
 
-`/turn` returns 404 (confirmed against the live worker — `turnMode:auto`, no key).
-Two peers both on cellular / behind CGNAT simply fail to connect. "Watch from
-anywhere" is the headline feature and it silently doesn't work for a meaningful
-slice of users. Needs a Cloudflare Realtime TURN key (created in the dashboard —
-the wrangler OAuth session lacks the `calls`/`realtime` scope) or self-hosted
-coturn on an Oracle Cloud always-free ARM box. This is also the real recurring
-cost the paid tier exists to cover (Part 2) — the monetization story doesn't
-close until TURN is real.
+_Was: `/turn` returned 404, so two peers both on cellular / behind CGNAT simply
+failed to connect and "watch from anywhere" silently didn't work for a
+meaningful slice of users._
+
+A Cloudflare Realtime TURN key is now provisioned and the secrets
+(`TURN_KEY_ID`, `TURN_API_TOKEN`) are set on the Worker, so `/turn` issues
+short-lived credentials to any caller holding a ticket valid for the room. The
+CGNAT-to-CGNAT case now falls back to an encrypted relay instead of failing, and
+media across it stays DTLS-SRTP — the relay forwards packets it cannot read.
+Nothing in the app changed: it already sent `turnMode:"auto"` and fetched
+`/turn` at runtime, so this needed no rebuild or resubmission.
+
+**What remains is the cost line, not the function.** The free tier is 1 TB/month
+of relayed egress (~1,400–2,000 hours of relayed video), then $0.05/GB.
+`turnMode:"auto"` keeps the relay out of the path whenever a direct one exists,
+so only genuinely CGNAT-bound calls draw on it — but this is now a real,
+metered, recurring bill, which is exactly what Part 2's optional-support story
+exists to point at. It is also the number the optional fair-use soft cap would
+be measured against, if the economics ever need it. Revisit if relayed minutes
+approach the ceiling.
 
 ### C. Rendezvous security patch is written, tested, NOT deployed
 
@@ -230,8 +242,9 @@ bar for a long time.
 
 1. **Fix the "keeps working after the screen goes off" story** (see 1A). Product,
    not polish. Everything else is second.
-2. **Ship the rendezvous patch + provision TURN** (1B, 1C). The headline feature
-   half-works without it, and the paid tier has nothing to pay for.
+2. **Ship the rendezvous patch** (1C). TURN is now provisioned (1B ✅), so the
+   headline feature works end to end; the admission patch is the last piece of
+   this that is written, tested and still not deployed.
 3. **Shrink the launch blockers Opus can touch** (1G): privacy policy on the
    Worker, submission runbook into the repo, a small public status/health page.
    Leave keystore + trademark to the user as the only two remaining.
@@ -267,7 +280,8 @@ bar for a long time.
 
 ## Suggested sequence
 
-1. Deploy the rendezvous patch; provision TURN; privacy policy on the Worker.
+1. Deploy the rendezvous patch; ~~provision TURN~~ (done); privacy policy on the
+   Worker — all three land in the same `wrangler deploy`.
 2. Foreground-service Monitor mode (or ship v1 honest + this as milestone 2).
 3. Test matrix + CI harness; run the on-device matrix on the two phones.
 4. Play Billing: the two products, the "Support Tawny" row, the "where your

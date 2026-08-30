@@ -39,7 +39,13 @@ TURN relays media only when a direct peer-to-peer path can't be found
 (symmetric NAT, some mobile carriers). Media stays DTLS-SRTP encrypted end to
 end — the relay forwards packets it cannot read.
 
-**Cloudflare Realtime TURN** (has a free monthly allowance):
+**This is set for the production deployment** — Tawny's Worker runs on
+Cloudflare Realtime TURN, so `/turn` issues real credentials to any caller
+holding a ticket valid for the room. The steps below are for standing up your
+own instance.
+
+**Cloudflare Realtime TURN** (free allowance: 1 TB/month of relayed egress, then
+$0.05/GB):
 
 1. Dashboard → *Realtime* → *TURN* → create a key.
 2. ```sh
@@ -55,8 +61,10 @@ wrangler secret put TURN_STATIC_SECRET   # == coturn `static-auth-secret`
 #   "turn:turn.example.net:3478,turns:turn.example.net:5349"
 ```
 
-If you set neither, `/turn` returns 404 and the app just uses STUN — fine for
-most phone-to-home cases, not for hostile NATs.
+If you set neither, `/turn` returns 404 and that deployment is STUN-only — fine
+for most phone-to-home cases, but two peers both behind carrier-grade NAT will
+not connect at all. Tawny's own deployment sets the Realtime pair above, so 404
+from `/turn` there means the secrets did not take, not that TURN is optional.
 
 ### 4. Deploy
 
@@ -86,8 +94,11 @@ exactly as before.
   Object is billable-active for its duration (hibernation only helps while
   *idle*). Fine for "check in for a few minutes"; a household that streams
   remotely for hours every day will want the paid Workers plan or an SFU.
-- TURN egress: ~0.5–0.7 GB per relayed hour of video. `turnMode:"auto"` keeps
-  TURN off whenever a direct path exists.
+- TURN egress: ~0.5–0.7 GB per relayed hour of video, against a 1 TB/month free
+  allowance — call it 1,400–2,000 relayed hours before it bills at $0.05/GB.
+  `turnMode:"auto"` keeps TURN off whenever a direct path exists, so only
+  genuinely CGNAT-bound calls count against it. This is the one metered
+  recurring cost the project has.
 
 ---
 

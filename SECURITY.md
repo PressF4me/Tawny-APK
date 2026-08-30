@@ -163,10 +163,18 @@ after-the-fact alarm, not a gate.
 - **Node/Deno `server.js` can be run without tickets** (`REQUIRE_TICKET=off`) for
   a LAN-style self-host; in that mode any viewer with the room id is admitted.
 - **No audit log** of who joined when, and no alert on a new device pairing.
-- **TURN is not provisioned.** `/turn` answers 404, so calls are STUN-only: two
-  peers both behind carrier-grade NAT will fail to connect rather than fall back
-  to a relay. A failure, not a leak — but it is why "from anywhere" is not
-  promised in the store listing.
+- **TURN depends on Cloudflare being up, and on a bandwidth allowance.** TURN is
+  provisioned (Cloudflare Realtime): `/turn` issues short-lived credentials to a
+  caller holding a ticket valid for the room, so two peers both behind
+  carrier-grade NAT now fall back to a relay instead of failing. Media through
+  that relay is still DTLS-SRTP end to end — the relay forwards packets it
+  cannot read, and stores nothing. The residual points are availability and
+  cost, not confidentiality: a Cloudflare Realtime outage takes the relay path
+  down with it (LAN and direct-P2P calls are unaffected), and the free tier
+  covers 1 TB/month of relayed egress — roughly 1,400–2,000 hours of relayed
+  video — after which it bills at $0.05/GB. `turnMode:"auto"` keeps the relay out
+  of the path entirely whenever a direct one exists, so only the genuinely
+  CGNAT-bound calls draw on it.
 - **The Monitor's camera stops when its screen turns off.** There is no
   foreground service. The app now detects the loss, tells viewers the monitor is
   paused rather than leaving a frozen frame up, and re-acquires on foreground —
