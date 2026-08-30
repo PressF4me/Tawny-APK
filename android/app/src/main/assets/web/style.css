@@ -41,6 +41,31 @@
   --text: "Tawny Text", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
           Roboto, "Helvetica Neue", Arial, sans-serif;
 
+  /* Corner scale — the same three tiers the native screens use (CARD 16dp /
+     CONTROL 11dp / CHIP 7dp), so a Kotlin screen and a WebView screen round
+     their corners by the same rule. */
+  --r-card: 16px;   /* panels that hold other things: the SAS card, the note */
+  --r-ctl:  11px;   /* things you press: control keys, chime keys, PiP */
+  --r-chip:  7px;   /* things you only read: rail chips, tags */
+
+  /* On-video overlay palette. The live view is the one place the theme does
+     NOT decide the colours: these sit on top of an arbitrary camera frame and
+     have to stay readable over a white wall and a black corridor alike, so
+     they are dark in both palettes. They are, at least, *warm* dark now — the
+     same 23/19/15 ground the rest of Tawny is built on, not a blue-grey. */
+  --glass:      rgba(23, 19, 15, .68);   /* chip ground */
+  --glass-deep: rgba(19, 15, 12, .90);   /* card ground — a safety code on it */
+  --glass-line: rgba(255, 246, 236, .18);
+  --glass-fg:   #f7f1e8;                 /* warm near-white */
+  --glass-dim:  #d6c9b8;
+  --glass-blur: blur(8px) saturate(1.15);
+  --alert:      #e0a63c;                 /* "paused" amber — matches .dot.warn */
+  /* The accents again, lifted towards white so they clear the dark overlay
+     ground. Substitution is lazy, so the dark palette's brass and sage flow
+     through these without a second definition. */
+  --berry-lit: color-mix(in srgb, var(--berry) 76%, #ffffff);
+  --sky-lit:   color-mix(in srgb, var(--sky)   76%, #ffffff);
+
   --pad: clamp(16px, 4vw, 32px);
   /* The Android shell runs the live view edge-to-edge under the status and
      navigation bars, but a WebView inside an app does not report
@@ -408,8 +433,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   max-width: 150px;
   aspect-ratio: 3 / 4;
   object-fit: cover;
-  border: 1px solid var(--line);
-  border-radius: 3px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-ctl);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .38);
   background: #000;
   transform: scaleX(-1);
 }
@@ -430,21 +456,39 @@ button { font: inherit; color: inherit; cursor: pointer; }
   transform: none;
 }
 
-/* connecting: an idle carrier meter, same language as the live sound meter */
+/* connecting: an idle carrier meter, same language as the live sound meter,
+   sat inside a warm lantern glow so a dark room still shows something happening.
+   Only transform and opacity move — the old keyframe animated `background`
+   between two solids, which is a repaint on every frame of the loop. */
 .loader {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 7px;
   pointer-events: none;
 }
 
+.loader::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;               /* centres it without spending the transform */
+  width: 176px;
+  height: 176px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--berry) 30%, transparent), transparent);
+  animation: lantern 2.8s ease-in-out infinite;
+}
+
 .loader i {
-  width: 5px;
-  height: 40px;
-  background: var(--berry-d);
+  position: relative;
+  width: 6px;
+  height: 42px;
+  border-radius: 99px;
+  background: linear-gradient(180deg, var(--berry), var(--berry-d));
   transform-origin: 50% 50%;
   animation: carrier 1.4s ease-in-out infinite;
 }
@@ -454,8 +498,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .loader i:nth-child(5) { animation-delay: .56s; }
 
 @keyframes carrier {
-  0%, 100% { transform: scaleY(.28); background: var(--berry-d); }
-  50%      { transform: scaleY(1);   background: var(--berry); }
+  0%, 100% { transform: scaleY(.26); opacity: .45; }
+  50%      { transform: scaleY(1);   opacity: 1; }
+}
+
+@keyframes lantern {
+  0%, 100% { transform: scale(.86); opacity: .5; }
+  50%      { transform: scale(1.1); opacity: .95; }
 }
 
 .spinner { display: flex; gap: 6px; }
@@ -480,9 +529,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
   top: 0; left: 0; right: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  /* The Monitor's rail carries three tags at once (phone count, safety code,
+     channel name) and used to shave the status down to "O…" on a narrow phone.
+     Let it take a second line instead: the status text is the one thing here
+     that must never be a guess. */
+  flex-wrap: wrap;
+  gap: 8px 10px;
   padding: calc(12px + var(--safe-t)) 14px 12px;
-  background: linear-gradient(#0000008c, transparent 88%);
+  /* warm shade rather than neutral black, and it fades out sooner so it eats
+     less of the picture */
+  background: linear-gradient(rgba(12, 9, 6, .58), transparent 92%);
   text-transform: uppercase;
 }
 /* ...except the pet's own name, which is a proper noun the user typed.
@@ -495,32 +551,51 @@ button { font: inherit; color: inherit; cursor: pointer; }
   align-items: center;
   gap: 7px;
   min-width: 0;
-  padding: 5px 10px;
-  background: rgba(14, 15, 20, .62);
-  border: 1px solid rgba(255, 255, 255, .16);
-  border-radius: 3px;
+  padding: 6px 11px;
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-chip);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   font-family: var(--text);
   font-weight: 600;
   font-size: 11px;
   letter-spacing: .16em;
 }
 
-.rail-left { color: #eef0f4; }
+.rail-left { flex: none; max-width: 100%; color: var(--glass-fg); }
 .rail-left span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rail-right { margin-left: auto; color: #cfd3dc; gap: 9px; }
+.rail .meter { flex: none; }
+.rail-right { flex: 0 1 auto; margin-left: auto; color: var(--glass-dim); gap: 8px; }
 .rail-right #channel { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* connected-Handheld count on the Watcher */
-#peercount {
+/* connected-Handheld count on the Watcher. The old border was --line, a pale
+   warm hairline meant for a cream card — on video it read as a cream box. Each
+   tag now borrows its own accent instead: berry for "who is watching", sky for
+   the safety code. */
+#peercount, .sas-chip {
   flex: none;
-  padding: 1px 6px;
-  border: 1px solid var(--line);
-  border-radius: 2px;
-  color: var(--berry);
+  padding: 2px 6px;
+  border-radius: calc(var(--r-chip) - 2px);
+  border: 1px solid transparent;
+}
+#peercount {
+  color: var(--berry-lit);
+  border-color: color-mix(in srgb, var(--berry) 52%, transparent);
+  background: color-mix(in srgb, var(--berry) 16%, transparent);
   letter-spacing: .1em;
 }
-#peercount.is-busy { color: var(--live); border-color: var(--live); }
-.sas-chip { color: var(--sky); border: 1px solid var(--line); border-radius: 2px; padding: 1px 6px; letter-spacing: .12em; }
+#peercount.is-busy {
+  color: color-mix(in srgb, var(--live) 76%, #ffffff);
+  border-color: color-mix(in srgb, var(--live) 60%, transparent);
+  background: color-mix(in srgb, var(--live) 18%, transparent);
+}
+.sas-chip {
+  color: var(--sky-lit);
+  border-color: color-mix(in srgb, var(--sky) 52%, transparent);
+  background: color-mix(in srgb, var(--sky) 16%, transparent);
+  letter-spacing: .12em;
+}
 
 #peer-audio { position: absolute; width: 0; height: 0; overflow: hidden; }
 
@@ -530,30 +605,62 @@ button { font: inherit; color: inherit; cursor: pointer; }
   left: 50%; bottom: calc(16px + var(--safe-b));
   transform: translateX(-50%);
   width: min(88vw, 360px);
-  background: #12131b;               /* over the video — stays dark */
-  border: 1px solid #2a2c38;
-  border-radius: 8px;
-  padding: 16px;
+  /* over the video — stays dark, but the app's warm dark, not a blue-grey.
+     The ground is the most opaque of the overlays on purpose: this is the one
+     card whose text a user is asked to compare character by character. */
+  background: var(--glass-deep);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-card);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .42);
+  padding: 18px;
   text-align: center;
-  color: #eef0f4;
+  color: var(--glass-fg);
+  animation: overlay-in .26s cubic-bezier(.2, .8, .3, 1);
 }
-.sas p { margin: 0 0 8px; font-size: 14px; color: #b9bdc8; }
+.sas p { margin: 0 0 10px; font-size: 14px; color: var(--glass-dim); }
 .sas-code {
   display: block;
   font-family: var(--text);
-  font-size: 30px;
+  font-size: 32px;
   letter-spacing: .18em;
-  color: #9fd0ea;
-  margin-bottom: 12px;
+  color: var(--sky-lit);
+  margin-bottom: 14px;
 }
-.sas-actions { display: flex; gap: 8px; }
+.sas-actions { display: flex; gap: 9px; }
+
+/* The two buttons are the shared .wide, which is drawn for a cream card. On
+   this one the ghost half has to come from the overlay palette or it turns
+   into a pale hairline box on a dark ground. */
+.sas .wide {
+  border-radius: var(--r-ctl);
+  transition: transform .16s cubic-bezier(.2, .8, .3, 1), filter .12s ease;
+}
+.sas .wide.ghost {
+  background: color-mix(in srgb, #ffffff 7%, transparent);
+  border-color: var(--glass-line);
+  color: var(--glass-fg);
+}
+.sas .wide:active { transform: scale(.965); }
+.sas .wide.ghost:hover { border-color: var(--live); color: var(--live); }
+
+/* One shot, and it ends on the resting state so the reduced-motion collapse
+   below lands somewhere sensible. */
+@keyframes overlay-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px) scale(.97); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0)   scale(1); }
+}
 
 /* The generic `.warn` rule below has the same specificity and wins on source
    order, so it used to replace the card's dark background while leaving
    `.sas`'s near-white text alone — an invisible warning in the one state this
    card exists for. Scoped modifier instead. */
-.sas--warn { border-color: var(--live); box-shadow: 0 0 0 1px var(--live); }
-.sas--warn .sas-code { color: #ffb9ae; }
+.sas--warn {
+  border-color: var(--live);
+  box-shadow: 0 0 0 1px var(--live), 0 14px 34px rgba(0, 0, 0, .42);
+}
+.sas--warn .sas-code { color: color-mix(in srgb, var(--live) 55%, #ffffff); }
 .sas-actions .wide { flex: 1; margin: 0; }
 
 .dot {
@@ -562,11 +669,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: var(--dim);
   flex: none;
 }
-.dot.on   { background: var(--berry); box-shadow: 0 0 8px var(--berry); }
-.dot.live { background: var(--live);  box-shadow: 0 0 8px var(--live);
+.dot.on   { background: var(--berry);
+            box-shadow: 0 0 10px color-mix(in srgb, var(--berry) 70%, transparent); }
+.dot.live { background: var(--live);
+            box-shadow: 0 0 10px color-mix(in srgb, var(--live) 70%, transparent);
             animation: breathe 2s ease-in-out infinite; }
 /* capture paused: steady amber, deliberately not the breathing "live" dot */
-.dot.warn { background: #e0a63c; box-shadow: 0 0 8px #e0a63c; }
+.dot.warn { background: var(--alert);
+            box-shadow: 0 0 10px color-mix(in srgb, var(--alert) 70%, transparent); }
 
 /* The one centred message over the video: a paused monitor, or a connection
    that never came up. A frozen picture must never be mistaken for a live one. */
@@ -576,15 +686,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
   transform: translate(-50%, -50%);
   width: min(84vw, 340px);
   display: flex; flex-direction: column; gap: 6px;
-  padding: 16px 18px;
-  border-radius: 10px;
-  background: rgba(14, 15, 20, .82);
-  border: 1px solid rgba(224, 166, 60, .55);
-  color: #f3efe8;
+  padding: 17px 19px;
+  border-radius: var(--r-card);
+  background: var(--glass-deep);
+  border: 1px solid color-mix(in srgb, var(--alert) 55%, transparent);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, .4);
+  color: var(--glass-fg);
   text-align: center;
+  animation: note-in .3s cubic-bezier(.2, .8, .3, 1);
 }
-.stage-note strong { font-size: 15px; color: #e0a63c; }
-.stage-note span { font-size: 13px; line-height: 1.5; color: #cfd3dc; }
+.stage-note strong { font-size: 15px; color: var(--alert); }
+.stage-note span { font-size: 13px; line-height: 1.5; color: var(--glass-dim); }
+
+@keyframes note-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 7px)) scale(.97); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
 
 @keyframes breathe { 50% { opacity: .35; } }
 
@@ -592,72 +711,184 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .meter { display: flex; gap: 3px; align-items: flex-end; height: 14px; }
 
+/* Unlit bars used to be a bright cool grey and lit ones the accent, which in
+   the dark palette made the *quiet* bars the loud ones. Now level reads twice:
+   colour and height, and the height is a scaleY so it stays on the compositor
+   while the meter repaints every frame. */
 .meter i {
   width: 3px;
   height: 100%;
-  background: #d8dbe4;
-  transition: background .06s linear;
+  border-radius: 99px;
+  background: rgba(247, 241, 232, .24);
+  transform: scaleY(.42);
+  transform-origin: 50% 100%;
+  transition: background .06s linear, transform .06s linear;
 }
-.meter i.lit  { background: var(--berry); }
-.meter i.peak { background: var(--live); }
+.meter i.lit  { background: var(--berry-lit); transform: scaleY(1); }
+.meter i.peak { background: var(--live);      transform: scaleY(1); }
 
 .meter.big { height: 46px; gap: 6px; }
 .meter.big i { width: 6px; }
 
+/* "Listening to you" is a status, so it now hangs off the status rail instead
+   of the bottom edge. At the bottom it shared a centre line with the lens
+   selector and sat underneath the chime tray — the two overlays you are most
+   likely to have open at the exact moment you are holding the talk key. */
 .talkflag {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  top: calc(92px + var(--safe-t));   /* clears a rail that has wrapped to two rows */
   transform: translateX(-50%);
-  padding: 7px 14px;
+  padding: 8px 15px;
   background: var(--live);
   color: #fff;
   font-size: 11px;
+  font-weight: 600;
   letter-spacing: .16em;
   text-transform: uppercase;
-  border-radius: 2px;
+  border-radius: var(--r-chip);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--live) 40%, transparent);
+  animation: flag-in .24s cubic-bezier(.2, .8, .3, 1);
+}
+
+@keyframes flag-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-9px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* controls */
 
+/* Five keys, not five table cells. The hairline dividers were the loudest
+   square thing on the screen; the icons now sit on their own rounded plate and
+   the rule between them is gone. --ctl-line survives as that plate's rim. */
 .controls {
   display: flex;
+  gap: 3px;
   border-top: 1px solid var(--line);
   background: var(--panel);
-  padding-bottom: var(--safe-b);
+  padding: 7px 6px calc(7px + var(--safe-b));
 }
 
 .ctl {
   flex: 1;
+  min-width: 0;
   display: grid;
   justify-items: center;
   gap: 5px;
-  padding: 13px 4px 15px;
+  padding: 2px 1px 3px;
   background: none;
   border: 0;
-  border-right: 1px solid var(--ctl-line);
+  border-radius: var(--r-ctl);
   font-size: 11.5px;
   letter-spacing: .04em;
   text-transform: uppercase;
   color: var(--dim);
   -webkit-tap-highlight-color: transparent;
-  transition: color .12s ease, background .12s ease;
+  transition: color .14s ease;
+  /* every key carries its own accent; the row is not one colour repeated */
+  --acc: var(--berry);
+  --acc-d: var(--berry-d);
 }
 
-.ctl:last-child { border-right: 0; }
-.ctl .ico { font-size: 19px; line-height: 0; }
-.ctl .ico svg { width: 27px; height: 27px; display: block; }
+.ctl .ico {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: 58px;
+  height: 34px;
+  transition: transform .18s cubic-bezier(.2, .8, .3, 1);
+}
+
+/* the plate */
+.ctl .ico::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--r-ctl);
+  background: var(--raise);
+  border: 1px solid var(--ctl-line);
+  transition: background .14s ease, border-color .14s ease;
+}
+
+/* the accent that blooms out from behind it on a press — the CSS cousin of
+   IconView's ring, and, like it, transform + opacity only */
+.ctl .ico::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  z-index: -2;
+  border-radius: calc(var(--r-ctl) + 3px);
+  background: var(--acc);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ctl .ico svg { width: 25px; height: 25px; display: block; }
 .ctl .ico .slash { display: none; }
 .ctl[aria-pressed="true"] .ico .slash { display: block; stroke: var(--live); }
-.ctl.danger .ico { color: var(--live); }
-.ctl:hover { color: var(--fg); background: var(--raise); }
-.ctl[aria-pressed="true"] { color: var(--berry); background: var(--raise); }
-.ctl.danger:hover { color: var(--live); }
-.ctl:disabled { opacity: .35; cursor: default; }
 
-.ctl.talk.hot {
-  color: #fff;
+.ctl:hover { color: var(--fg); }
+.ctl:hover .ico::before { background: color-mix(in srgb, var(--acc) 9%, var(--raise)); }
+
+/* press: a scale-dip plus one bloom, then it settles back */
+.ctl:active { color: var(--acc-d); }
+.ctl:active .ico { transform: scale(.9); }
+.ctl:active .ico::before {
+  background: color-mix(in srgb, var(--acc) 20%, var(--panel));
+  border-color: var(--acc);
+}
+.ctl:active .ico::after { animation: ctl-bloom .44s ease-out; }
+
+@keyframes ctl-bloom {
+  0%   { transform: scale(.82); opacity: .5; }
+  100% { transform: scale(1.32); opacity: 0; }
+}
+
+/* latched on (camera sending, chime tray open, mic muted) */
+.ctl[aria-pressed="true"] { color: var(--acc-d); }
+.ctl[aria-pressed="true"] .ico::before {
+  background: color-mix(in srgb, var(--acc) 18%, var(--panel));
+  border-color: color-mix(in srgb, var(--acc) 60%, var(--ctl-line));
+}
+
+/* hang up / end call: the app's own warm red, and it wears it at rest so the
+   thumb can find it without reading */
+.ctl.danger { --acc: var(--live); --acc-d: var(--live); }
+.ctl.danger .ico { color: var(--live); }
+.ctl.danger .ico::before {
+  background: color-mix(in srgb, var(--live) 11%, var(--panel));
+  border-color: color-mix(in srgb, var(--live) 34%, var(--ctl-line));
+}
+.ctl.danger:hover { color: var(--live); }
+
+/* a muted mic is a warning, not a preference */
+#btn-mute[aria-pressed="true"] { --acc: var(--live); --acc-d: var(--live); }
+
+.ctl:disabled { opacity: .35; cursor: default; }
+.ctl:disabled .ico { transform: none; }
+
+/* held: hold-to-talk. Filled in --live, and a slow halo behind the plate says
+   the microphone is open without moving anything but a scale and an alpha. */
+.ctl.talk { --acc: var(--sky); --acc-d: var(--sky-d); }
+
+.ctl.talk.hot { color: var(--live); }
+.ctl.talk.hot .ico { color: #fff; }
+.ctl.talk.hot .ico::before {
   background: var(--live);
+  border-color: var(--live);
+}
+.ctl.talk.hot .ico::after {
+  background: var(--live);
+  animation: talk-halo 1.5s ease-out infinite;
+}
+
+@keyframes talk-halo {
+  0%   { transform: scale(.94); opacity: .55; }
+  70%  { transform: scale(1.28); opacity: 0; }
+  100% { transform: scale(1.28); opacity: 0; }
 }
 
 /* Five calls, not three, so this wraps into rows instead of running off the
@@ -671,21 +902,51 @@ button { font: inherit; color: inherit; cursor: pointer; }
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  /* one warm tray on the video instead of five pale cards floating on it */
+  padding: 8px;
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-card);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .38);
+  animation: tray-in .22s cubic-bezier(.2, .8, .3, 1);
 }
 
 .chimes button {
   padding: 10px 14px;
-  background: var(--raise);
-  border: 1px solid var(--line);
-  border-radius: 2px;
+  background: color-mix(in srgb, #ffffff 9%, transparent);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-ctl);
+  color: var(--glass-fg);
   font-size: 11px;
+  font-weight: 600;
   letter-spacing: .12em;
   text-transform: uppercase;
   /* Every one of these is a target for a thumb held over a pet's head. */
-  min-height: 40px;
+  min-height: 42px;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .14s ease, border-color .14s ease, color .14s ease,
+              transform .16s cubic-bezier(.2, .8, .3, 1);
 }
 
-.chimes button:hover { border-color: var(--berry); color: var(--berry); }
+.chimes button:hover {
+  border-color: color-mix(in srgb, var(--berry) 65%, transparent);
+  background: color-mix(in srgb, var(--berry) 16%, transparent);
+  color: var(--berry-lit);
+}
+
+.chimes button:active {
+  transform: scale(.94);
+  background: var(--berry);
+  border-color: var(--berry);
+  color: var(--on-accent);
+}
+
+@keyframes tray-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 
 /* On a narrow phone the labels are long enough ("Psp psp psp", "Good boy") that
    free wrapping leaves a ragged single button on the last row. Two even columns
@@ -720,10 +981,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   display: flex;
   gap: 3px;
   padding: 4px;
-  background: rgba(14, 15, 20, .74);
-  border: 1px solid rgba(255, 255, 255, .14);
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
   border-radius: 20px;
-  backdrop-filter: blur(8px);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .3);
   white-space: nowrap;
 }
 
@@ -732,16 +995,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: transparent;
   border: none;
   border-radius: 16px;
-  color: rgba(255, 255, 255, .72);
+  color: color-mix(in srgb, var(--glass-fg) 74%, transparent);
   font-family: var(--text);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: .04em;
   cursor: pointer;
-  transition: background .15s, color .15s;
+  transition: background .15s, color .15s,
+              transform .16s cubic-bezier(.2, .8, .3, 1);
   -webkit-tap-highlight-color: transparent;
 }
-.lens-btn:hover  { color: #fff; background: rgba(255,255,255,.15); }
+.lens-btn:hover  { color: var(--glass-fg); background: rgba(255, 246, 236, .14); }
+.lens-btn:active { transform: scale(.92); }
 .lens-btn.active { background: var(--berry); color: var(--on-accent); }
 
 #zoom-chip {
@@ -750,21 +1015,23 @@ button { font: inherit; color: inherit; cursor: pointer; }
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 13;
-  padding: 8px 16px;
-  background: rgba(14, 15, 20, .78);
-  border: 1px solid rgba(255, 255, 255, .18);
-  border-radius: 10px;
-  color: #fff;
+  padding: 9px 18px;
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-card);
+  color: var(--glass-fg);
   font-size: 24px;
   font-weight: 700;
   letter-spacing: .04em;
   pointer-events: none;
-  backdrop-filter: blur(6px);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .34);
 }
 
 .dim-label {
   margin: 0;
-  color: #6b7280;
+  color: #7d6f5e;    /* warm, and still nearly nothing on a black screen */
   font-size: 10.5px;
   letter-spacing: .22em;
   text-transform: uppercase;
@@ -788,7 +1055,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 @media (min-width: 720px) {
-  .ctl { font-size: 13px; padding: 15px 8px 17px; }
+  .controls { gap: 6px; padding: 9px 10px calc(9px + var(--safe-b)); }
+  .ctl { font-size: 13px; padding: 3px 2px 4px; }
+  .ctl .ico { height: 40px; max-width: 72px; }
+  .ctl .ico svg { width: 28px; height: 28px; }
   #local { width: 180px; max-width: 180px; }
 }
 
@@ -798,6 +1068,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
     animation-iteration-count: 1 !important;
     transition-duration: .001ms !important;
   }
+
+  /* A collapsed loop stops on its last keyframe, which for the two live-view
+     loops is "almost invisible" — the connecting bars at a quarter height, the
+     talk halo at zero alpha. Park them somewhere that still reads instead. */
+  .loader i { transform: scaleY(.72); opacity: .95; }
+  .loader::before { transform: scale(1); opacity: .7; }
+  .ctl.talk.hot .ico::after { opacity: .32; transform: scale(1.06); }
+  /* and no scale-dip at all, since it can no longer spring back */
+  .ctl:active .ico,
+  .chimes button:active,
+  .lens-btn:active,
+  .sas .wide:active { transform: none; }
 }
 
 /* ==================== v2: channels, sheets, pairing ==================== */
