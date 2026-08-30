@@ -2044,25 +2044,42 @@ class MainActivity : AppCompatActivity() {
                 "Version ${BuildConfig.VERSION_NAME} · build ${BuildConfig.VERSION_CODE}"
             )
         )
-        col.addView(aboutBody(
-            "Tawny turns two phones into a private pet monitor. One stays with " +
-                "your pet and sends its camera and microphone; the other watches, " +
-                "listens, and talks back."
-        ))
-        col.addView(aboutBody(
-            "Video and audio travel straight between your own devices, encrypted " +
-                "end to end. Nothing is recorded, there is no account and no " +
-                "sign-up, and no server ever sees your pairing key or a single " +
-                "frame of your video. On your home Wi-Fi nothing leaves the house " +
-                "at all."
-        ))
+
+        // A quiet tracked-out heading to set one part of the page off from the
+        // next. Before this the screen was one unbroken column of grey prose.
+        fun eyebrow(s: String) = TextView(this).apply {
+            text = s.uppercase()
+            setTextColor(Hue.DIM)
+            textSize = Type.LABEL
+            letterSpacing = 0.16f
+            typeface = uiFontSemi
+            layoutParams = lp(topMargin = 30)
+        }
 
         col.addView(aboutBody(
-            "Tawny is free and stays free. Watching from outside your home goes " +
-                "through a small relay, and that relay costs bandwidth every " +
-                "month. If Tawny is useful to you, chipping in keeps it running. " +
-                "Supporters get nothing extra in the app — no badge, no locked " +
-                "features, nothing. That is the point."
+            "Tawny turns two spare phones into a pet camera. Leave one with " +
+                "your cat or dog — on a charger, pointed at their favourite " +
+                "spot — and keep the other with you to look in, listen, and " +
+                "say hello."
+        ))
+
+        col.addView(eyebrow("Your home, your video"))
+        col.addView(aboutBody(
+            "The picture and sound go straight from one phone to the other, " +
+                "scrambled so that only your two phones can read them. There is " +
+                "no account to make, nothing is ever recorded, and no server in " +
+                "between ever sees your video or the code that pairs your " +
+                "phones. On your own Wi-Fi, none of it leaves the house."
+        ))
+
+        col.addView(eyebrow("Keeping it running"))
+        col.addView(aboutBody(
+            "Tawny is free, and it stays that way — every part of it, for " +
+                "everyone. Looking in from outside the house hops through a " +
+                "small relay I run, and that relay adds up a bandwidth bill " +
+                "every month. If Tawny earns a place in your day, a little " +
+                "toward that bill means a lot. Chipping in unlocks nothing " +
+                "extra — no badge, no hidden features. That part is on purpose."
         ))
         col.addView(metaPanel(
             metaRow("heart", "Support Tawny", Hue.BERRY, "↗", sub = "ko-fi.com/tawnyone") {
@@ -2088,20 +2105,22 @@ class MainActivity : AppCompatActivity() {
             },
         ))
         col.addView(aboutBody(
-            "Questions, bug reports, or anything that went wrong. If it is a " +
-                "connection problem, long-press the version number on any screen " +
-                "and send the diagnostics log with it."
+            "That last one is for anything at all — a question, a bug, " +
+                "something that broke. If a connection will not hold, " +
+                "long-press the version number on any screen first and send " +
+                "the little diagnostics log along with your note."
         ))
 
-        col.addView(gap(10))
+        col.addView(gap(18))
+        col.addView(eyebrow("Sound credits"))
         // CC BY 4.0 on the "psp psp psp" clip is the only sound licence that
-        // needs a credit; the rest are here so it does not read as an oddity.
+        // needs a credit; the rest are listed so it does not read as an oddity.
         col.addView(aboutBody(
-            "Chime sounds: “Psp psp psp” is “Female calling a " +
-                "cat” by Jolindi, trimmed and filtered, used under CC BY 4.0 " +
-                "(creativecommons.org/licenses/by/4.0). “Meow” is CC0. " +
-                "The dog-toy and “good boy” sounds are from Pixabay. " +
-                "The bell is synthesised."
+            "“Psp psp psp” is “Female calling a cat” by Jolindi, trimmed and " +
+                "filtered, used under CC BY 4.0 " +
+                "(creativecommons.org/licenses/by/4.0). “Meow” is CC0. The " +
+                "dog-toy and “good boy” sounds are from Pixabay. The bell is " +
+                "synthesised."
         ))
         col.addView(link("freesound.org/s/654284") {
             openExternal("https://freesound.org/s/654284/")
@@ -3335,6 +3354,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun endLive() {
         isLive = false
+        // ...and never left holding a phone with its camera light still on.
+        // The page turns it off on its own hang-up path, but the shell ends
+        // sessions by routes of its own too (the "End the call?" dialog, a load
+        // error, onDestroy). Tearing the WebView down releases the camera and
+        // the LED with it; this is the explicit off, ahead of that.
+        web?.evaluateJavascript("window.tawnyTorchOff && window.tawnyTorchOff()", null)
         // Whatever else happens, the user must never be left holding a phone
         // whose screen is pinned black with no live screen to tap.
         applyDim(false)
