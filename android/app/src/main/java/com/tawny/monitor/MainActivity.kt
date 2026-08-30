@@ -19,6 +19,7 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.provider.Settings
 import android.text.InputType
@@ -2924,12 +2925,129 @@ private abstract class CritterScene(ctx: Context) : View(ctx) {
 
     override fun onDetachedFromWindow() {
         animator.cancel()
+        removeCallbacks(ticker)
         super.onDetachedFromWindow()
     }
 
-    fun stop() = animator.cancel()
+    fun stop() {
+        animator.cancel()
+        removeCallbacks(ticker)
+        reactWho = 0
+    }
+
+    // ---------------------------------------------------------------- tap to react
+    //
+    // Tap a pet and it does its thing: 1 = cat, 2 = dog, 3 = the owlet (she takes
+    // off and flies a loop). The reaction runs on wall-clock time so it is
+    // independent of the idle loop; a self-posting ticker keeps frames coming
+    // even when the ambient animator is stopped for reduce-motion.
+
+    protected var reactWho = 0
+        private set
+    private var reactStart = 0L
+    private val reactDurMs = intArrayOf(0, 1300, 1500, 2700)   // idx = who
+
+    /** 0..1 progress while [who] is the one reacting, else 0. */
+    protected fun reactP(who: Int): Float {
+        if (reactWho != who) return 0f
+        val e = SystemClock.uptimeMillis() - reactStart
+        return (e.toFloat() / reactDurMs[who]).coerceIn(0f, 1f)
+    }
+
+    /** Seconds since the current reaction began — for driving sin() wiggles. */
+    protected fun reactSecs(): Float = (SystemClock.uptimeMillis() - reactStart) / 1000f
+
+    private fun reactExpired(): Boolean {
+        if (reactWho == 0) return true
+        if (SystemClock.uptimeMillis() - reactStart >= reactDurMs[reactWho]) {
+            reactWho = 0
+            return true
+        }
+        return false
+    }
+
+    private val ticker = object : Runnable {
+        override fun run() {
+            if (!reactExpired()) {
+                invalidate()
+                postOnAnimation(this)
+            }
+        }
+    }
+
+    /** scene-space (vw x vh) hit test → 1/2/3, or 0 for a miss. */
+    protected abstract fun critterAt(sx: Float, sy: Float): Int
+
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            val s = min(width / vw, height / vh)
+            val sx = (ev.x - (width - vw * s) / 2f) / s
+            val sy = (ev.y - (height - vh * s) / 2f) / s
+            val who = critterAt(sx, sy)
+            if (who != 0) {
+                reactWho = who
+                reactStart = SystemClock.uptimeMillis()
+                performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                performClick()
+                removeCallbacks(ticker)
+                post(ticker)
+                return true
+            }
+        }
+        return super.onTouchEvent(ev)
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+
+    // smoothstep-ish ramp, clamped
+    protected fun ramp(x: Float): Float {
+        val u = x.coerceIn(0f, 1f)
+        return u * u * (3f - 2f * u)
+    }
+
+    // a 0→1→0 hump over [0,1]
+    protected fun hump(x: Float): Float =
+        if (x <= 0f || x >= 1f) 0f else sin(x * PI).toFloat()
+
+    protected fun lerp(a: Float, b: Float, u: Float) = a + (b - a) * u
+
+    protected data class Flight(val fx: Float, val fy: Float, val bank: Float, val look: Float)
+
+    /** The owlet's flight path for tap-progress [op] 0..1: lift off the perch,
+     *  circle the scene 1.5 times on an ellipse, settle back. */
+    protected fun owlFlight(
+        op: Float, perchX: Float, perchY: Float,
+        cxA: Float, cyA: Float, rx: Float, ry: Float
+    ): Flight {
+        val a0 = -PI.toFloat() / 2f
+        fun at(u: Float): Triple<Float, Float, Float> {
+            val a = a0 + u.coerceIn(0f, 1f) * (2f * PI.toFloat()) * 1.5f
+            return Triple(cxA + rx * cos(a), cyA + ry * sin(a), a)
+        }
+        return when {
+            op < 0.16f -> {
+                val u = ramp(op / 0.16f)
+                val (lx, ly, _) = at(0f)
+                Flight(lerp(perchX, lx, u), lerp(perchY, ly, u), u * -8f, 0f)
+            }
+            op < 0.82f -> {
+                val u = (op - 0.16f) / 0.66f
+                val (lx, ly, a) = at(u)
+                Flight(lx, ly, -cos(a) * 15f, -sin(a) * 1.8f)
+            }
+            else -> {
+                val u = ramp((op - 0.82f) / 0.18f)
+                val (lx, ly, _) = at(1f)
+                Flight(lerp(lx, perchX, u), lerp(ly, perchY, u), lerp(-8f, 0f, u), 0f)
+            }
+        }
+    }
 
     override fun onDraw(canvas: Canvas) {
+        reactExpired()
         val s = min(width / vw, height / vh)
         canvas.save()
         canvas.translate((width - vw * s) / 2f, (height - vh * s) / 2f)
@@ -3085,11 +3203,43 @@ private abstract class CritterScene(ctx: Context) : View(ctx) {
 
     /** Tawny the owlet — shared between both scenes. [hop] lifts her off the
      *  ground and flaps the wings. Pass [ballX]/[ballY] and she watches the ball,
-     *  leans after it and perks up when it comes close — part of the game. */
+     *  leans after it and perks up when it comes close — part of the game. Pass
+     *  [flyX]/[flyY] and she is airborne instead: wings spread, banking, feet up
+     *  (used by the tap-to-react loop). */
     protected fun owlet(
         c: Canvas, x: Float, groundY: Float, tNorm: Float, hop: Float = 0f,
-        ballX: Float? = null, ballY: Float? = null
+        ballX: Float? = null, ballY: Float? = null,
+        flyX: Float? = null, flyY: Float = 0f, flyBank: Float = 0f,
+        flyFlap: Float = 0f, flyLook: Float = 0f
     ) {
+        if (flyX != null) {
+            val ax = flyX; val ay = flyY
+            val alt = ((groundY - ay) / 66f).coerceIn(0f, 1f)
+            castShadow(c, x, groundY + 3f, 24f * (1f - 0.6f * alt),
+                (30 * (1f - 0.7f * alt)).toInt())
+            c.save()
+            c.rotate(flyBank, ax, ay)
+            // long wings, spread and flapping
+            c.save(); c.rotate(-42f - 30f * flyFlap, ax - 6f, ay - 1f)
+            capsule(c, ax - 15f, ay + 1f, 10f, 22f, cream, edge); c.restore()
+            c.save(); c.rotate(42f + 30f * flyFlap, ax + 6f, ay - 1f)
+            capsule(c, ax + 15f, ay + 1f, 10f, 22f, cream, edge); c.restore()
+            // ear tufts
+            softTri(c, ax - 8f, ay - 10f, ax - 3f, ay - 22f, ax + 1f, ay - 11f, cream, edge)
+            softTri(c, ax + 8f, ay - 10f, ax + 3f, ay - 22f, ax - 1f, ay - 11f, cream, edge)
+            mass(c, ax, ay, 25f, 30f, cream)
+            capsule(c, ax, ay - 3f, 21f, 16f, creamHi)
+            // tail fan
+            softTri(c, ax - 5f, ay + 12f, ax, ay + 22f, ax + 5f, ay + 12f, creamLo, edge)
+            val bl = blink(0.45f)
+            owlEye(c, ax - 5.2f, ay - 4f, 4.5f, bl, flyLook, -0.35f)
+            owlEye(c, ax + 5.2f, ay - 4f, 4.5f, bl, flyLook, -0.35f)
+            c.drawPath(Path().apply {
+                moveTo(ax - 2f, ay + 1f); lineTo(ax + 2f, ay + 1f); lineTo(ax, ay + 5f); close()
+            }, berry)
+            c.restore()
+            return
+        }
         val tracking = ballX != null
         val toBall = if (tracking) ballX!! - x else 0f
         val track = (toBall / 58f).coerceIn(-1f, 1f)          // -1 ball hard-left … +1 hard-right
@@ -3157,7 +3307,19 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
             val by = bob * 1.6f
             castShadow(c, x + 2f, g + 4f, 66f, 40)
 
-            val flick = sin(t * 4.0 * PI + 1.0).toFloat()
+            // tap → wind-up wiggle, then pounce.
+            val cp = reactP(1)
+            val crouch = ramp(cp / 0.30f) * (1f - ramp((cp - 0.34f) / 0.18f))
+            val spring = hump((cp - 0.28f) / 0.55f)
+            val land = hump((cp - 0.82f) / 0.18f)
+            val wiggle = sin(reactSecs() * 44f).toFloat() * crouch * 2.6f
+            val active = (crouch + spring).coerceAtMost(1f)
+            c.save()
+            c.translate(wiggle, crouch * 3.6f - spring * 17f + land * 2.4f)
+            c.scale(1f + spring * 0.05f, 1f - spring * 0.06f, x, g)
+
+            val flick = sin(t * 4.0 * PI + 1.0).toFloat() +
+                active * sin(reactSecs() * 30f).toFloat() * 3.2f
             c.save(); c.rotate(flick * 4f, x + 6f, g - 6f)
             val catTail = Path().apply {
                 moveTo(x + 2f, g - 4f)
@@ -3175,16 +3337,18 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
             capsule(c, x - 4f, g - 3f, 12f, 9f, cream, edge)
             capsule(c, x + 10f, g - 3f, 12f, 9f, cream, edge)
 
-            val hx = x + 3f; val hy = g - 64f + by
-            softTri(c, hx - 16f, hy - 2f, hx - 20f, hy - 22f, hx - 3f, hy - 12f, dove, edge)
-            softTri(c, hx + 16f, hy - 2f, hx + 20f, hy - 22f, hx + 3f, hy - 12f, dove, edge)
+            val hx = x + 3f; val hy = g - 64f + by - spring * 3f
+            val earTip = -3f - active * 3f          // ears flick back on the pounce
+            softTri(c, hx - 16f, hy - 2f, hx - 20f, hy - 22f - earTip, hx - 3f, hy - 12f, dove, edge)
+            softTri(c, hx + 16f, hy - 2f, hx + 20f, hy - 22f - earTip, hx + 3f, hy - 12f, dove, edge)
             softTri(c, hx - 13f, hy - 4f, hx - 16f, hy - 17f, hx - 5f, hy - 11f, berry)
             softTri(c, hx + 13f, hy - 4f, hx + 16f, hy - 17f, hx + 5f, hy - 11f, berry)
             mass(c, hx, hy, 32f, 29f, dove)
             capsule(c, hx, hy + 6f, 15f, 12f, creamHi)
-            val bl = blink()
-            eye(c, hx - 6f, hy - 1f, 3.4f, bl)
-            eye(c, hx + 6f, hy - 1f, 3.4f, bl)
+            val bl = (blink() - spring).coerceIn(0f, 1f)
+            val er = 3.4f + active * 1.0f
+            eye(c, hx - 6f, hy - 1f, er, bl)
+            eye(c, hx + 6f, hy - 1f, er, bl)
             c.drawPath(Path().apply {
                 moveTo(hx, hy + 8f); lineTo(hx - 2.4f, hy + 5.6f); lineTo(hx + 2.4f, hy + 5.6f); close()
             }, berry)
@@ -3192,6 +3356,7 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
             c.drawLine(hx + 6f, hy + 8f, hx + 20f, hy + 9f, hair)
             c.drawLine(hx - 6f, hy + 5f, hx - 20f, hy + 3f, hair)
             c.drawLine(hx - 6f, hy + 8f, hx - 20f, hy + 9f, hair)
+            c.restore()
         }
 
         // ---------------- dog, sitting, right ----------------
@@ -3200,8 +3365,18 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
             val by = sin(tau + 0.6).toFloat() * 1.6f
             castShadow(c, x + 2f, g + 4f, 78f, 40)
 
-            val wag = sin(t * 7.0 * PI).toFloat()
-            c.save(); c.rotate(wag * 8f, x + 14f, g - 8f)
+            // tap → play-bow, then a couple of happy bounces, tail going mad.
+            val dp = reactP(2)
+            val bow = ramp(dp / 0.26f) * (1f - ramp((dp - 0.30f) / 0.16f))
+            val bounce = if (dp in 0.30f..0.92f)
+                abs(sin(((dp - 0.30f) / 0.62f) * PI * 2f).toFloat()) else 0f
+            val dogA = (bow + bounce).coerceAtMost(1f)
+            c.save()
+            c.rotate(-13f * bow, x, g)
+            c.translate(0f, -bounce * 9f)
+
+            val wag = sin(t * 7.0 * PI + dogA * reactSecs() * 40f).toFloat()
+            c.save(); c.rotate(wag * (8f + dogA * 18f), x + 14f, g - 8f)
             val dogTail = Path().apply {
                 moveTo(x + 12f, g - 4f)
                 cubicTo(x + 40f, g - 4f, x + 48f, g - 26f, x + 36f, g - 40f)
@@ -3219,7 +3394,7 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
             capsule(c, x + 8f, g - 3f, 13f, 10f, cream, edge)
 
             val hx = x; val hy = g - 62f + by
-            val sway = sin(tau + 0.6).toFloat() * 3f
+            val sway = sin(tau + 0.6).toFloat() * 3f + sin(reactSecs() * 24f).toFloat() * dogA * 6f
             // Ears hang from the top corners of the head and splay outward, so
             // they read beside the face. Drawn BEFORE the head: only the part
             // outside the skull shows, exactly like a real floppy ear.
@@ -3236,12 +3411,28 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
             c.drawCircle(hx - 1.6f, hy + 2.6f, 1.1f, creamHi)
             c.drawArc(RectF(hx - 6f, hy + 6f, hx, hy + 13f), 20f, 130f, false, hair)
             c.drawArc(RectF(hx, hy + 6f, hx + 6f, hy + 13f), 30f, 130f, false, hair)
-            val loll = 4f + 1.5f * (0.5f + 0.5f * sin(t * 6.0 * PI).toFloat())
+            val loll = 4f + 1.5f * (0.5f + 0.5f * sin(t * 6.0 * PI).toFloat()) + dogA * 5f
             c.drawRoundRect(hx - 2.4f, hy + 9f, hx + 2.4f, hy + 9f + loll, 2.4f, 2.4f, berry)
+            c.restore()
         }
 
-        // ---------------- owlet, centre ----------------
-        owlet(c, 130f, g - 2f, t, hop = (0.5f + 0.5f * sin(tau).toFloat()) * 2f)
+        // ---------------- owlet, centre (flies a loop when tapped) ----------------
+        val op = reactP(3)
+        if (op > 0f) {
+            val (fx, fy, bank, look) = owlFlight(op, perchX = 130f, perchY = g - 20f,
+                cxA = 130f, cyA = 46f, rx = 82f, ry = 34f)
+            val flap = 0.55f + 0.45f * abs(sin(reactSecs() * 24f).toFloat())
+            owlet(c, 130f, g - 2f, t, flyX = fx, flyY = fy, flyBank = bank, flyFlap = flap, flyLook = look)
+        } else {
+            owlet(c, 130f, g - 2f, t, hop = (0.5f + 0.5f * sin(tau).toFloat()) * 2f)
+        }
+    }
+
+    override fun critterAt(sx: Float, sy: Float): Int = when {
+        sx in 108f..152f && sy in 88f..156f -> 3
+        sx in 28f..114f && sy in 56f..158f -> 1
+        sx in 146f..244f && sy in 50f..158f -> 2
+        else -> 0
     }
 }
 
@@ -3273,11 +3464,24 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
             val by = sin(tau).toFloat() * 1.4f
             val wiggle = sin(t * 18.0 * PI).toFloat() * pounce * 1.6f
             castShadow(c, x + 4f, g + 3f, 66f, 36)
+
+            // tap → its own wind-up wiggle and pounce, over the top of the ball chase.
+            val kp = reactP(1)
+            val kCrouch = ramp(kp / 0.28f) * (1f - ramp((kp - 0.32f) / 0.18f))
+            val kSpring = hump((kp - 0.26f) / 0.56f)
+            val kLand = hump((kp - 0.82f) / 0.18f)
+            val kAct = (kCrouch + kSpring).coerceAtMost(1f)
+            c.save()
+            c.translate(sin(reactSecs() * 46f).toFloat() * kCrouch * 2.6f,
+                kCrouch * 3.4f - kSpring * 16f + kLand * 2f)
+            c.scale(1f + kSpring * 0.05f, 1f - kSpring * 0.06f, x, g)
+
             c.save()
             c.translate(0f, -7f * pounce)
             c.rotate(11f * pounce, x, g)
 
-            val flick = sin(t * 11.0 * PI).toFloat()
+            val flick = sin(t * 11.0 * PI).toFloat() +
+                kAct * sin(reactSecs() * 30f).toFloat() * 3f
             c.save(); c.rotate(flick * 12f, x - 14f, g - 12f)
             val kitTail = Path().apply {
                 moveTo(x - 12f, g - 10f)
@@ -3318,6 +3522,7 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
             c.drawLine(hx - 5f, hy + 4f, hx - 16f, hy + 2f, hair)
             c.drawLine(hx - 5f, hy + 6f, hx - 16f, hy + 8f, hair)
             c.restore()
+            c.restore()
         }
 
         // ---------- dog, right — its bone, and it bats the ball when it lands ----------
@@ -3326,12 +3531,21 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
             // 0 when the ball is away, 1 when it drops in near the dog's paws.
             val toy = ((ballX - 168f) / 38f).coerceIn(0f, 1f)
             val bat = toy * abs(sin(t * 11.0 * PI).toFloat())          // paw-swat rhythm
-            val by = sin(tau).toFloat() * 1.5f - toy * abs(sin(t * 8.0 * PI).toFloat()) * 3f
             val gnaw = sin(t * 8.0 * PI).toFloat().coerceAtLeast(0f) * 3f * (1f - toy)
             castShadow(c, x + 4f, g + 3f, 106f, 40)
 
-            val wag = sin(t * 9.0 * PI).toFloat()
-            c.save(); c.rotate(wag * (12f + toy * 14f), x + 40f, g - 12f)
+            // tap → head snaps up, paws paddle, tail goes wild, a few body bounces.
+            val dp = reactP(2)
+            val dHead = ramp(dp / 0.20f) * (1f - ramp((dp - 0.76f) / 0.20f))
+            val dBounce = if (dp in 0.25f..0.90f)
+                abs(sin(((dp - 0.25f) / 0.65f) * PI * 3f).toFloat()) else 0f
+            val dAct = (dHead + dBounce).coerceAtMost(1f)
+            val by = sin(tau).toFloat() * 1.5f - toy * abs(sin(t * 8.0 * PI).toFloat()) * 3f -
+                dBounce * 5f
+            c.save()
+
+            val wag = sin(t * 9.0 * PI + dAct * reactSecs() * 44f).toFloat()
+            c.save(); c.rotate(wag * (12f + toy * 14f + dAct * 24f), x + 40f, g - 12f)
             val lyingTail = Path().apply {
                 moveTo(x + 36f, g - 8f)
                 cubicTo(x + 58f, g - 10f, x + 64f, g - 30f, x + 52f, g - 42f)
@@ -3347,18 +3561,20 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
             capsule(c, x + 24f, g - 4f, 30f, 12f, biscuitLo, edge)
             capsule(c, x + 12f, g - 3f, 14f, 9f, cream, edge)
 
-            // inner front paw planted; the outer one lifts to swat the ball
+            // inner front paw planted; the outer one lifts to swat the ball / paddle
             capsule(c, x - 16f, g - 3f, 24f, 10f, cream, edge)
+            val paddle = dHead * abs(sin(reactSecs() * 27f).toFloat())
             val batX = x - 30f - toy * 5f
-            val batY = g - 3f - toy * 6f - bat * 12f
-            if (toy > 0.02f) taper(c, x - 6f, g - 6f, batX + 4f, batY, 4.5f, biscuit, edge)
+            val batY = g - 3f - toy * 6f - bat * 12f - paddle * 9f
+            if (toy > 0.02f || dHead > 0.05f)
+                taper(c, x - 6f, g - 6f, batX + 4f, batY, 4.5f, biscuit, edge)
             capsule(c, batX, batY, 22f, 10f, cream, edge)
             c.drawLine(x - 38f, g - 3f, x - 38f, g - 7f, hair)
             c.drawLine(x - 34f, g - 3f, x - 34f, g - 7f, hair)
 
             bone(c, x - 27f, g + 1f, 7.5f)
 
-            val hx = x - 18f; val hy = g - 30f + by + gnaw - toy * 4f
+            val hx = x - 18f; val hy = g - 30f + by + gnaw - toy * 4f - dHead * 9f
             val sway = sin(tau + 0.5).toFloat() * 3f
             // Ears hang from the top corners and splay outward — drawn BEFORE the
             // head, so only the part beside the skull shows.
@@ -3374,15 +3590,24 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
             c.drawCircle(hx + dogLook - 1.5f, hy + 1.7f, 1f, creamHi)
             c.drawArc(RectF(hx - 5f, hy + 5f, hx, hy + 11f), 20f, 130f, false, hair)
             c.drawArc(RectF(hx, hy + 5f, hx + 5f, hy + 11f), 30f, 130f, false, hair)
-            val loll = 3f + 1.6f * (0.5f + 0.5f * sin(t * 7.0 * PI).toFloat()) + toy * 2f
+            val loll = 3f + 1.6f * (0.5f + 0.5f * sin(t * 7.0 * PI).toFloat()) + toy * 2f + dAct * 4f
             c.drawRoundRect(hx - 2.2f, hy + 7f, hx + 2.2f, hy + 7f + loll, 2.2f, 2.2f, berry)
+            c.restore()
         }
 
-        // ---------- Tawny, dead centre, hopping, watching the ball ----------
-        owlet(
-            c, 150f, g - 2f, t, hop = abs(sin(t * 4.0 * PI).toFloat()) * 8f,
-            ballX = ballX, ballY = ballY
-        )
+        // ---------- Tawny, dead centre — flies a loop when tapped ----------
+        val op = reactP(3)
+        if (op > 0f) {
+            val (fx, fy, bank, look) = owlFlight(op, perchX = 150f, perchY = g - 20f,
+                cxA = 150f, cyA = 38f, rx = 96f, ry = 28f)
+            val flap = 0.55f + 0.45f * abs(sin(reactSecs() * 24f).toFloat())
+            owlet(c, 150f, g - 2f, t, flyX = fx, flyY = fy, flyBank = bank, flyFlap = flap, flyLook = look)
+        } else {
+            owlet(
+                c, 150f, g - 2f, t, hop = abs(sin(t * 4.0 * PI).toFloat()) * 8f,
+                ballX = ballX, ballY = ballY
+            )
+        }
 
         // ---------- the ball, kept on top so it never hides ----------
         run {
@@ -3405,5 +3630,12 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
             c.drawCircle(0f, 0f, 9f, edge)
             c.restore()
         }
+    }
+
+    override fun critterAt(sx: Float, sy: Float): Int = when {
+        sx in 128f..172f && sy in 74f..120f -> 3
+        sx in 24f..120f && sy in 68f..124f -> 1
+        sx in 180f..292f && sy in 68f..124f -> 2
+        else -> 0
     }
 }
