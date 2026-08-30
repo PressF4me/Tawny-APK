@@ -1024,7 +1024,10 @@ class MainActivity : AppCompatActivity() {
      * Non-consuming, so the click still fires and the ripple still draws.
      * Everything is scaled by [animScale], so "remove animations" stops it dead.
      */
-    private fun metaPress(row: View, icon: IconView, trail: View, kind: String, glyph: String) {
+    private fun metaPress(
+        row: View, icon: IconView, trail: View, kind: String, glyph: String,
+        wipe: WipeLabel? = null,
+    ) {
         val leaves = glyph == "↗"
         val nx = dp(if (leaves) 3 else 4).toFloat()
         val ny = if (leaves) -dp(3).toFloat() else 0f
@@ -1039,6 +1042,7 @@ class MainActivity : AppCompatActivity() {
                         .setInterpolator(android.view.animation.DecelerateInterpolator())
                         .start()
                     icon.beat(kind == "heart", a)
+                    wipe?.sweep(1f, a)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     v.animate().scaleX(1f).scaleY(1f).setDuration((260 * a).toLong())
@@ -1048,6 +1052,10 @@ class MainActivity : AppCompatActivity() {
                         .setDuration((340 * a).toLong())
                         .setInterpolator(android.view.animation.OvershootInterpolator(3.0f))
                         .start()
+                    // Let the reveal land for a beat before it wipes back — on
+                    // ACTION_UP the click also fires and the browser opens, so
+                    // this mostly plays as the app leaves.
+                    wipe?.let { w -> w.postDelayed({ w.sweep(0f, a) }, (130 * a).toLong()) }
                 }
             }
             false
@@ -1062,7 +1070,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun metaRow(
         kind: String, label: String, fg: Int, trail: String,
-        sub: String? = null, onClick: () -> Unit,
+        sub: String? = null, reveal: String? = null, onClick: () -> Unit,
     ) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -1086,10 +1094,19 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(dp(19), dp(19))
         }
         addView(icon)
+        val wipe = reveal?.let {
+            WipeLabel(
+                this@MainActivity, label, it, uiFontSemi,
+                android.util.TypedValue.applyDimension(
+                    android.util.TypedValue.COMPLEX_UNIT_SP, Type.SUB, resources.displayMetrics
+                ),
+                fg,
+            )
+        }
         addView(LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(13) }
-            addView(TextView(this@MainActivity).apply {
+            addView(wipe ?: TextView(this@MainActivity).apply {
                 text = label
                 setTextColor(fg)
                 textSize = Type.SUB
@@ -1115,7 +1132,7 @@ class MainActivity : AppCompatActivity() {
         }
         addView(glyph)
         isClickable = true; isFocusable = true
-        metaPress(this, icon, glyph, kind, trail)
+        metaPress(this, icon, glyph, kind, trail, wipe)
         setOnClickListener { haptic(); onClick() }
     }
 
@@ -1894,7 +1911,9 @@ class MainActivity : AppCompatActivity() {
         // is the exact complaint the whole category earns (docs/DIRECTION.md,
         // part 2). Nothing here unlocks anything — see [showAbout].
         col.addView(metaPanel(
-            metaRow("heart", "Support Tawny", Hue.BERRY, "↗") { openExternal(SUPPORT_URL) },
+            metaRow("heart", "Support Tawny", Hue.BERRY, "↗", reveal = "ko-fi.com") {
+                openExternal(SUPPORT_URL)
+            },
             metaRow("info", "About Tawny", Hue.TEXT, "›") { showAbout() },
         ))
 
@@ -3052,6 +3071,81 @@ class MainActivity : AppCompatActivity() {
  *   "home bar" rendered as visibly lighter brown rectangles and the icon just
  *   looked broken.
  */
+/**
+ * A one-line label that, on press, sweeps an accent fill left-to-right and
+ * reveals a second string underneath it — then wipes back. Used only on the
+ * sessions-home "Support Tawny" row: base text says what it is, the wipe shows
+ * where it goes. Everything on-palette — [Hue.BERRY] fill, [Hue.ON_ACCENT] for
+ * the revealed text — and it measures to the wider of the two strings so
+ * nothing reflows mid-animation.
+ */
+private class WipeLabel(
+    ctx: Context,
+    private val base: String,
+    private val alt: String,
+    tf: Typeface,
+    textPx: Float,
+    baseColor: Int,
+) : View(ctx) {
+    private val baseP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = tf; textSize = textPx; color = baseColor; letterSpacing = 0.01f
+    }
+    private val altP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = tf; textSize = textPx; color = Hue.ON_ACCENT; letterSpacing = 0.01f
+    }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Hue.BERRY }
+    private val lead = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Hue.ON_ACCENT; alpha = 70
+    }
+    private var wipe = 0f
+    private var anim: ValueAnimator? = null
+
+    override fun onMeasure(wSpec: Int, hSpec: Int) {
+        val w = maxOf(baseP.measureText(base), altP.measureText(alt))
+        val fm = baseP.fontMetrics
+        setMeasuredDimension(
+            resolveSize((w + 1f).toInt(), wSpec),
+            resolveSize((fm.descent - fm.ascent + 1f).toInt(), hSpec),
+        )
+    }
+
+    override fun onDraw(c: Canvas) {
+        val by = -baseP.fontMetrics.ascent
+        c.drawText(base, 0f, by, baseP)
+        if (wipe <= 0f) return
+        val x = wipe * width
+        c.save()
+        c.clipRect(0f, 0f, x, height.toFloat())
+        val pad = height * 0.12f
+        val r = (height - 2f * pad) / 2f
+        c.drawRoundRect(-r, pad, x, height - pad, r, r, fill)
+        c.drawRect(x - 2f, 0f, x, height.toFloat(), lead)
+        c.drawText(alt, 0f, by, altP)
+        c.restore()
+    }
+
+    /** Sweep to [target] (0 hidden, 1 fully revealed). Honours the animator
+     *  scale — 0 snaps with no motion. */
+    fun sweep(target: Float, scale: Float) {
+        anim?.cancel()
+        if (scale <= 0f) { wipe = target; invalidate(); return }
+        val opening = target > wipe
+        anim = ValueAnimator.ofFloat(wipe, target).apply {
+            duration = ((if (opening) 300 else 200) * scale).toLong()
+            interpolator = if (opening)
+                android.view.animation.DecelerateInterpolator(1.7f)
+            else android.view.animation.AccelerateInterpolator(1.3f)
+            addUpdateListener { wipe = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        anim?.cancel(); anim = null
+        super.onDetachedFromWindow()
+    }
+}
+
 private class IconView(
     ctx: Context,
     private val kind: String,
