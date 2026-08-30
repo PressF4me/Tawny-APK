@@ -126,7 +126,11 @@ dependencies {
 val syncWebAssets by tasks.registering(Copy::class) {
     // README.md: public/sounds/ documents which chime clips are still
     // placeholders, which is for whoever replaces them, not for the APK.
-    from(rootProject.file("../public")) { exclude("**/.DS_Store", "**/README.md") }
+    // sounds/_src/: the original recordings the chime clips are derived from,
+    // kept for re-editing (see tools/gen-chimes.sh). Not for the APK.
+    from(rootProject.file("../public")) {
+        exclude("**/.DS_Store", "**/README.md", "**/sounds/_src/**")
+    }
     into(layout.projectDirectory.dir("src/main/assets/web"))
     doLast {
         val stunJson = stunUrls.split(",")
