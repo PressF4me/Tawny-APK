@@ -49,6 +49,13 @@ patched code** under `wrangler dev`.
 Proves the key-commitment does not let an attacker permanently claim an *idle*
 room, which would be a worse failure than the bug it fixes. 4/4 locally.
 
+## `turn-credentials.mjs` — is TURN actually on?
+
+Registers a Monitor in a fresh room, then asks `/turn` with that room's ticket.
+PASS means a `turn:` URL came back; a 404 "no turn configured" means the
+`TURN_KEY_ID` / `TURN_API_TOKEN` secrets are not set on the Worker. Verified
+provisioned against the deployed Worker on 2026-08-29.
+
 ## Running the worker locally
 
 ```bash
