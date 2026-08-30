@@ -19,7 +19,7 @@
 //   deno/main.ts     (Deno Deploy alternative)
 //   ../server.js     (self-host reference)
 
-export const PRIVACY_UPDATED = '2026-08-29';
+export const PRIVACY_UPDATED = '2026-08-30';
 
 export const PRIVACY_HEADERS = {
   'content-type': 'text/html; charset=utf-8',
@@ -130,7 +130,9 @@ export const PRIVACY_HTML = `<!doctype html>
       <td>An optional, deliberately out-of-the-way log (long-press the small
         version number) for working out why a connection failed. Records hashed
         room identifiers, never your key.</td>
-      <td>No, unless you choose to send it. Excluded from cloud backup.</td>
+      <td>Only if you tap <strong>Send to Tawny</strong> &mdash; see
+        &ldquo;Sending a diagnostics report&rdquo; below. Otherwise it stays on
+        your device and is excluded from cloud backup.</td>
     </tr>
     <tr>
       <td><strong>Pairing key</strong></td>
@@ -171,6 +173,23 @@ export const PRIVACY_HTML = `<!doctype html>
   this listing; contact details are below. This page is served by that same
   service.</p>
 
+  <h2>Sending a diagnostics report</h2>
+  <p>The diagnostics screen has a <strong>Send to Tawny</strong> button. It does
+  nothing unless you tap it. When you do, the app sends <strong>that one
+  diagnostics log</strong>, together with your device model, your Android version
+  and the app's version number, to the developer's rendezvous service over an
+  encrypted connection, to help work out why a connection failed.</p>
+  <ul>
+    <li>It is never sent automatically, only when you tap the button.</li>
+    <li>It contains no account, name, email or advertising identifier &mdash;
+      there are none in the app &mdash; and the log records only hashed room
+      identifiers, never your pairing key.</li>
+    <li>Reports are held for at most 30 days and then deleted automatically.</li>
+    <li>If you would rather not send it through the app, the same screen offers
+      &ldquo;Send another way&rdquo; (your device's normal share sheet) and
+      &ldquo;Copy&rdquo;.</li>
+  </ul>
+
   <h2>Children</h2>
   <p>Tawny is not directed to children under 13 and does not knowingly collect
   information from them.</p>
@@ -184,13 +203,24 @@ export const PRIVACY_HTML = `<!doctype html>
   leaked.</p>
 
   <h2>Supporting Tawny</h2>
-  <p>The app carries one external link, to
-  <a href="https://ko-fi.com/tawnyone">ko-fi.com/tawnyone</a>, shown in the About
-  screen and on the web client's footer. Following it opens your browser;
-  nothing about you is sent there by the app, and no purchase, account or
-  contribution changes anything in the app — every feature is available to
-  everyone. Any payment page reached that way is operated by Ko-fi under its own
-  privacy policy, not by us.</p>
+  <p>Supporting Tawny is entirely optional and unlocks nothing &mdash; every
+  feature is available to everyone, whether or not anyone ever contributes.</p>
+  <ul>
+    <li><strong>Ko-fi.</strong> The About screen and the web client's footer
+      carry one external link, to
+      <a href="https://ko-fi.com/tawnyone">ko-fi.com/tawnyone</a>. Following it
+      opens your browser; nothing about you is sent there by the app. Any payment
+      page reached that way is operated by Ko-fi under its own privacy policy,
+      not by us.</li>
+    <li><strong>Bitcoin (Lightning).</strong> The <strong>Tip in Bitcoin</strong>
+      screen shows a Lightning Address (<code>loustrikes@strike.me</code>). Its
+      button asks Android to open that address in whatever Lightning wallet you
+      have installed; the wallet, not Tawny, does everything from there. Tawny
+      sets no amount, holds no funds, includes no wallet, and never handles a
+      key, an invoice or a payment. If you have no wallet installed, the screen
+      simply shows the address and a QR code. Nothing about you is sent anywhere
+      by opening this screen.</li>
+  </ul>
 
   <h2>Changes</h2>
   <p>If this policy changes materially, the &ldquo;Last updated&rdquo; date

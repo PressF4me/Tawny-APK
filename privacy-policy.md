@@ -1,6 +1,6 @@
 # Tawny — Privacy Policy
 
-_Last updated: 2026-08-29_
+_Last updated: 2026-08-30_
 
 Tawny is a two-way pet monitor. One device (**the Monitor**) stays with your pet
 and sends its camera and microphone; one or more other devices (**Viewers**)
@@ -26,7 +26,7 @@ your information.
 | **Microphone** | The Monitor streams room sound; the Viewer sends your voice when you hold "talk". | Audio is sent, encrypted, only to the paired device(s). Never to us. |
 | **Local network** | To discover and connect your two phones. | Stays on your Wi-Fi. |
 | **Photos you save** ("Snapshot") | Saved to your device's Pictures folder, in a "Tawny" album. | No. |
-| **Diagnostics log** | An optional, deliberately out-of-the-way log (long-press the small version number) for working out why a connection failed. Records hashed room identifiers, never your key. | No, unless you choose to send it. Excluded from cloud backup. |
+| **Diagnostics log** | An optional, deliberately out-of-the-way log (long-press the small version number) for working out why a connection failed. Records hashed room identifiers, never your key. | Only if you tap **Send to Tawny** — see "Sending a diagnostics report" below. Otherwise it stays on your device and is excluded from cloud backup. |
 | **Pairing key** | A random 128-bit key, generated on your device, that identifies your private channel. Stored in the app's private storage. | No — it is never sent to any server. Servers only ever see an irreversible hash of it. |
 
 The app requests camera and microphone access only when you set up a role, and
@@ -52,6 +52,23 @@ Video and audio use **WebRTC** and are encrypted end to end with DTLS-SRTP.
 The rendezvous service for the Play release is operated by the developer of this
 listing; contact details are below.
 
+## Sending a diagnostics report
+
+The diagnostics screen has a **Send to Tawny** button. It does nothing unless you
+tap it. When you do, the app sends **that one diagnostics log**, together with
+your device model, your Android version and the app's version number, to the
+developer's rendezvous service over an encrypted connection, to help work out why
+a connection failed.
+
+- It is never sent automatically, only when you tap the button.
+- It contains no account, name, email or advertising identifier — there are
+  none in the app — and the log records only hashed room identifiers, never your
+  pairing key.
+- Reports are held for at most 30 days and then deleted automatically.
+- If you would rather not send it through the app, the same screen offers
+  "Send another way" (your device's normal share sheet) and "Copy", so you can
+  send it by email or not at all.
+
 ## Children
 
 Tawny is not directed to children under 13 and does not knowingly collect
@@ -72,12 +89,20 @@ the new version will ship with an app update.
 
 ## Supporting Tawny
 
-The app carries one external link, to **<https://ko-fi.com/tawnyone>**, shown in
-the About screen and on the web client's footer. Following it opens your
-browser; nothing about you is sent there by the app, and no purchase, account or
-contribution changes anything in the app — every feature is available to
-everyone. Any payment page reached that way is operated by Ko-fi under its own
-privacy policy, not by us.
+Supporting Tawny is entirely optional and unlocks nothing — every feature is
+available to everyone, whether or not anyone ever contributes.
+
+- **Ko-fi.** The About screen and the web client's footer carry one external
+  link, to **<https://ko-fi.com/tawnyone>**. Following it opens your browser;
+  nothing about you is sent there by the app. Any payment page reached that way
+  is operated by Ko-fi under its own privacy policy, not by us.
+- **Bitcoin (Lightning).** The **Tip in Bitcoin** screen shows a Lightning
+  Address (`loustrikes@strike.me`). Its button asks Android to open that address
+  in whatever Lightning wallet you have installed; the wallet, not Tawny, does
+  everything from there. Tawny sets no amount, holds no funds, includes no
+  wallet, and never handles a key, an invoice or a payment. If you have no
+  wallet installed, the screen simply shows the address and a QR code. Nothing
+  about you is sent anywhere by opening this screen.
 
 ## Contact
 
