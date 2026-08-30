@@ -587,7 +587,7 @@ function stopMeter() { S.meterStop?.(); S.meterStop = null; }
 // oscillator version rather than to silence.
 
 const CHIMES = {
-  bark:    { label: 'Bark',        file: 'sounds/bark.ogg',    gain: 0.9 },
+  bark:    { label: 'Dog toy',     file: 'sounds/bark.ogg',    gain: 0.9 },
   pspsps:  { label: 'Psp psp psp', file: 'sounds/pspsps.ogg',  gain: 1.0 },
   meow:    { label: 'Meow',        file: 'sounds/meow.ogg',    gain: 0.85 },
   goodboy: { label: 'Good boy',    file: 'sounds/goodboy.ogg', gain: 0.8 },

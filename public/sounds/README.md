@@ -20,23 +20,24 @@ from. It is the master copy — edit those, or the trim windows in
 `tools/gen-chimes.sh`, and re-run that script to rebuild the whole set. `_src/`
 is excluded from the APK.
 
-## ⚠️ Licensing — confirm before a public release
+## ⚠️ Licensing — two of the four are not clear to ship
 
-The four recordings in `_src/` were supplied by the developer. Every one must be
-**your own recording** or **CC0 / public domain** — a Play Store release cannot
-ship audio under a licence that requires attribution or forbids commercial use.
-Fill this in and keep the proof:
-
-| `_src/` file | Origin | Licence | Link / note |
+| `_src/` file | Origin | Licence | Verdict |
 |---|---|---|---|
-| `dog toy - dog.mp3` | _TBC_ | _TBC_ | |
-| `pspsps cat.ogg` | _TBC_ | _TBC_ | |
-| `Meow - cat.ogg` | _TBC_ | _TBC_ | |
-| `goodboy - dog.mp3` | _TBC_ | _TBC_ | |
+| `dog toy - dog.mp3` | Pixabay Sound Effects #5987 (`film-special-effects-dog-toy`) | Pixabay Content License — commercial use OK, no attribution | ✅ ship |
+| `goodboy - dog.mp3` | Pixabay Sound Effects #352699 (`people-good-boy-male-voice-praise`) | Pixabay Content License | ✅ ship |
+| `Meow - cat.ogg` | Wikimedia Commons `File:Meow.ogg`, by Dan Crosby | **CC-BY-SA 3.0** — requires a credit line *and* the clip stays under CC-BY-SA (share-alike) | ⚠️ replace, or add an in-app credit + keep the file offered under CC-BY-SA |
+| `pspsps cat.ogg` | 101soundboards.com (user upload "adekgobiet") | none stated; 101soundboards hosts user uploads with no cleared rights and its terms restrict commercial reuse | 🔴 replace |
 
-Good CC0 sources if any need replacing: **freesound.org** (filter *License →
-Creative Commons 0*), **Pixabay Sound Effects** (free for commercial use, no
-attribution), or your own phone.
+**Pixabay:** its Content License allows use in a commercial app with no
+attribution. You cannot resell the sound as a standalone file or use it to train
+a model — neither applies here. Keep a copy of the download page for your
+records.
+
+**Replace `pspsps` and (ideally) `meow`** with CC0: **freesound.org** filtered to
+*License → Creative Commons 0*, or **Pixabay Sound Effects**. Drop the new file
+into `_src/`, update the trim window in `tools/gen-chimes.sh` if needed, re-run
+it, rebuild, commit both copies.
 
 ## Format
 
