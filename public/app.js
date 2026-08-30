@@ -1807,10 +1807,16 @@ function retuneAll() {
 
 const localVideoTrack = () => S.local?.getVideoTracks?.()[0] || null;
 
+// Cameras that advertise `torch: true` and then throw when it is applied. The
+// capability is simply a lie on some drivers — a tablet with no lamp at all
+// still reports one — and the only way to find out is to ask. Kept on the
+// track, so switching lens gives that camera its own fair try.
+const torchDud = new WeakSet();
+
 /** Does the track we are *currently sending* expose a controllable light? */
 function torchCapable() {
   const t = localVideoTrack();
-  if (!t || t.readyState !== 'live') return false;
+  if (!t || t.readyState !== 'live' || torchDud.has(t)) return false;
   try { return t.getCapabilities?.().torch === true; } catch { return false; }
 }
 
@@ -1843,7 +1849,21 @@ async function pushTorch(on) {
   const t = localVideoTrack();
   if (!t) return false;
   try { await t.applyConstraints({ advanced: [{ torch: !!on }] }); return true; }
-  catch (e) { diag(`torch apply failed: ${e && e.name}`); return false; }
+  catch (e) {
+    // An *off* push that fails on a camera we never managed to light is not a
+    // fault: there was no light to put out. The lamp-less tablet answers the
+    // teardown push with UnknownError and logged it as a failure at the end of
+    // every single session. Believe the refusal instead of the capability, and
+    // say so quietly. A failed *off* on a light that IS burning stays loud.
+    if (!on && !S.torchOn) {
+      torchDud.add(t);
+      S.torchSupported = false;
+      diag('torch: this camera reports a light it does not have');
+      return false;
+    }
+    diag(`torch apply failed: ${e && e.name}`);
+    return false;
+  }
 }
 
 async function setTorch(on, why) {
