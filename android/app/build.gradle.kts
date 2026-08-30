@@ -47,12 +47,12 @@ val stunUrls = localOrProject("tawny.stunUrls")
 
 android {
     namespace = "com.tawny.monitor"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.tawny.monitor"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
 
