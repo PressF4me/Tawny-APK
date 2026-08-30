@@ -51,7 +51,7 @@ const S = {
   local: null, remoteStream: null,
   ice: [], iceTimer: null, relayOnly: false,  // filled by fetchIce() when a rendezvous is configured
   facing: 'environment', micOn: true, camSending: false,
-  wake: null, meterStop: null, ac: null, closing: false,
+  wake: null, meterStop: null, ac: null, closing: false, dimmed: false,
   editing: null, scanStop: null, pending: null,
   featured: null,
   cameras: [], cameraIndex: 0, zoomLevel: 1.0, zoomHardware: false, stationZoomSupported: false
@@ -67,6 +67,31 @@ const MAX_PENDING_ICE = 64;
 
 // How long a Viewer waits for a picture before saying something useful.
 const CONNECT_TIMEOUT_MS = 25000;
+
+// ------------------------------------------------------------ power budget
+//
+// The Monitor is a phone left on a charger for hours, often an old handset
+// with a tired battery. Dim mode is when it is genuinely dozing — nobody is
+// looking at its screen, only at the Viewer's — so it is the moment to spend
+// as little as possible while still sending a usable picture.
+//
+// Every number that trades quality for battery lives here, and nowhere else.
+//
+//  * `video` is the encode ceiling while dimmed. 960x540/24 is the normal
+//    capture; /1.5 lands at 640x360, which is under the 640x480 we are willing
+//    to defend as "still a useful look at the pet", and 15fps halves the
+//    encoder's work. 500kbps is comfortably enough for that frame at that rate.
+//  * `captureFps` is pushed at the camera track itself, not just the encoder.
+//    That is the bigger win of the two: it takes the sensor, the ISP and the
+//    whole capture pipeline down with it, not only the H.264 encode.
+//  * `meterHz` — the level meter is 14 bars on a black screen. It ran on
+//    requestAnimationFrame, i.e. at the panel's full refresh rate, to animate
+//    something with 14 possible states. A few times a second reads identically.
+const POWER = {
+  video: { scaleDownBy: 1.5, maxFramerate: 15, maxBitrate: 500_000 },
+  captureFps: 15,
+  meterHz: 4
+};
 
 // --------------------------------------------------------------- storage
 
@@ -556,7 +581,7 @@ function startMeter(stream) {
   const buf = new Uint8Array(an.fftSize);
   const bars = [...el.meter.children];
   const dimBars = [...el.dimMeter.children];
-  let raf;
+  let raf, timer;
 
   const tick = () => {
     an.getByteTimeDomainData(buf);
@@ -568,17 +593,24 @@ function startMeter(stream) {
     const rms = Math.sqrt(sum / buf.length);
     const level = Math.min(1, Math.log10(1 + rms * 60) / Math.log10(61));
     const lit = Math.round(level * bars.length);
+    // Dimmed, the rail meter is behind an opaque overlay: writing to it is
+    // work nobody can see, and each write is a style invalidation.
+    const live = S.dimmed ? [dimBars] : [bars, dimBars];
     for (let i = 0; i < bars.length; i++) {
       const cls = i < lit ? (i >= bars.length - 2 ? 'peak' : 'lit') : '';
-      if (bars[i].className !== cls) bars[i].className = cls;
-      if (dimBars[i].className !== cls) dimBars[i].className = cls;
+      for (const set of live) if (set[i].className !== cls) set[i].className = cls;
     }
-    raf = requestAnimationFrame(tick);
+    // Full refresh rate while someone is watching this screen; a few hertz
+    // when it is black. rAF is also throttled hard when the page is hidden,
+    // which would stall the meter — the timer keeps ticking either way.
+    if (S.dimmed) timer = setTimeout(tick, 1000 / POWER.meterHz);
+    else raf = requestAnimationFrame(tick);
   };
   tick();
 
   S.meterStop = () => {
     cancelAnimationFrame(raf);
+    clearTimeout(timer);
     try { src.disconnect(); } catch {}
     for (const b of [...bars, ...dimBars]) b.className = '';
   };
@@ -1623,9 +1655,13 @@ async function tuneVideoSender(peer) {
   try {
     const p = sender.getParameters();
     if (!p.encodings || !p.encodings.length) p.encodings = [{}];
-    p.encodings[0].maxBitrate = bitrateFor(viewerCount());
-    p.encodings[0].maxFramerate = viewerCount() > 3 ? 20 : 24;
-    p.encodings[0].scaleResolutionDownBy = 1;
+    // Dimmed, the Monitor drops to the power budget: a smaller, slower, leaner
+    // encode. The Viewer keeps a picture throughout — it just gets the cheap
+    // one while the phone it comes from is asleep in the corner.
+    const cap = S.dimmed ? POWER.video : null;
+    p.encodings[0].maxBitrate = Math.min(bitrateFor(viewerCount()), cap?.maxBitrate ?? Infinity);
+    p.encodings[0].maxFramerate = Math.min(viewerCount() > 3 ? 20 : 24, cap?.maxFramerate ?? Infinity);
+    p.encodings[0].scaleResolutionDownBy = cap?.scaleDownBy ?? 1;
     p.encodings[0].networkPriority = 'high';
     p.encodings[0].priority = 'high';
     p.degradationPreference = 'maintain-resolution';
@@ -2005,6 +2041,7 @@ async function keepAwake() {
 
 function hangUp() {
   S.closing = true;
+  setDim(false);   // never leave the live screen with the backlight pinned down
   for (const p of S.peers.values()) sig({ type: 'bye', to: p.id }, p);
   teardownAll();
   closeAllSignals();
@@ -2181,8 +2218,43 @@ $('#btn-mute').addEventListener('click', () => {
   btn.querySelector('span:last-child').textContent = S.micOn ? 'Mute mic' : 'Unmute mic';
 });
 
-$('#btn-dim').addEventListener('click', () => { el.dimmer.hidden = false; });
-el.dimmer.addEventListener('click', () => { el.dimmer.hidden = true; });
+// Dim mode. The overlay used to be only a black <div> laid over the page: on
+// an LCD the backlight stayed wherever the user had left it, and on an AMOLED
+// the panel still drove every pixel while the compositor, the preview decode
+// and a 60fps meter all kept running underneath. "Dim" cost almost nothing.
+//
+// Going dim now means all of it at once — the native shell pulls the backlight
+// down (the one thing a web page cannot reach), the self-preview stops, the
+// animations stop, the meter drops to a few hertz, and both the camera and the
+// encoder drop to the power budget above. The stream never stops: the Viewer
+// keeps its picture throughout, it just gets the cheap one while the phone
+// sending it is asleep in the corner.
+async function setDim(on) {
+  if (S.dimmed === on) return;
+  S.dimmed = on;
+  el.dimmer.hidden = !on;
+  document.body.classList.toggle('dimmed', on);
+  try { androidNative?.setDimmed?.(on); } catch {}
+
+  // The self-preview is a second, full-rate video sink for a stream this phone
+  // is already busy encoding — and nobody is looking at it.
+  try { on ? el.local.pause() : await el.local.play(); } catch {}
+
+  // Take the capture itself down, not just the encode. This is the half the
+  // sensor and the ISP actually feel; the encoder cap alone leaves them at 24.
+  for (const t of S.local?.getVideoTracks() ?? []) {
+    try {
+      await t.applyConstraints(on
+        ? { ...cameraConstraints(), frameRate: { ideal: POWER.captureFps, max: POWER.captureFps } }
+        : cameraConstraints());
+    } catch {}
+  }
+  for (const peer of S.peers.values()) tuneVideoSender(peer);
+  diag(`dim ${on ? 'on' : 'off'}`);
+}
+
+$('#btn-dim').addEventListener('click', () => setDim(true));
+el.dimmer.addEventListener('click', () => setDim(false));
 
 $('#sas-ok')?.addEventListener('click', () => {
   // Store the approved code itself so a later change re-raises this panel.

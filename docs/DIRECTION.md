@@ -44,6 +44,86 @@ taking regardless: a persistent notification while a session is live
 (`POST_NOTIFICATIONS`), which is the honest signal that a phone is acting as a
 camera.
 
+#### Decision (2026-08-30): (a) confirmed. Battery mitigation landed; FGS deferred.
+
+Reviewed while doing the Monitor battery pass. **(a) stands**, and the deciding
+argument is not schedule — it is that *a foreground service on its own does not
+buy screen-off capture here.*
+
+An FGS with `camera|microphone` lifts the **platform's** UID-level ban on
+background camera use. It does nothing about the **WebView**, which is what
+actually owns the capture: Chromium tears its capture pipeline down when the
+Activity stops and the window's surface goes away, and the page already sees
+this today (`watchLocalTracks` → `S.captureLost` → the "paused" banner). So the
+real work item is not "add a Service class" — it is "move capture out of the
+WebView and onto libwebrtc", which this brief already said above and which is a
+rewrite of the streaming core, not a submission-week patch.
+
+Two further reasons not to fold it into the in-flight submission:
+
+- **The Play cost is partly a human deliverable.** New FGS types require the
+  Foreground Service declaration form *per type*, each wanting a short demo
+  video (a hosted URL) showing the feature in use, plus a new prominent
+  disclosure and the `POST_NOTIFICATIONS` surface. The video has to be recorded
+  by a person. Declaring an FGS whose behaviour does not match the shipped build
+  is a well-known rejection and post-publication-removal cause.
+- **The submission is staged and self-consistent.** Runbook, `PLAY-SUBMISSION`,
+  review notes and the ship pack all currently say "no service, keep the screen
+  on", and that is true. Flipping it means editing ~9 documents plus the Console.
+
+**What landed instead** (no new permission, no service, no doc claim changed):
+dim mode now pins window `screenBrightness` to `0.004` so the backlight really
+goes dark, the camera track and encoder drop to a low-power profile while it is
+showing, the preview and the page's animations stop, and the level meter falls
+from the panel refresh rate to 4 Hz. Most of the practical battery win, none of
+the submission risk. See the power section of `MainActivity.kt` and `POWER` in
+`public/app.js`.
+
+**Concrete plan for the FGS milestone**, in order:
+
+1. **Prove the premise first, before any Play paperwork.** Spike a throwaway
+   `camera`-type FGS on top of today's WebView build and check whether capture
+   actually survives a real screen-off on hardware (watch for the `paused` diag
+   line). If it survives, the milestone is small. If it does not — the expected
+   outcome — the milestone is the libwebrtc capture path, and should be sized
+   as such. Everything below is wasted until this is answered.
+2. **Manifest** (`android/app/src/main/AndroidManifest.xml`): add
+   `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CAMERA`,
+   `FOREGROUND_SERVICE_MICROPHONE`, `POST_NOTIFICATIONS`; declare
+   `<service android:name=".MonitorService" android:exported="false"
+   android:foregroundServiceType="camera|microphone" />`.
+3. **`MonitorService.kt`**: started from `beginLive()` *while the Activity is
+   foreground* — on API 34+ a `camera`-type service started from the background
+   throws, so this ordering is load-bearing. `startForeground(id, notification,
+   FOREGROUND_SERVICE_TYPE_CAMERA or FOREGROUND_SERVICE_TYPE_MICROPHONE)`.
+   Stopped in `endLive()` and `onDestroy()`.
+4. **Notification**: its own low-importance channel ("Monitor running"), ongoing,
+   text "Tawny is streaming from this phone's camera", tapping returns to the
+   Activity, with a "Stop" action wired to `endLive()`. This is the honest
+   signal that a phone is acting as a camera and should ship even if the
+   screen-off path slips.
+5. **Disclosure**: reuse the `disclose()` pattern in `MainActivity.kt` with a
+   second, screen-off-specific string — proposed: *"To keep watching with the
+   screen off, Tawny needs to keep using this phone's camera and microphone
+   while it is not on screen. A notification will show for as long as it is
+   streaming. Video and sound are still sent encrypted, directly between your
+   devices, and are never recorded or stored."* Shown before the first
+   screen-off session, not at install.
+6. **`POST_NOTIFICATIONS`** runtime request on API 33+, asked at the same
+   moment, and degrade gracefully when refused (the service still runs; Android
+   shows its own notice).
+7. **Play Console**: Foreground Service declaration for *both* `camera` and
+   `microphone` — purpose, a user-visible description, and a demo video URL
+   each; refresh the prominent-disclosure answers; re-check Data Safety (no new
+   data types, so likely unchanged).
+8. **Docs, in the same commit as the code**: runbook §7 + "Honest limitations" +
+   Step 6 (add the FGS declaration answers), `PLAY-SUBMISSION.md` §2 and §7 and
+   its residual-questions list, `docs/review-notes.md`, this section (mark
+   done), the store "Good to know" copy, and the ship pack (`listing/review-
+   notes.md`, `listing/category-and-contact.md`, `listing/data-safety-answers.md`
+   if it moves, `README.md`). Runbook stays canonical; the ship-pack
+   `listing/*.md` mirror it and carry a "Last synced" header.
+
 ### B. TURN — ✅ RESOLVED (provisioned on Cloudflare Realtime)
 
 _Was: `/turn` returned 404, so two peers both on cellular / behind CGNAT simply

@@ -959,6 +959,29 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* dim mode */
 
+/* Dim mode. The overlay is opaque and the backlight is pinned near-black, so
+   everything under it is invisible — but it was all still costing a compositor
+   pass every frame, and the animated parts (the connecting loader, the
+   talk-back halo, the "breathe" pulse) a style recalculation on top of that.
+   Take the whole live screen out of rendering instead.
+
+   Audio is deliberately untouched: `visibility` is a rendering property and
+   does not reach the <audio> elements inside #live, so the Viewer's talk-back
+   and the chimes keep playing exactly as before. The camera is untouched too —
+   a <video> is only a sink, and the MediaStream track behind it goes on
+   feeding the encoder. */
+body.dimmed #live { visibility: hidden; }
+body.dimmed #live *,
+body.dimmed #live *::before,
+body.dimmed #live *::after {
+  animation: none !important;
+  transition: none !important;
+}
+/* The theme toggle hangs off <body>, not #live, and outranks the dimmer's
+   z-index — so it stayed lit in the corner of an otherwise black screen. On an
+   AMOLED it was very nearly the only thing still drawing power. */
+body.dimmed #theme-toggle { display: none; }
+
 .dimmer {
   position: fixed;
   inset: 0;

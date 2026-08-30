@@ -238,9 +238,29 @@ object Hue {
  * and signaling address to jump straight into the session.
  *
  * The wrapper still does what a WebView cannot: grant the WebView's own capture
- * request, hold the screen on during a call, route audio through the hardware
- * echo canceller, and catch snapshot downloads as base64.
+ * request, hold the screen on during a call, pull the backlight down and slow
+ * the panel while the Monitor dozes, route audio through the hardware echo
+ * canceller, and catch snapshot downloads as base64.
  */
+
+/**
+ * Dim mode's backlight level. Deliberately *not* 0f: several OEM builds —
+ * Samsung's among them — read an exact zero as "no override, follow the system
+ * value", which hands the backlight straight back to auto-brightness. In a lit
+ * room that is the opposite of what dim mode is for. A hair above zero is
+ * unambiguous to every implementation, and is visually black on both an AMOLED
+ * A50 and an LCD tablet.
+ */
+private const val DIM_BRIGHTNESS = 0.004f
+
+/**
+ * The floor for the refresh-rate drop. Panels advertise seamless low-rate modes
+ * well below this; going down there makes the UI feel broken on wake and buys
+ * very little over 30, since the expensive part is the scan-out, not the last
+ * few hertz.
+ */
+private const val MIN_REFRESH_HZ = 30f
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var root: FrameLayout
@@ -250,6 +270,8 @@ class MainActivity : AppCompatActivity() {
     private var pairOverlayHidden = false
     private var pairChip: View? = null   // QR shown over the Watcher's live view while waiting
     private var isLive = false
+    /** Dim mode is showing, so the backlight is pinned near-black. */
+    private var isDimmed = false
 
     private var scene: PetSceneView? = null
     private var playScene: PlayfulSceneView? = null   // the animated critters on sessions home
@@ -415,7 +437,7 @@ class MainActivity : AppCompatActivity() {
         pendingScan = savedInstanceState?.getBoolean("pendingScan", false) == true
         when {
             resumed -> Unit
-            role == "station" && !key.isNullOrBlank() -> goLive("station")
+            role == "station" && !key.isNullOrBlank() -> startStationLive()
             role == "viewer" && canViewerResume -> showHandheldHome()
             loadRecentSessions().isNotEmpty() -> showSessionsHome()
             // Onboarding is a one-time thing: it shows on the very first launch
@@ -510,6 +532,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun haptic() {
+        // Nobody is holding the Monitor during a session, and the vibrator
+        // motor is the most expensive thing on the phone per millisecond.
+        if (isLive) return
         root.performHapticFeedback(
             HapticFeedbackConstants.VIRTUAL_KEY,
             HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
@@ -533,7 +558,7 @@ class MainActivity : AppCompatActivity() {
             showHandheldHome()
         } else {
             prefs.edit().putString("role", "station").apply()
-            goLive("station")
+            startStationLive()
         }
         return true
     }
@@ -2326,19 +2351,61 @@ class MainActivity : AppCompatActivity() {
             return
         }
         disclose(needCamera = true, tag = "monitor") {
-            if (prefs.getString("channelKey", null).isNullOrBlank()) {
-                promptRoomName { name ->
-                    prefs.edit()
-                        .putString("channelKey", newKey())
-                        .putString("channelName", name)
-                        .remove("myToken")        // fresh channel → fresh admission ticket
-                        .apply()
+            monitorBatteryTip {
+                if (prefs.getString("channelKey", null).isNullOrBlank()) {
+                    promptRoomName { name ->
+                        prefs.edit()
+                            .putString("channelKey", newKey())
+                            .putString("channelName", name)
+                            .remove("myToken")        // fresh channel → fresh admission ticket
+                            .apply()
+                        startWatcher(ip)
+                    }
+                } else {
                     startWatcher(ip)
                 }
-            } else {
-                startWatcher(ip)
             }
         }
+    }
+
+    /**
+     * Every way a user can put this phone on duty as a Monitor: a cold start
+     * that restores the saved role, a swipe-forward resume, and the pairing
+     * flow in [onWatcher]. They all go through here so the battery tip has one
+     * place to live rather than three. [goLive] itself is left alone — it is
+     * also called to rebuild the live view mid-session, which is not a moment
+     * to put a dialog in front of anyone.
+     */
+    private fun startStationLive() = monitorBatteryTip { goLive("station") }
+
+    /**
+     * Shown once, the first time this phone is set up as a Monitor.
+     *
+     * Only three things, and only the ones the owner has to do themselves: the
+     * screen is far and away the biggest draw on a phone that is being held
+     * awake for hours, and the two settings that govern it are system settings
+     * an app cannot touch. Everything Tawny can do for itself, it now does
+     * without asking (see the power section).
+     *
+     * Not cancelable, because dismissing it would strand the caller — [then] is
+     * the rest of the start-the-monitor flow.
+     */
+    private fun monitorBatteryTip(then: () -> Unit) {
+        if (prefs.getBoolean("monitorTipSeen", false)) { then(); return }
+        prefs.edit().putBoolean("monitorTipSeen", true).apply()
+        themedDialog(
+            title = "Before you leave it watching",
+            body = "This phone has to stay awake to keep streaming, and its screen " +
+                "is what drains it. Three things help more than anything else:\n\n" +
+                "1.  Leave it on a charger.\n\n" +
+                "2.  Turn the screen brightness right down — and turn adaptive " +
+                "brightness off, or the phone will quietly brighten itself back up.\n\n" +
+                "3.  Once a viewer has connected, tap “Dim screen”. Tawny takes " +
+                "the backlight down to almost nothing and keeps streaming.",
+            primaryLabel = "Got it",
+            onPrimary = then,
+            cancelable = false
+        )
     }
 
     /**
@@ -3101,6 +3168,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         /**
+         * Dim mode, reaching the one thing the page cannot touch itself: the
+         * backlight. Called by public/app.js as the black overlay opens and
+         * closes. Gated on a live session so a stray call can never strand the
+         * user on a black screen.
+         */
+        @JavascriptInterface
+        fun setDimmed(on: Boolean) {
+            runOnUiThread { applyDim(on && isLive) }
+        }
+
+        /**
          * WebView drops `<a download>` on blob: URLs, so snapshots would
          * disappear without this. The page hands us base64 instead.
          */
@@ -3141,9 +3219,103 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ------------------------------------------------------------- power
+    //
+    // The Monitor sits on a charger for hours, usually on an old handset whose
+    // battery is already tired. Three levers live here, none of which needs a
+    // new permission or a service:
+    //
+    //  * the backlight. Dim mode was a black <div> in the WebView, which on an
+    //    LCD leaves the backlight burning at whatever the user set and on an
+    //    AMOLED still drives the panel. Only the window can pull the actual
+    //    light down, so the page asks us to.
+    //  * the refresh rate. A monitor's own screen shows a still camera frame.
+    //    Scanning it at 90 or 120Hz is heat and nothing else.
+    //  * haptics. The vibrator is the most expensive actuator on the phone per
+    //    millisecond of use, and during a session nobody is holding it.
+
+    /** Pin the backlight near-black for dim mode, or hand it back to the system. */
+    private fun applyDim(on: Boolean) {
+        if (isDimmed == on) return
+        isDimmed = on
+        val lp = window.attributes
+        lp.screenBrightness =
+            if (on) DIM_BRIGHTNESS else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        window.attributes = lp
+        hideShellChrome(on)
+        // Deliberately NOT hiding the system bars here, though they are the
+        // brightest pixels left once the page goes black. Doing so makes the OS
+        // throw up its full-screen education panel — a large white sheet with a
+        // "Got it" button, right at the moment the user has put the phone down
+        // and walked away. Verified on the emulator; it costs far more light,
+        // and a tap, than the handful of status icons it would have saved.
+        Diag.log("power", if (on) "backlight pinned to $DIM_BRIGHTNESS" else "backlight released")
+    }
+
+    /** Shell views hidden for the duration of dim mode, to be put back exactly. */
+    private val dimHidden = mutableListOf<View>()
+
+    /**
+     * Dim mode's black sheet is drawn inside the WebView, but the shell floats
+     * its own views on top of it — the "show pairing code" chip, and the build
+     * stamp. Left alone they stay lit on an otherwise black screen: wrong to
+     * look at, and on an AMOLED very nearly the only pixels still drawing
+     * power. Hide every sibling of the WebView, and restore exactly those.
+     */
+    private fun hideShellChrome(on: Boolean) {
+        if (on) {
+            dimHidden.clear()
+            for (i in 0 until root.childCount) {
+                val v = root.getChildAt(i)
+                if (v !== web && v.visibility == View.VISIBLE) {
+                    v.visibility = View.INVISIBLE   // not GONE: no relayout on wake
+                    dimHidden.add(v)
+                }
+            }
+        } else {
+            for (v in dimHidden) v.visibility = View.VISIBLE
+            dimHidden.clear()
+        }
+    }
+
+    /**
+     * Ask the display for the slowest mode it offers *at the resolution it is
+     * already in* — a mode switch that also changed the resolution would resize
+     * the WebView mid-session. Returns the rate asked for, or null when the
+     * panel has nothing slower than it is already running.
+     */
+    private fun applyLowRefreshRate(): Float? {
+        val display = (if (android.os.Build.VERSION.SDK_INT >= 30) display
+            else @Suppress("DEPRECATION") windowManager.defaultDisplay) ?: return null
+        val current = display.mode ?: return null
+        val slowest = display.supportedModes
+            .filter {
+                it.physicalWidth == current.physicalWidth &&
+                    it.physicalHeight == current.physicalHeight &&
+                    it.refreshRate >= MIN_REFRESH_HZ
+            }
+            .minByOrNull { it.refreshRate } ?: return null
+        if (slowest.refreshRate >= current.refreshRate - 1f) return null
+        val lp = window.attributes
+        lp.preferredRefreshRate = slowest.refreshRate
+        lp.preferredDisplayModeId = slowest.modeId
+        window.attributes = lp
+        return slowest.refreshRate
+    }
+
+    private fun restoreRefreshRate() {
+        val lp = window.attributes
+        if (lp.preferredRefreshRate == 0f && lp.preferredDisplayModeId == 0) return
+        lp.preferredRefreshRate = 0f
+        lp.preferredDisplayModeId = 0
+        window.attributes = lp
+    }
+
     private fun beginLive() {
         isLive = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val hz = applyLowRefreshRate()
+        Diag.log("power", "live — refresh " + (hz?.let { "→ ${it}Hz" } ?: "already lowest"))
         refreshSystemBars()
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -3163,6 +3335,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun endLive() {
         isLive = false
+        // Whatever else happens, the user must never be left holding a phone
+        // whose screen is pinned black with no live screen to tap.
+        applyDim(false)
+        restoreRefreshRate()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         refreshSystemBars()
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -3202,7 +3378,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (isLive) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (isLive) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            // Window attributes only bind while the window is showing, so both
+            // of these have to be re-asserted after any trip through the
+            // background — including the user pressing power off and on again.
+            applyLowRefreshRate()
+            if (isDimmed) { isDimmed = false; applyDim(true) }
+        }
         web?.evaluateJavascript(
             "window.dispatchEvent(new Event('tawny:foreground'))", null
         )
