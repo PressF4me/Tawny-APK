@@ -124,6 +124,27 @@ in `~/Documents/Tawny ship/`, outside git — a single point of failure).
 - Plan a `targetSdk` 36 bump before Play's next deadline.
 - `androidx` deps are current enough for now; no action.
 
+### I. Chime sounds — done, one carries a credit
+
+The Viewer's chime is now five pet-calling sounds instead of three UI beeps —
+**Dog toy, Psp psp psp, Meow, Good boy, Bell** (`public/sounds/`, played by
+`playChime()` in `public/app.js`, each with an oscillator fallback in
+`synthChime()`).
+
+Four are real recordings, kept as masters in `public/sounds/_src/` and trimmed
+by `tools/gen-chimes.sh`; `bell` stays FM-synthesised. Licences — full table in
+`public/sounds/README.md`:
+
+- **Dog toy**, **Good boy** — Pixabay Content License, no attribution.
+- **Meow** — freesound.org 582745, CC0.
+- **Psp psp psp** — freesound.org 654284 by Jolindi, **CC BY 4.0**: credited in
+  the About screen (`showAbout()` in `MainActivity.kt`). Swap for a CC0 clip to
+  carry no attribution at all.
+- **Bell** — synthesised, the project's own.
+
+Not a launch blocker. Nobody has heard the clips on a device yet — check them in
+the on-device test pass.
+
 ---
 
 ## Part 2 — Monetization

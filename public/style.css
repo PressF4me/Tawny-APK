@@ -503,11 +503,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: var(--live);
 }
 
+/* Five calls, not three, so this wraps into rows instead of running off the
+   side of a phone. `right` as well as `left` is what gives it a width to wrap
+   inside; without it the flex box is free to grow past the viewport. */
 .chimes {
   position: absolute;
   left: 8px;
+  right: 8px;
   bottom: calc(84px + var(--safe-b));
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -519,9 +524,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 11px;
   letter-spacing: .12em;
   text-transform: uppercase;
+  /* Every one of these is a target for a thumb held over a pet's head. */
+  min-height: 40px;
 }
 
 .chimes button:hover { border-color: var(--berry); color: var(--berry); }
+
+/* On a narrow phone the labels are long enough ("Psp psp psp", "Good boy") that
+   free wrapping leaves a ragged single button on the last row. Two even columns
+   read as a deliberate pad instead. */
+@media (max-width: 380px) {
+  .chimes { display: grid; grid-template-columns: 1fr 1fr; }
+  .chimes button { padding: 10px 8px; letter-spacing: .08em; }
+  .chimes button:last-child { grid-column: 1 / -1; }
+}
 
 /* dim mode */
 

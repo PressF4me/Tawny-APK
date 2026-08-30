@@ -167,6 +167,11 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
         "json" -> "application/json; charset=utf-8"
         "svg" -> "image/svg+xml"
         "png" -> "image/png"
+        // The chime clips. decodeAudioData sniffs the container and would take
+        // these as octet-stream anyway, but this server sends nosniff, so a
+        // future <audio src> would be refused outright without the real type.
+        "ogg", "oga" -> "audio/ogg"
+        "mp3" -> "audio/mpeg"
         "webmanifest" -> "application/manifest+json; charset=utf-8"
         else -> "application/octet-stream"
     }

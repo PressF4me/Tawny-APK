@@ -587,9 +587,116 @@ function startMeter(stream) {
 function stopMeter() { S.meterStop?.(); S.meterStop = null; }
 
 // --------------------------------------------------------------- chimes
+//
+// A chime is the Viewer reaching into the room to get the pet's attention, so
+// the sounds are pet-calling sounds rather than UI beeps. They are short Vorbis
+// clips bundled in the APK (public/sounds/, regenerate with tools/gen-chimes.sh)
+// and fetched same-origin from the loopback server — which the page CSP already
+// covers: `connect-src 'self'` for the fetch, and nothing else is needed because
+// decodeAudioData is not a fetch and never touches the network.
+//
+// Every slug also has a synthesised approximation. A chime that makes no sound
+// is worse than a chime that sounds wrong: the Viewer is told it played, and the
+// pet hears nothing. So a clip that fails to load or decode degrades to the
+// oscillator version rather than to silence.
 
-function playChime(kind) {
+const CHIMES = {
+  bark:    { label: 'Dog toy',     file: 'sounds/bark.ogg',    gain: 0.9 },
+  pspsps:  { label: 'Psp psp psp', file: 'sounds/pspsps.ogg',  gain: 1.0 },
+  meow:    { label: 'Meow',        file: 'sounds/meow.ogg',    gain: 0.85 },
+  goodboy: { label: 'Good boy',    file: 'sounds/goodboy.ogg', gain: 0.8 },
+  bell:    { label: 'Bell',        file: 'sounds/bell.ogg',    gain: 1.0 }
+};
+const DEFAULT_CHIME = 'bell';
+
+/** slug -> AudioBuffer, or null once we know that slug will never decode. */
+const chimeBuffers = new Map();
+/** slug -> in-flight load, so a burst of presses does not fetch five times. */
+const chimeLoads = new Map();
+
+/**
+ * The one lookup into CHIMES, and the only sanitiser `sound` gets.
+ *
+ * `sound` arrives from a peer, so a plain `CHIMES[slug]` is wrong twice over:
+ * it reaches inherited properties (`CHIMES['constructor']` is perfectly truthy,
+ * and would have sent us off to `fetch(undefined)`), and it takes any type at
+ * all. Own properties only, strings only, nothing else exists.
+ */
+function chimeSpec(slug) {
+  // hasOwnProperty.call, not Object.hasOwn: the latter is Chrome 93 and this
+  // page runs in whatever WebView the device has.
+  return typeof slug === 'string' &&
+    Object.prototype.hasOwnProperty.call(CHIMES, slug) ? CHIMES[slug] : null;
+}
+
+/** A display name for a slug. Anything not in the table is just "Chime". */
+function chimeLabel(slug) {
+  return chimeSpec(slug)?.label || 'Chime';
+}
+
+function loadChime(slug) {
+  if (chimeBuffers.has(slug)) return Promise.resolve(chimeBuffers.get(slug));
+  if (chimeLoads.has(slug)) return chimeLoads.get(slug);
+  const spec = chimeSpec(slug);
+  if (!spec) return Promise.resolve(null);
+
+  const p = fetch(spec.file)
+    .then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.arrayBuffer();
+    })
+    // Safari still wants the callback form, and decodeAudioData detaches the
+    // ArrayBuffer, so this copy cannot be retried from the same buffer.
+    .then((buf) => new Promise((res, rej) => audioCtx().decodeAudioData(buf, res, rej)))
+    .then((audio) => { chimeBuffers.set(slug, audio); return audio; })
+    .catch((e) => {
+      diag(`chime ${slug} unavailable (${e.message || e}); using the synth`);
+      chimeBuffers.set(slug, null);   // remember the failure; stop refetching
+      return null;
+    })
+    .finally(() => chimeLoads.delete(slug));
+
+  chimeLoads.set(slug, p);
+  return p;
+}
+
+/**
+ * Warm the cache on the Monitor. Called from the same tap that unlocks the
+ * AudioContext, because a chime has to be instant when it arrives — waiting on
+ * a fetch would put the sound a round trip behind the Viewer's press, which for
+ * "get the dog's attention" is the whole point missed.
+ */
+function preloadChimes() {
+  for (const slug of Object.keys(CHIMES)) loadChime(slug);
+}
+
+function playChime(slug) {
+  const key = chimeSpec(slug) ? slug : DEFAULT_CHIME;
   const ac = audioCtx();
+  const buffer = chimeBuffers.get(key);
+  if (buffer) return playChimeBuffer(ac, buffer, CHIMES[key].gain);
+
+  // Not cached yet, or known bad. Make a sound *now* out of the synth, and warm
+  // the cache for next time — never make the user wait on the network.
+  synthChime(ac, key);
+  if (!chimeBuffers.has(key)) loadChime(key);
+}
+
+function playChimeBuffer(ac, buffer, gain = 1) {
+  const src = ac.createBufferSource();
+  const g = ac.createGain();
+  g.gain.value = 0.55 * gain;
+  src.buffer = buffer;
+  src.connect(g).connect(ac.destination);
+  src.start();
+}
+
+/**
+ * The fallback voices. Deliberately crude — these exist so the feature still
+ * does something on a device where the clips did not decode, not to compete
+ * with them.
+ */
+function synthChime(ac, kind) {
   const t0 = ac.currentTime;
   const out = ac.createGain();
   out.gain.value = 0.35;
@@ -608,26 +715,57 @@ function playChime(kind) {
     o.stop(t0 + start + dur + 0.05);
   };
 
-  if (kind === 'bell') {
+  // A band-passed noise burst: the "ps" of pspsps, and the fizz on a bark.
+  const hiss = (start, dur, freq, q, peak) => {
+    const frames = Math.ceil(ac.sampleRate * dur);
+    const buf = ac.createBuffer(1, frames, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < frames; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / frames);
+    const src = ac.createBufferSource();
+    const bp = ac.createBiquadFilter();
+    const g = ac.createGain();
+    src.buffer = buf;
+    bp.type = 'bandpass';
+    bp.frequency.value = freq;
+    bp.Q.value = q;
+    g.gain.value = peak;
+    src.connect(bp).connect(g).connect(out);
+    src.start(t0 + start);
+  };
+
+  // A pitch glide — the shape shared by a meow and a bark.
+  const glide = (start, dur, points, type = 'sawtooth', peak = 0.7) => {
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(points[0][1], t0 + start);
+    for (const [at, hz] of points.slice(1)) {
+      o.frequency.exponentialRampToValueAtTime(hz, t0 + start + at);
+    }
+    g.gain.setValueAtTime(0.0001, t0 + start);
+    g.gain.exponentialRampToValueAtTime(peak, t0 + start + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + start + dur);
+    o.connect(g).connect(out);
+    o.start(t0 + start);
+    o.stop(t0 + start + dur + 0.05);
+  };
+
+  if (kind === 'pspsps') {
+    hiss(0, 0.09, 6300, 1.4, 0.9);
+    hiss(0.17, 0.09, 6300, 1.4, 0.9);
+    hiss(0.34, 0.15, 5800, 1.2, 0.9);
+  } else if (kind === 'bark') {
+    glide(0, 0.22, [[0, 340], [0.06, 190], [0.22, 130]], 'sawtooth', 0.8);
+    hiss(0, 0.06, 1400, 0.8, 0.5);
+  } else if (kind === 'meow') {
+    glide(0, 0.62, [[0, 430], [0.24, 720], [0.62, 380]], 'sawtooth', 0.6);
+  } else if (kind === 'goodboy') {
+    glide(0, 0.24, [[0, 172], [0.24, 140]], 'sawtooth', 0.5);
+    glide(0.30, 0.40, [[0, 180], [0.40, 120]], 'sawtooth', 0.5);
+  } else {
     ping(880, 0, 1.1);
     ping(1318.5, 0.02, 1.3, 'sine', 0.6);
     ping(1760, 0.28, 0.9, 'sine', 0.45);
-  } else if (kind === 'whistle') {
-    const o = ac.createOscillator();
-    const g = ac.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(900, t0);
-    o.frequency.exponentialRampToValueAtTime(2400, t0 + 0.35);
-    o.frequency.exponentialRampToValueAtTime(1100, t0 + 0.75);
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.9, t0 + 0.05);
-    g.gain.setValueAtTime(0.9, t0 + 0.6);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.85);
-    o.connect(g).connect(out);
-    o.start(t0);
-    o.stop(t0 + 0.95);
-  } else {
-    for (let i = 0; i < 3; i++) ping(2100, i * 0.16, 0.1, 'square', 0.5);
   }
 }
 
@@ -1192,10 +1330,9 @@ async function handle(m, entry) {
     }
     case 'chime-ack': {
       // Peer-controlled and optional: a missing `sound` used to throw here and
-      // the confirmation toast just never appeared.
-      const name = typeof m.sound === 'string' && m.sound
-        ? `${m.sound[0].toUpperCase()}${m.sound.slice(1)}` : 'Chime';
-      toast(`${name} played on the Monitor`);
+      // the confirmation toast just never appeared. It is also no longer echoed
+      // back at the user — chimeLabel() only ever returns one of our own names.
+      toast(`${chimeLabel(m.sound)} played on the Monitor`);
       break;
     }
     case 'talking': {
@@ -1738,7 +1875,13 @@ async function start(role) {
 
   audioCtx(); // the tap that got us here also unlocks chime playback
   // Camera enumeration only works after getUserMedia grants permission (labels are blank before).
-  if (role === 'station') enumerateCameras();
+  if (role === 'station') {
+    enumerateCameras();
+    // The Monitor is the end that plays chimes. Decode them now, while it is
+    // idle and unlocked, so an arriving chime is instant instead of a fetch
+    // behind the Viewer's press.
+    preloadChimes();
+  }
 
   el.remote.srcObject = null;
   el.remoteAudio.srcObject = null;
