@@ -61,9 +61,19 @@ const S = {
   cameras: [], cameraIndex: 0, zoomLevel: 1.0, zoomHardware: false, stationZoomSupported: false
 };
 
-// 1 Monitor + up to 5 Viewers. Kept in step with LocalWeb.kt MAX_PER_ROOM (6)
-// and the rendezvous Durable Object.
-const MAX_VIEWERS = 5;
+// One Monitor, three Viewers. Three is the product, not a preference: there is
+// deliberately no setting, no URL parameter and no message that raises it, and
+// the same number is compiled into every relay that could otherwise admit a
+// fourth — LocalWeb.kt and rendezvous/room.js both cap a room at
+// MAX_PER_ROOM = 4 (this + the Monitor), as do server.js and the Deno port.
+// A fourth phone is refused and told why; it never displaces one of the three.
+const MAX_VIEWERS = 3;
+
+// The one sentence a refused fourth phone sees, wherever the refusal came from
+// — the Monitor's own cap or a relay's 4003.
+const FULL_MESSAGE =
+  `This monitor is full (${MAX_VIEWERS} phones). Close Tawny on one of the `
+  + 'other phones, then try this code again.';
 
 // Candidates buffered before setRemoteDescription. A real negotiation sends a
 // couple of dozen; anything past this is a peer filling memory.
@@ -1070,9 +1080,10 @@ function openSignal(base, tag) {
           return;
         }
         return bail(
-          ev.code === 4003 ? 'That channel already has the maximum number of devices.'
+          ev.code === 4003 ? FULL_MESSAGE
           : ev.code === 4004 ? 'A monitor is already running on this channel.'
-          : 'That pairing code has expired. Scan a fresh one from the Monitor.'
+          : 'That pairing code has expired. Scan a fresh one from the Monitor.',
+          ev.code === 4003 ? 'full' : undefined
         );
       }
 
@@ -1218,6 +1229,19 @@ async function fetchIce() {
 
 // --------------------------------------------------------- peer bookkeeping
 
+/**
+ * Turn a phone away because the Monitor already has its three.
+ *
+ * Addressed at the socket, never at a peer record: nothing is created for the
+ * refused id, no camera or microphone track is ever attached to it, and the
+ * three live connections are not renegotiated or even looked at. `bye` is on
+ * every relay's forward list, so this reaches the phone over LAN and cloud
+ * alike without the relay needing to know what it means.
+ */
+function refuseAsFull(id, entry) {
+  sig({ type: 'bye', to: id, reason: 'full', max: MAX_VIEWERS }, { transport: entry });
+}
+
 const stationPeer = () => [...S.peers.values()].find((p) => p.role === 'station');
 const viewerPeers = () => [...S.peers.values()].filter((p) => p.role === 'viewer');
 const viewerCount = () => viewerPeers().length;
@@ -1329,12 +1353,21 @@ function updatePeerChip() {
   if (!el.peercount) return;
   if (S.role !== 'station') { el.peercount.hidden = true; return; }
   const n = viewerCount();
+  const full = n >= MAX_VIEWERS;
   el.peercount.hidden = n === 0;
-  el.peercount.textContent = n === 1 ? '1 phone' : `${n} phones`;
-  el.peercount.classList.toggle('is-busy', n >= 3);
-  // Tell the native shell whether to keep the pairing-QR overlay up.
-  const state = n > 0 ? 'watching' : 'waiting';
-  if (state !== S._peerState) { S._peerState = state; tellNative(state, { n }); }
+  el.peercount.textContent = full
+    ? `${n} phones · full`
+    : n === 1 ? '1 phone' : `${n} phones`;
+  el.peercount.classList.toggle('is-busy', full);
+  // Tell the native shell how many are watching and whether there is still room
+  // for another. This used to fire once, on the very first Viewer, and only
+  // ever said "watching" — so the shell tore down the way back to the pairing
+  // code the moment phone #1 arrived and never learned that phones #2 and #3
+  // were still welcome. Send it on every change of *count*, not just of state.
+  if (n !== S._peerN) {
+    S._peerN = n;
+    tellNative(n > 0 ? 'watching' : 'waiting', { n, max: MAX_VIEWERS, full });
+  }
 }
 
 // ------------------------------------------------------------- dispatch
@@ -1360,7 +1393,15 @@ async function handle(m, entry) {
     }
     case 'peer-joined': {
       if (m.role === S.role) return;
-      if (S.role === 'station' && viewerCount() >= MAX_VIEWERS) return;
+      // Full. Turn the newcomer away *out loud* — this used to be a bare
+      // `return`, so a fourth phone that the relay had let into the room sat on
+      // "Connecting" until it timed out with no idea it had been refused. The
+      // three already watching are not touched.
+      if (S.role === 'station' && viewerCount() >= MAX_VIEWERS) {
+        diag(`peer-joined refused: ${MAX_VIEWERS} viewers already`);
+        refuseAsFull(m.id, entry);
+        return;
+      }
       if (S.role === 'viewer' && m.role === 'station') {
         commitTransport(entry);
         // A Watcher that dropped and rejoined comes back with a new id — retire
@@ -1373,7 +1414,10 @@ async function handle(m, entry) {
       if (S.role === 'viewer') {
         await callPeer(p);
       } else {
-        el.pair.hidden = true;
+        // Browser Monitor: the pairing sheet closes only once the third phone
+        // is on. Closing it at the first one is what made "add another phone"
+        // feel like it had been taken away.
+        if (viewerCount() >= MAX_VIEWERS) el.pair.hidden = true;
         updatePeerChip();
         updateStatus();
       }
@@ -1388,6 +1432,7 @@ async function handle(m, entry) {
       // attaches the live camera and microphone. Gate both doors.
       if (S.role === 'station' && !S.peers.has(m.from) && viewerCount() >= MAX_VIEWERS) {
         diag(`offer refused: ${MAX_VIEWERS} viewers already`);
+        refuseAsFull(m.from, entry);
         return;
       }
       const p = ensurePeer(m.from, S.role === 'station' ? 'viewer' : 'station', entry);
@@ -1521,6 +1566,10 @@ async function handle(m, entry) {
       break;
     }
     case 'bye':
+      // A Monitor at its cap says goodbye with a reason. Anything else is an
+      // ordinary hang-up and must stay one — a plain `bye` ends the call, it
+      // does not accuse the Monitor of being full.
+      if (m.reason === 'full' && S.role === 'viewer') return bail(FULL_MESSAGE, 'full');
       removePeer(m.from);
       if (!S.peers.size) status(S.role === 'viewer' ? 'Call ended' : 'Waiting', null);
       break;
@@ -1733,7 +1782,8 @@ async function answerPeer(peer, sdp) {
 }
 
 // Per-Handheld uplink budget. One encode per viewer on a mid-range phone, so the
-// ceiling drops as more phones connect: 1→1.5M, 2→1.0M, 3→750k, 5→500k.
+// ceiling drops as more phones connect: 1→1.5M, 2→1.0M, 3→750k. Three is the
+// cap, so 750k each — 2.2 Mbps of encode — is the worst case this has to hold.
 function bitrateFor(n) {
   return Math.max(350_000, Math.min(1_500_000, Math.round(3_000_000 / (n + 1))));
 }
@@ -1755,7 +1805,9 @@ async function tuneVideoSender(peer) {
     // one while the phone it comes from is asleep in the corner.
     const cap = S.dimmed ? POWER.video : null;
     p.encodings[0].maxBitrate = Math.min(bitrateFor(viewerCount()), cap?.maxBitrate ?? Infinity);
-    p.encodings[0].maxFramerate = Math.min(viewerCount() > 3 ? 20 : 24, cap?.maxFramerate ?? Infinity);
+    // At the cap there are three simultaneous encodes off one capture; give the
+    // framerate up rather than the picture, which is what a pet monitor is for.
+    p.encodings[0].maxFramerate = Math.min(viewerCount() >= 3 ? 20 : 24, cap?.maxFramerate ?? Infinity);
     p.encodings[0].scaleResolutionDownBy = cap?.scaleDownBy ?? 1;
     p.encodings[0].networkPriority = 'high';
     p.encodings[0].priority = 'high';
@@ -2177,7 +2229,14 @@ function initPinch() {
 
 // ----------------------------------------------------------------- boot
 
-function bail(msg) {
+/**
+ * Give up on this session and say why.
+ *
+ * `reason` is a machine-readable tag for the native shell, which otherwise has
+ * to guess from the role what went wrong — and guessed "Monitor isn't on yet"
+ * for a Handheld turned away from a monitor that was very much on, just full.
+ */
+function bail(msg, reason) {
   diag(`bail: ${msg}`);
   S.closing = true;
   closeAllSignals();
@@ -2185,7 +2244,7 @@ function bail(msg) {
   teardownAll();
   if (S.nativeShell) {
     // The native shell owns navigation and error UI.
-    tellNative('error', { message: msg });
+    tellNative('error', { message: msg, ...(reason ? { reason } : {}) });
     S.closing = false;
     return;
   }
