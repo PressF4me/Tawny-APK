@@ -157,6 +157,23 @@ sanitised slug and never touches WebAudio, an unknown slug falls back to the
 default, and a browser Monitor still plays through WebAudio. **Green on
 2026-08-31.**
 
+## `video-fit.mjs` — fill the screen, or box the frame
+
+Lifts `screenIsWide` / `idealCaptureSize` / `fitVideo` out of `public/app.js`.
+
+```bash
+node tools/probes/video-fit.mjs
+```
+
+The full-frame video fills the stage (`cover`, no bars) when the picture and the
+screen face the same way — you have turned the phone to match the camera — and
+is boxed (`contain`, whole frame) when they don't, so a sideways feed on an
+upright phone still shows the whole room. The Monitor's capture takes its long
+axis from the orientation too, at a fixed ~540p budget. Both are aspect-driven
+only: asserts all four orientation pairings, the square and no-metadata edges,
+and that `idealCaptureSize` swaps width/height with the orientation for any
+requested size. **Green on 2026-08-31.**
+
 ## Running the worker locally
 
 ```bash

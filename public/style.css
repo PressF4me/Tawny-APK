@@ -420,6 +420,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #remote {
   width: 100%;
   height: 100%;
+  /* Start boxed so nothing is hidden before the first frame; fitVideo() in
+     app.js then switches to `cover` whenever the picture and the screen face
+     the same way, so a landscape feed on a landscape phone has no side bars. */
   object-fit: contain;
   background: var(--stage);
   display: block;

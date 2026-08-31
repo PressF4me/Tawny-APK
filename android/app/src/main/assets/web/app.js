@@ -1857,7 +1857,7 @@ function newPC(peer) {
       playSoon(el.remoteAudio);
       el.remote.srcObject = stream;
       el.remote.hidden = !hasVideo;
-      if (hasVideo) playSoon(el.remote);
+      if (hasVideo) { playSoon(el.remote); fitVideos(); }
       el.loader.hidden = true;
       if (!S.remotePaused) stageNote(null);
       startMeter(stream);           // meter the Watcher's room
@@ -1947,6 +1947,7 @@ function featureVideo(peer, stream) {
   playSoon(el.remote);
   el.local.classList.remove('fill');   // our own camera → corner PiP
   el.local.hidden = false;
+  fitVideos();
 }
 function unfeature(id) {
   if (S.featured !== id) return;
@@ -1955,6 +1956,7 @@ function unfeature(id) {
   el.remote.hidden = true;
   el.local.classList.add('fill');
   el.local.hidden = false;
+  fitVideos();
 }
 
 // Viewer side: open the connection to the Watcher.
@@ -2436,7 +2438,7 @@ async function switchLens(index) {
   await setTorch(false, 'lens switch');
   try {
     const ns = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: { exact: cam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: { deviceId: { exact: cam.deviceId }, ...idealCaptureSize(1280, 720) },
       audio: false
     });
     const nt = ns.getVideoTracks()[0];
@@ -2557,15 +2559,44 @@ function bail(msg, reason) {
   S.closing = false;
 }
 
-// Kept modest on purpose: a steady 540p feed holds up on a mid-range phone
-// where 720p drops frames and freezes.
+// The capture's long axis follows how the phone is being held: a Monitor on
+// its side sends a genuine wide frame, one upright sends a tall one, and the
+// pixel budget (~540p, steady on a mid-range phone where 720p drops frames) is
+// the same either way. Aspect-driven only — no fixed W×H that would force one
+// shape onto every device.
+function screenIsWide() {
+  return (window.screen?.orientation?.type || '').startsWith('landscape')
+    || window.innerWidth >= window.innerHeight;
+}
+function idealCaptureSize(long = 960, short = 540) {
+  return screenIsWide()
+    ? { width: { ideal: long }, height: { ideal: short } }
+    : { width: { ideal: short }, height: { ideal: long } };
+}
+
 function cameraConstraints() {
   return {
     facingMode: { ideal: S.facing },
-    width: { ideal: 960 },
-    height: { ideal: 540 },
+    ...idealCaptureSize(),
     frameRate: { ideal: 24, max: 30 }
   };
+}
+
+// How the full-frame video sits in the stage. Fill the screen when the picture
+// and the screen face the same way — you have turned the phone to match the
+// camera, so bars would be pointless — and box it when they don't, so a
+// sideways feed on an upright phone still shows the whole room. Driven only by
+// the two aspect ratios: every phone, every resolution, either way up.
+function fitVideo(v) {
+  if (!v) return;
+  const vw = v.videoWidth, vh = v.videoHeight;
+  if (v.hidden || !vw || !vh) { v.style.objectFit = ''; return; }
+  v.style.objectFit = (vw >= vh) === screenIsWide() ? 'cover' : 'contain';
+}
+function fitVideos() {
+  fitVideo(el.remote);
+  if (el.local.classList.contains('fill')) fitVideo(el.local);
+  else el.local.style.objectFit = '';     // hand the PiP back to the stylesheet
 }
 
 async function start(role) {
@@ -2638,12 +2669,14 @@ async function start(role) {
     updatePeerChip();
     keepAwake();
     watchBrowserBattery();            // native shell drives window.tawnyBattery instead
+    lastCaptureWide = screenIsWide(); // getUserMedia above already matched this
   } else {
     for (const t of S.local.getAudioTracks()) t.enabled = false; // push-to-talk
     el.cViewer.hidden = false;
     el.cStation.hidden = true;
     updateTorchUI();
   }
+  fitVideos();
 
   // Rail label: just the room name the user gave. The Handheld keeps it (you may
   // have several monitors); on the Monitor's own screen CSS hides it - you named
@@ -2924,7 +2957,7 @@ $('#btn-flip').addEventListener('click', async () => {
   const grab = (facing) => navigator.mediaDevices.getUserMedia({
     video: {
       facingMode: { ideal: facing },
-      width: { ideal: 960 }, height: { ideal: 540 },
+      ...idealCaptureSize(),
       frameRate: { ideal: 24, max: 30 }
     }
   });
@@ -3194,4 +3227,44 @@ function reopenAfterRestore() {
   S.closing = false;
   diag('restored from background — reopening signaling');
   connectAll();
+}
+
+// ------------------------------------------------------- orientation & fit
+
+// Re-fit the picture whenever the screen turns or the incoming frame changes
+// shape (the far phone rotated, or the bitrate ladder stepped the resolution).
+// `resize` on a <video> fires on both.
+for (const ev of ['resize', 'orientationchange']) {
+  window.addEventListener(ev, () => {
+    fitVideos();
+    reshapeCapture();          // station only; keeps the sent frame matched to how the phone is held
+  });
+}
+for (const v of [el.remote, el.local]) {
+  v.addEventListener('loadedmetadata', fitVideos);
+  v.addEventListener('resize', fitVideos);
+}
+
+// Station: when the Monitor is turned, ask the camera for a frame shaped to the
+// new orientation, so a phone laid on its side actually sends a wide picture
+// rather than a portrait one with the room rotated into it. Debounced, and a
+// no-op off the Monitor or before a track exists.
+let reshapeTimer = null;
+let lastCaptureWide = null;
+function reshapeCapture() {
+  if (S.role !== 'station' || !S.local) return;
+  const wide = screenIsWide();
+  if (wide === lastCaptureWide) return;     // only when the orientation flips
+  lastCaptureWide = wide;
+  clearTimeout(reshapeTimer);
+  reshapeTimer = setTimeout(async () => {
+    const c = S.dimmed
+      ? { ...cameraConstraints(), frameRate: { ideal: POWER.captureFps, max: POWER.captureFps } }
+      : cameraConstraints();
+    for (const t of S.local.getVideoTracks()) {
+      try { await t.applyConstraints(c); } catch {}
+    }
+    for (const peer of S.peers.values()) tuneVideoSender(peer);
+    fitVideos();
+  }, 350);
 }
