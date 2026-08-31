@@ -273,7 +273,7 @@ function renderChannels() {
       if (!confirm(`Delete "${ch.name}"? Devices paired to it will stop connecting.`)) return;
       setChannels(getChannels().filter((c) => c.id !== ch.id));
       renderChannels();
-      toast('Channel deleted');
+      toast('Monitor removed');
     });
 
     li.append(open, edit, del);
@@ -294,13 +294,13 @@ function openEditor(ch) {
 
 function saveEditor() {
   const name = el.editorName.value.trim();
-  if (!name) return toast('Give the channel a name.');
+  if (!name) return toast('Give this monitor a name.');
   const list = getChannels();
   if (S.editing) {
     const found = list.find((c) => c.id === S.editing.id);
     if (found) found.name = name;
   } else {
-    if (list.length >= 12) return toast('That is plenty of channels.');
+    if (list.length >= 12) return toast('That is as many monitors as Tawny keeps.');
     list.push({ id: crypto.randomUUID(), name, key: newKey() });
   }
   setChannels(list);
@@ -1132,7 +1132,7 @@ function openSignal(base, tag) {
           const retryable = tag === 'cloud' && ev.code !== 4003 &&
             entry.refused < STATION_CLOUD_RETRIES;
           if (retryable) {
-            if (entry.refused === 0) toast('Reconnecting to the internet relay…');
+            if (entry.refused === 0) toast('Reconnecting…');
             const wait = Math.min(1000 * 2 ** entry.refused++, 15000);
             diag(`${tag} refused ${ev.code} — retry ${entry.refused}/${STATION_CLOUD_RETRIES} in ${wait}ms`);
             updateStatus();
@@ -1144,16 +1144,16 @@ function openSignal(base, tag) {
           // off the Wi-Fi was being turned away at the relay.
           diag(`${tag} FATAL ${ev.code} — monitor is NOT reachable over the internet`);
           closeSignal(entry);
-          if (ev.code === 4004) toast('Another device claimed this monitor on the internet relay.');
+          if (ev.code === 4004) toast('Another phone is now using this monitor.');
           if (ev.code === 4008 && tag === 'cloud') {
-            toast('The internet relay refused this monitor. Viewers off your Wi-Fi cannot connect.');
+            toast('This monitor can only be watched from your Wi-Fi right now. Phones somewhere else will not be able to connect.');
           }
           return;
         }
         return bail(
           ev.code === 4003 ? FULL_MESSAGE
-          : ev.code === 4004 ? 'A monitor is already running on this channel.'
-          : 'That pairing code has expired. Scan a fresh one from the Monitor.',
+          : ev.code === 4004 ? 'This monitor is already running on another phone.'
+          : 'That code has expired. Show a fresh one on the other phone and scan it again.',
           ev.code === 4003 ? 'full' : undefined
         );
       }
@@ -1174,7 +1174,7 @@ function openSignal(base, tag) {
         return;
       }
       if (S.role === 'viewer' && !S.committedTag && entry.tag === 'lan' && !rendezvousBase()) {
-        return bail('This code needs the Monitor on the same Wi-Fi as this phone.');
+        return bail('This code only works on the same Wi-Fi as the other phone. Put both phones on the same Wi-Fi and try again.');
       }
 
       if (S.nativeShell && S.role === 'viewer' && entry.retry === 6) tellNative('unreachable');
@@ -1214,7 +1214,7 @@ function connectAll() {
   if (S.role === 'station') {
     if (S.signalUrl) openSignal(S.signalUrl, 'lan');
     if (rv) openSignal(rv, 'cloud');
-    if (!S.signals.length) return bail('No way to reach the Viewer yet — connect this phone to Wi-Fi.');
+    if (!S.signals.length) return bail('This phone is not on Wi-Fi yet. Connect it to Wi-Fi and try again.');
     status('Waiting', null);
     return;
   }
@@ -1242,7 +1242,7 @@ function raceTransports() {
     S.committedTag = 'cloud';
     openSignal(rv, 'cloud');
   } else {
-    bail('This code needs the Monitor on the same Wi-Fi as this phone.');
+    bail('This code only works on the same Wi-Fi as the other phone. Put both phones on the same Wi-Fi and try again.');
   }
 }
 
@@ -1780,7 +1780,7 @@ function newPC(peer) {
           ? 'Check the monitor phone is awake with Tawny open.'
           : 'A direct connection could not be made from this network. If both '
             + 'phones are on mobile data, try putting this one on Wi-Fi.');
-        status('Cannot connect', 'warn');
+        status('Still trying', 'warn');
       }
     }, CONNECT_TIMEOUT_MS);
   }
@@ -2370,8 +2370,8 @@ async function start(role) {
   fetchIce();   // non-blocking; new PCs pick up S.ice when it lands
 
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-    return bail('Browsers only release the camera and microphone on https:// pages ' +
-      '(or http://localhost). Open Tawny over https and try again.');
+    return bail('Tawny could not get to the camera and microphone on this phone. ' +
+      'Close Tawny and open it again.');
   }
 
   const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };

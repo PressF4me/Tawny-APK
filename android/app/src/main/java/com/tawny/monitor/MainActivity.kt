@@ -620,8 +620,11 @@ class MainActivity : AppCompatActivity() {
     private fun confirmPairing(p: Pairing) {
         val paired = prefs.getString("channelKey", null)
         val replacing = !paired.isNullOrBlank() && paired != p.key
-        val where = p.signal?.removePrefix("ws://")?.let { "$it on your Wi-Fi" }
-            ?: "your monitor over the internet"
+        // Deliberately not the host:port. The address is meaningless to the
+        // person holding the phone and reads like an error code; what they can
+        // actually act on is which network the connection goes over.
+        val where = if (p.signal != null) "a monitor on your Wi-Fi"
+            else "your monitor over the internet"
         themedDialog(
             title = "Connect to “${p.name}”?",
             body = "This code connects to $where.\n\n" + (
@@ -2436,14 +2439,23 @@ class MainActivity : AppCompatActivity() {
         col.addView(wordmark())
         col.addView(
             body(
+                // Say the two-phone shape before the role screen asks which one
+                // this is: "one stays, one comes with you" is the whole mental
+                // model, and without it the next screen is a quiz.
                 "Keep an eye on your pet from the next room or across town. " +
-                    "Two phones, no accounts — just open the app and connect.",
+                    "You need two phones: one stays with your pet, one comes " +
+                    "with you. No accounts, nothing to set up.",
                 maxW = 300
             )
         )
         col.addView(gap(4))
         col.addView(primary("Get started") { showRole() })
-        col.addView(link("I want to watch a monitor") { onHandheld() })
+        // Not "I want to watch a monitor": that asked the user to know which of
+        // two roles they were before the app had explained either, and it
+        // competed with "Get started" for the same first-time tap. Having a
+        // code is a fact you can check by looking at the other phone, so the
+        // two routes no longer overlap.
+        col.addView(link("I already have a code to scan") { onHandheld() })
         mountCentered(col)
         root.addView(themeToggleView())
     }
@@ -3182,8 +3194,8 @@ class MainActivity : AppCompatActivity() {
         }
         col.addView(
             body(
-                "On the other phone, open Tawny and tap \u201cI want to watch a " +
-                    "monitor\u201d, then point its camera at this code. Up to " +
+                "On the other phone, open Tawny and tap \u201cI already have a " +
+                    "code to scan\u201d, then point its camera at this code. Up to " +
                     "$MAX_VIEWERS phones can watch this monitor \u2014 the same code " +
                     "works for each of them.",
                 maxW = 300
