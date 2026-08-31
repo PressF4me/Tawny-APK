@@ -24,11 +24,13 @@ import { privacyResponse } from "../privacy.js";
 const ROOM_RE = /^[a-f0-9]{32}$/;
 const TICKET_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
-// "cameras", "meta" and "camera-control" were missing here — the same bug that
-// made the lens picker, remote zoom and pet-name sync inert on the other relays.
+// "cameras", "meta", "camera-control" and "torch" were each missing here at some
+// point — the same drift that made the lens picker, remote zoom, pet-name sync
+// and the Viewer's Light key inert on whichever relay was behind. Keep this set
+// in step with ../room.js, ../../server.js and LocalWeb.kt.
 const RELAY = new Set([
   "offer", "answer", "ice", "bye", "chime", "chime-ack", "talking",
-  "cameras", "meta", "camera-control",
+  "cameras", "meta", "camera-control", "torch",
 ]);
 const MAX_PER_ROOM = 4;      // 1 Monitor + up to 3 Viewers. Mirrors ../room.js.
 const MAX_STATIONS = 1;
