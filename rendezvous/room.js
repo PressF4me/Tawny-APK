@@ -21,12 +21,17 @@
 // it. A fourth Handheld is turned away with 4003 and told why.
 const MAX_PER_ROOM = 4;
 const MAX_STATIONS = 1;
-// Addressed control messages the relay will forward. `cameras`, `meta` and
-// `camera-control` were missing, so the lens picker, remote zoom and pet-name
-// sync were sent by the client, dropped here, and never arrived.
+// Addressed control messages the relay will forward.
+//
+// Must list every addressed `type` public/app.js sends through sig(). A missing
+// type is dropped in silence — no error, the feature just never happens on this
+// transport. That has bitten twice: `cameras`, `meta` and `camera-control` (lens
+// picker, remote zoom, pet-name sync), and then `torch`, which left the Viewer's
+// Light key greyed out on a phone whose LED works fine. Keep this in step with
+// LocalWeb.kt and server.js.
 const RELAY = new Set([
   'offer', 'answer', 'ice', 'bye', 'chime', 'chime-ack', 'talking',
-  'cameras', 'meta', 'camera-control'
+  'cameras', 'meta', 'camera-control', 'torch'
 ]);
 const TICKET_TTL_MS = 24 * 60 * 60 * 1000;
 const HEX64 = /^[a-f0-9]{64}$/;

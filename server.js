@@ -232,7 +232,16 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MSG });
 
 // Every relayed type is addressed. Peer ids come from the server, so a client
 // cannot blind-broadcast into a channel it has joined.
-const RELAY = new Set(['offer', 'answer', 'ice', 'bye', 'chime', 'chime-ack', 'talking']);
+//
+// Must list every addressed `type` public/app.js sends through sig(): a type
+// missing here is dropped in silence and its feature simply never happens on
+// this transport. This list had fallen four types behind the client — the lens
+// picker, remote zoom, pet-name sync and the Light key were all being discarded
+// here. Keep it in step with LocalWeb.kt and rendezvous/room.js.
+const RELAY = new Set([
+  'offer', 'answer', 'ice', 'bye', 'chime', 'chime-ack', 'talking',
+  'cameras', 'meta', 'camera-control', 'torch'
+]);
 
 server.on('upgrade', (req, socket, head) => {
   const ip = clientIP(req);

@@ -412,12 +412,21 @@ class SignalServer(
     }
 
     companion object {
-        // Addressed control messages this relay will forward. "cameras", "meta"
-        // and "camera-control" were missing, so the lens picker, remote zoom and
-        // pet-name sync were dropped here and never reached the other phone.
+        // Addressed control messages this relay will forward.
+        //
+        // This set must list every addressed `type` public/app.js sends through
+        // sig(). A type missing here is not an error anywhere — it is dropped in
+        // silence, and the feature it carries simply never happens on this
+        // transport. That has now bitten twice: first "cameras", "meta" and
+        // "camera-control" (lens picker, remote zoom, pet-name sync), and then
+        // "torch", which is why the Viewer's Light key sat greyed out on a phone
+        // whose LED works perfectly — the Monitor's "I have a light" never
+        // arrived, and the press never got back. Add the type here, in
+        // rendezvous/room.js and in server.js together, or it works on one
+        // transport and mysteriously not the others.
         private val RELAY = setOf(
             "offer", "answer", "ice", "bye", "chime", "chime-ack", "talking",
-            "cameras", "meta", "camera-control"
+            "cameras", "meta", "camera-control", "torch"
         )
         private val ROOM_RE = Regex("^[0-9a-f]{32}$")
         private val PROOF_RE = Regex("^[0-9a-fA-F]{64}$")
