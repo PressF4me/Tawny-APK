@@ -132,13 +132,25 @@ relay holds it, a relay that swapped certificates produces a **different** code
 on each screen. If the code cannot be computed the Viewer shows a "connection
 may be tampered with" warning rather than proceeding silently.
 
+**One code per connection, not per monitor.** The code is derived from the DTLS
+certificates of one `RTCPeerConnection`, so a Monitor with three Handhelds on
+the cloud path has *three* different codes at once. It is held on the peer
+record and never in one shared slot: the Monitor asks about one phone at a time
+(a queued card naming how many are behind it), and the always-on "Verify:" chip
+in the top rail appears only while exactly one cloud Handheld is connected,
+because with two or three there is nothing it could honestly be labelling.
+Answering "Disconnect it" drops that one Handheld, not the session.
+
 **Limitations, stated plainly:** the SAS assumes the user can compare two
 screens. On a genuinely remote session the user is not in the room with the
-Monitor, so there is only one screen to look at — the check then degrades to
-"does this code look the same as last time / as the sticker on the Monitor".
-Confirming once stops the *blocking* prompt for that monitor; the chip stays.
-Media is added and the answer is sent before the SAS is shown — it is an
-after-the-fact alarm, not a gate.
+Monitor, so there is only one screen to look at, and the check is weak there.
+It cannot degrade to "the same code as last time" either: WebRTC mints a fresh
+DTLS certificate for every `RTCPeerConnection` and the app persists none, so the
+code legitimately differs on every call. An earlier build stored the approved
+code and warned that the safety code had CHANGED whenever it failed to match,
+which from the second session onward was every time; that false alarm has been
+removed rather than kept as noise. Media is added and the answer is sent before
+the SAS is shown — it is an after-the-fact alarm, not a gate.
 
 ## Residual risk — still true
 

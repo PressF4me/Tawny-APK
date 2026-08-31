@@ -20,7 +20,7 @@ const el = {
   local: $('#local'), loader: $('#loader'), peerAudio: $('#peer-audio'),
   peercount: $('#peercount'),
   sas: $('#sas'), sascode: $('#sas-code'), saschip: $('#sas-chip'),
-  sasnote: $('#sas-note'),
+  sasnote: $('#sas-note'), sasok: $('#sas-ok'), sasno: $('#sas-no'),
   stageNote: $('#stage-note'),
   stageNoteTitle: $('#stage-note-title'),
   stageNoteBody: $('#stage-note-body'),
@@ -47,8 +47,12 @@ const S = {
   signals: [], committedTag: null, raceTimer: null, myId: null,
   // One RTCPeerConnection per remote peer. A Handheld holds exactly one (to the
   // Watcher); the Watcher fans out — one per Handheld, up to MAX_VIEWERS.
-  peers: new Map(),           // id -> { id, role, transport, pc, stream, iceKick, negotiating, talking, audioEl }
+  peers: new Map(),           // id -> { id, role, transport, pc, stream, iceKick, negotiating, talking, audioEl, sas, sasOk }
   local: null, remoteStream: null,
+  // Monitor: the id of the one cloud Viewer whose safety code is on screen
+  // right now. The card is pinned to a peer, never to "the newest handshake",
+  // so a second phone connecting mid-read cannot swap the code out.
+  sasAsk: null,
   ice: [], iceTimer: null, relayOnly: false,  // filled by fetchIce() when a rendezvous is configured
   facing: 'environment', micOn: true, camSending: false,
   wake: null, meterStop: null, ac: null, closing: false, dimmed: false,
@@ -926,38 +930,105 @@ async function showSas(peer, attempt = 0) {
   }
   if (!code) diag(`sas unavailable after ${attempt} tries (pc=${pcState})`);
 
-  if (S.role === 'station') {
-    if (!code) return;   // fail closed — never show an empty/broken chip
-    el.saschip.textContent = 'Verify: ' + code;
+  // The code belongs to *this* connection and to nothing else, so it is parked
+  // on the peer. That is the whole fix for the multi-viewer bug: the Monitor
+  // used to write every Handheld's code straight into one shared chip, so with
+  // two or three phones on the relay the chip showed whichever DTLS handshake
+  // finished last, and the user was invited to compare it against a phone whose
+  // session it had not come from. A safety code sitting beside a prompt about a
+  // different session is worse than no safety code at all.
+  peer.sas = code;
+
+  if (S.role === 'station') { syncStationSas(); return; }
+  showViewerSas(code);
+}
+
+/** Monitor: cloud Handhelds whose code has not been confirmed yet, oldest
+ *  first. LAN Handhelds never appear here - the Monitor *is* their relay. */
+function sasPendingViewers() {
+  return viewerPeers().filter(
+    (p) => p.transport?.tag === 'cloud' && p.sas && !p.sasOk
+  );
+}
+
+/**
+ * Monitor: put the right code in front of the right phone.
+ *
+ * Two surfaces, and each is allowed to speak only where it can be honest:
+ *
+ *  - the "Verify:" chip in the top rail is a bare label with nowhere to say
+ *    *whose* code it is, so it shows only while exactly one cloud Handheld is
+ *    connected. With two or three it is hidden - there is no such thing as
+ *    "the" code any more, and a chip that pretends otherwise is the bug.
+ *  - the card asks about one phone at a time, pinned to that peer until the
+ *    user answers or the phone goes away, and says how many are queued behind
+ *    it. Re-picking the newest peer on every call would swap the digits out
+ *    from under someone halfway through reading them.
+ */
+function syncStationSas() {
+  if (S.role !== 'station') return;
+  const cloud = viewerPeers().filter((p) => p.transport?.tag === 'cloud' && p.sas);
+
+  if (cloud.length === 1) {
+    el.saschip.textContent = 'Verify: ' + cloud[0].sas;
     el.saschip.hidden = false;
+  } else {
+    el.saschip.hidden = true;
+  }
+
+  let ask = S.sasAsk ? S.peers.get(S.sasAsk) : null;
+  if (!ask || ask.sasOk || !ask.sas || ask.transport?.tag !== 'cloud') ask = null;
+  if (!ask) ask = sasPendingViewers()[0] || null;
+  S.sasAsk = ask ? ask.id : null;
+
+  if (!ask) {
+    el.sas.hidden = true;
+    el.sas.classList.remove('sas--warn');
     return;
   }
-  // Handheld: show the code every internet session and let the user glance at
-  // it. We only stop *blocking* on it once the user has confirmed a match for
-  // this monitor — the chip stays.
+  const behind = sasPendingViewers().length - 1;
+  el.sascode.textContent = ask.sas;
+  el.sasnote.textContent =
+    'A phone is connecting from outside your Wi-Fi. It should be showing this code'
+    + (behind > 0 ? ` (${behind} more phone${behind > 1 ? 's' : ''} after it):` : ':');
+  if (el.sasok) el.sasok.textContent = 'Looks right';
+  if (el.sasno) el.sasno.textContent = 'Disconnect it';
+  el.sas.classList.remove('sas--warn');
+  el.sas.hidden = false;
+}
+
+/**
+ * Handheld: the code for this call, on every internet call.
+ *
+ * There is deliberately no memory of the last one. WebRTC mints a fresh DTLS
+ * certificate for every RTCPeerConnection - measured on this app's own WebView:
+ * three connections in one page, three different fingerprints - and nothing
+ * here persists one, so the code differs on every call *by construction*. The
+ * old scheme stored the approved code and, whenever it failed to match,
+ * announced that the monitor's safety code had CHANGED and that the user should
+ * stop and disconnect. After the first session that fired every single time. An
+ * alarm that cries wolf on every reconnect is worse than no alarm: it teaches
+ * the user to dismiss the one warning that would have mattered. So this now
+ * says what the check always actually was - a per-call comparison.
+ */
+function showViewerSas(code) {
   el.saschip.textContent = code || '—';
   el.saschip.hidden = false;
-
-  // Remember the code the user actually approved, not merely *that* they
-  // approved once. A boolean hid this panel forever after the first good call,
-  // which is exactly backwards: a rendezvous that swaps DTLS fingerprints on
-  // session #7 would change the code, and nobody would ever be told.
-  S.sasCode = code || null;
-  let saved = null;
-  try { saved = localStorage.getItem(`tawny.sas.${S.channel.id}`); } catch {}
-  const changed = !!code && !!saved && saved !== '1' && saved !== code;
+  // Retire the old per-channel store rather than leave a stale code behind it.
+  try { localStorage.removeItem(`tawny.sas.${S.channel?.id}`); } catch {}
 
   el.sascode.textContent = code || 'unavailable — connection may be tampered with';
-  el.sas.classList.toggle('sas--warn', !code || changed);
+  el.sas.classList.toggle('sas--warn', !code);
   if (el.sasnote) {
-    el.sasnote.textContent = changed
-      ? 'This monitor\u2019s safety code has CHANGED since you last checked it. '
-        + 'If you did not re-pair or reinstall, stop and disconnect.'
-      : 'Check this code matches the \u201cVerify:\u201d code shown on the Monitor\u2019s screen:';
+    el.sasnote.textContent = code
+      ? 'A new code is drawn for every connection. Check the Monitor is showing '
+        + 'this same one right now:'
+      : 'The safety code for this connection could not be worked out. If you did '
+        + 'not expect that, disconnect.';
   }
-  // Legacy '1' from the old boolean scheme means "approved, code unknown" — ask
-  // once more so we can record the real code.
-  el.sas.hidden = !!code && saved === code;
+  if (el.sasok) el.sasok.textContent = 'Looks right';
+  if (el.sasno) el.sasno.textContent = 'Disconnect';
+  el.sas.hidden = false;
 }
 
 function wsURLFor(base) {
@@ -1250,7 +1321,11 @@ function ensurePeer(id, role, transport) {
   let p = S.peers.get(id);
   if (!p) {
     p = { id, role, transport: transport || null, pc: null, stream: null,
-          iceKick: null, talking: false, audioEl: null, pendingIce: [] };
+          iceKick: null, talking: false, audioEl: null, pendingIce: [],
+          // This connection's safety code, and whether the Monitor's user has
+          // said it matches. Both live and die with the peer: a reconnect is a
+          // fresh DTLS handshake with a fresh code, so it is asked about again.
+          sas: null, sasOk: false };
     S.peers.set(id, p);
   } else if (transport) {
     p.transport = transport;   // Watcher may re-learn a peer on the other relay
@@ -1302,6 +1377,26 @@ function removePeer(id) {
   retuneAll();
   updatePeerChip();
   updateStatus();
+  // A phone leaving is what retires its safety-code card and lets the next one
+  // in the queue have the screen.
+  syncStationSas();
+}
+
+/**
+ * Monitor: end one Handheld's session and leave the others alone.
+ *
+ * Used when the user says a safety code does not match. Hanging up on all three
+ * would be a heavier hammer than the situation earns - the other two phones are
+ * watching a pet, and a monitor that goes dark for everyone is its own failure.
+ * The refused phone may reconnect; that is a new handshake with a new code, and
+ * it gets asked about again.
+ */
+function dropViewer(id) {
+  const p = S.peers.get(id);
+  if (!p) return;
+  sig({ type: 'bye', to: id }, p);
+  removePeer(id);
+  diag(`viewer ${id} dropped - safety code rejected`);
 }
 
 function teardownAll() {
@@ -1312,6 +1407,7 @@ function teardownAll() {
   el.talkflag.hidden = true;
   el.sas.hidden = true;
   el.saschip.hidden = true;
+  S.sasAsk = null;
   S.remotePaused = false;
   S.captureLost = false;
   stageNote(null);
@@ -2317,6 +2413,7 @@ async function start(role) {
   el.loader.hidden = role === 'station';
   el.sas.hidden = true;
   el.saschip.hidden = true;
+  S.sasAsk = null;
 
   if (role === 'station') {
     el.local.srcObject = S.local;
@@ -2694,14 +2791,29 @@ async function setDim(on) {
 $('#btn-dim').addEventListener('click', () => setDim(true));
 el.dimmer.addEventListener('click', () => setDim(false));
 
+// One card, two roles. On the Monitor it is asking about one named peer and
+// the answer is recorded against that peer; on a Handheld it is about the one
+// connection this phone has.
 $('#sas-ok')?.addEventListener('click', () => {
-  // Store the approved code itself so a later change re-raises this panel.
-  if (S.sasCode) {
-    try { localStorage.setItem(`tawny.sas.${S.channel?.id}`, S.sasCode); } catch {}
+  if (S.role === 'station') {
+    const p = S.sasAsk ? S.peers.get(S.sasAsk) : null;
+    if (p) p.sasOk = true;
+    S.sasAsk = null;
+    syncStationSas();       // hand the card to whoever is next in the queue
+    return;
   }
   el.sas.hidden = true;
 });
-$('#sas-no')?.addEventListener('click', hangUp);
+$('#sas-no')?.addEventListener('click', () => {
+  if (S.role === 'station') {
+    const id = S.sasAsk;
+    S.sasAsk = null;
+    if (id) dropViewer(id);   // this calls back into syncStationSas()
+    else syncStationSas();
+    return;
+  }
+  hangUp();
+});
 
 // ---------------------------------------------------------------- theme
 

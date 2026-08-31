@@ -195,10 +195,11 @@ export const PRIVACY_HTML = `<!doctype html>
   information from them.</p>
 
   <h2>Security</h2>
-  <p>Media is encrypted in transit (DTLS-SRTP). The first connection made over
+  <p>Media is encrypted in transit (DTLS-SRTP). Every connection made over
   the internet to a monitor shows a short safety code on both screens for you to
-  compare, which detects a tampered relay; if that code ever changes later, you
-  are asked to check it again. Pairing codes are like a key to your channel —
+  compare, which detects a tampered relay. A fresh code is drawn for each
+  connection, so compare it each time rather than expecting the same one twice.
+  Pairing codes are like a key to your channel —
   only share them with devices you own, and re-pair if a code may have
   leaked.</p>
 

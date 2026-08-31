@@ -326,7 +326,9 @@
     <div id="zoom-chip" class="zoom-chip" hidden></div>
 
     <div id="sas" class="sas" hidden>
-      <p id="sas-note">Check this code matches the &ldquo;Verify:&rdquo; code shown on the Monitor&rsquo;s screen:</p>
+      <!-- Replaced from app.js before this card is ever shown: the Monitor is
+           asking about one named phone, a Handheld about its own connection. -->
+      <p id="sas-note">Check this code matches the one on the other phone:</p>
       <strong id="sas-code" class="sas-code"></strong>
       <div class="sas-actions">
         <button id="sas-ok" type="button" class="wide primary">Looks right</button>

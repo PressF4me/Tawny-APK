@@ -66,6 +66,27 @@ PASS means a `turn:` URL came back; a 404 "no turn configured" means the
 `TURN_KEY_ID` / `TURN_API_TOKEN` secrets are not set on the Worker. Verified
 provisioned against the deployed Worker on 2026-08-29.
 
+## `sas-presentation.mjs` — the right code beside the right phone
+
+The one probe here that speaks no protocol. It lifts `syncStationSas()` and
+`sasPendingViewers()` out of `public/app.js` *by source text* — so it cannot
+drift from what ships — and runs them against stubbed peers.
+
+```bash
+node tools/probes/sas-presentation.mjs
+```
+
+The invariant, asserted after every call: if the safety-code card is up, the
+digits in it are the `sas` of the peer `S.sasAsk` names, and that peer is an
+unverified **cloud** viewer. Before the per-peer rework, the Monitor wrote every
+Handheld's code into the single `#sas-chip`, so with two or three phones on the
+relay it showed whichever DTLS handshake finished last and invited the user to
+compare it against a phone whose session it had not come from.
+
+Covers 1/2/3 cloud viewers, LAN-only, mixed LAN+cloud, a peer whose DTLS has not
+settled, and the pinned phone leaving mid-prompt. **9 scenarios green on
+2026-08-30.**
+
 ## Running the worker locally
 
 ```bash
