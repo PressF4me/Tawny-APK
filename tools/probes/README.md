@@ -140,6 +140,23 @@ Handheld chip maps a percent to the right gauge width and the right state class
 (`is-charging` on power, `is-low` under 15% unplugged, hidden with no reading).
 **All assertions green on 2026-08-31.**
 
+## `chime-routing.mjs` — a chime reaches an audible stream
+
+Lifts `CHIMES` / `chimeSpec` / `playChime` out of `public/app.js`.
+
+```bash
+node tools/probes/chime-routing.mjs
+```
+
+On the native Monitor a chime must go to the shell (`tellNative('chime', …)`),
+never the page's WebAudio: WebAudio output lands on `STREAM_MUSIC`, which Android
+keeps muted underneath a call and which the volume keys will not raise while one
+is running, so the shell plays the bundled clip on the call's own stream
+instead. Asserts the native path sends exactly one `chime` event with a
+sanitised slug and never touches WebAudio, an unknown slug falls back to the
+default, and a browser Monitor still plays through WebAudio. **Green on
+2026-08-31.**
+
 ## Running the worker locally
 
 ```bash

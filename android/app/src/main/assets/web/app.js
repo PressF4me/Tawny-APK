@@ -803,16 +803,35 @@ function preloadChimes() {
   for (const slug of Object.keys(CHIMES)) loadChime(slug);
 }
 
-function playChime(slug) {
+async function playChime(slug) {
   const key = chimeSpec(slug) ? slug : DEFAULT_CHIME;
-  const ac = audioCtx();
-  const buffer = chimeBuffers.get(key);
-  if (buffer) return playChimeBuffer(ac, buffer, CHIMES[key].gain);
 
-  // Not cached yet, or known bad. Make a sound *now* out of the synth, and warm
-  // the cache for next time — never make the user wait on the network.
-  synthChime(ac, key);
-  if (!chimeBuffers.has(key)) loadChime(key);
+  // The native Monitor plays the chime itself. From the page's WebAudio a chime
+  // comes out on STREAM_MUSIC — which sits muted underneath a call, and cannot
+  // be raised with the volume keys while one is running (they move the in-call
+  // stream instead). The shell puts it on the call's own audio stream, where it
+  // is actually audible and tracks the in-call volume.
+  if (androidNative && S.role === 'station') {
+    tellNative('chime', { slug: key });
+    return;
+  }
+
+  const ac = audioCtx();
+  // The Monitor's session can start without a tap the WebView ever sees, and
+  // Chrome re-parks the context whenever it loses audio focus (dim mode, a trip
+  // through the background). Starting a source on a stopped clock makes no
+  // sound, so wait for it to actually be running.
+  if (ac.state !== 'running') { try { await ac.resume(); } catch {} }
+
+  const buffer = chimeBuffers.get(key);
+  if (buffer) playChimeBuffer(ac, buffer, CHIMES[key].gain);
+  else {
+    // Not cached yet, or known bad. Make a sound *now* from the synth, and warm
+    // the cache for next time — never make the user wait on the network.
+    synthChime(ac, key);
+    if (!chimeBuffers.has(key)) loadChime(key);
+  }
+  diag(`chime ${key} (${buffer ? 'clip' : 'synth'}, ctx=${ac.state})`);
 }
 
 function playChimeBuffer(ac, buffer, gain = 1) {
@@ -1667,7 +1686,7 @@ async function handle(m, entry) {
       if (S.role !== 'station') return;
       const p = S.peers.get(m.from);
       const now = Date.now();
-      if (now - (handle._chimeAt || 0) > 300) { playChime(m.sound); handle._chimeAt = now; }
+      if (now - (handle._chimeAt || 0) > 300) { handle._chimeAt = now; playChime(m.sound); }
       sig({ type: 'chime-ack', to: m.from, sound: m.sound }, p);
       break;
     }
@@ -2592,8 +2611,9 @@ async function start(role) {
     enumerateCameras();
     // The Monitor is the end that plays chimes. Decode them now, while it is
     // idle and unlocked, so an arriving chime is instant instead of a fetch
-    // behind the Viewer's press.
-    preloadChimes();
+    // behind the Viewer's press. The native shell plays chimes itself, so it
+    // does not need the WebAudio clips at all.
+    if (!androidNative) preloadChimes();
   }
 
   el.remote.srcObject = null;

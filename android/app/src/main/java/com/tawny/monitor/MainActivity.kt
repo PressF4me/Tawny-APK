@@ -18,7 +18,9 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.SoundPool
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
@@ -300,6 +302,13 @@ class MainActivity : AppCompatActivity() {
     /** Live only while this phone is the Monitor: forwards its battery to the
      *  page, which mirrors it to every Handheld. */
     private var batteryRx: BroadcastReceiver? = null
+    /** Chime playback for the Monitor, on the call's own audio stream (see
+     *  startChimeAudio). */
+    private var chimePool: SoundPool? = null
+    private val chimeIds = HashMap<String, Int>()
+    private val chimeFds = mutableListOf<android.content.res.AssetFileDescriptor>()
+    private var pendingChime: String? = null
+    private var pendingChimeAt = 0L
     /** Dim mode is showing, so the backlight is pinned near-black. */
     private var isDimmed = false
 
@@ -3393,6 +3402,9 @@ class MainActivity : AppCompatActivity() {
                     // can explain a "it froze" report after the fact.
                     "paused" -> Diag.log("shell", "capture paused — monitor left the foreground")
                     "resumed" -> Diag.log("shell", "capture resumed")
+                    // A Viewer pressed a chime. Play it on the call's audio
+                    // stream, where the page's own WebAudio cannot reach.
+                    "chime" -> playChimeNative(obj.optString("slug"))
                     // Theme changed from the in-session web toggle.
                     "theme" -> {
                         val mode = obj.optString("mode")
@@ -3632,7 +3644,10 @@ class MainActivity : AppCompatActivity() {
         isLive = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         acquireSessionLocks()
-        if (prefs.getString("role", null) == "station") startBatteryMirror()
+        if (prefs.getString("role", null) == "station") {
+            startBatteryMirror()
+            startChimeAudio()
+        }
         val hz = applyLowRefreshRate()
         Diag.log("power", "live — refresh " + (hz?.let { "→ ${it}Hz" } ?: "already lowest"))
         refreshSystemBars()
@@ -3655,6 +3670,7 @@ class MainActivity : AppCompatActivity() {
     private fun endLive() {
         isLive = false
         stopBatteryMirror()
+        stopChimeAudio()
         // ...and never left holding a phone with its camera light still on.
         // The page turns it off on its own hang-up path, but the shell ends
         // sessions by routes of its own too (the "End the call?" dialog, a load
@@ -3721,6 +3737,67 @@ class MainActivity : AppCompatActivity() {
     private fun stopBatteryMirror() {
         batteryRx?.let { runCatching { unregisterReceiver(it) } }
         batteryRx = null
+    }
+
+    /**
+     * Chime playback for a Monitor session. The page hands the shell a slug; the
+     * shell plays the bundled clip through a SoundPool tagged
+     * USAGE_VOICE_COMMUNICATION, so it rides the *call* audio stream. Played from
+     * WebAudio in the page it lands on STREAM_MUSIC instead — which Android keeps
+     * muted underneath a call, and which the volume keys will not touch while one
+     * is running. The clips live in assets/web/sounds/ (kept in sync from
+     * public/sounds/ by syncWebAssets); .ogg is not compressed in the APK, so
+     * openFd() works.
+     */
+    private val chimeSlugs = listOf("bark", "pspsps", "meow", "goodboy", "bell")
+
+    private fun startChimeAudio() {
+        if (chimePool != null) return
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val pool = SoundPool.Builder().setMaxStreams(2).setAudioAttributes(attrs).build()
+        pool.setOnLoadCompleteListener { sp, sampleId, status ->
+            if (status != 0) return@setOnLoadCompleteListener
+            val slug = chimeIds.entries.firstOrNull { it.value == sampleId }?.key
+            if (slug != null && slug == pendingChime &&
+                SystemClock.elapsedRealtime() - pendingChimeAt < 4000L) {
+                pendingChime = null
+                sp.play(sampleId, 0.95f, 0.95f, 1, 0, 1f)
+            }
+        }
+        for (slug in chimeSlugs) {
+            try {
+                val fd = assets.openFd("web/sounds/$slug.ogg")
+                chimeFds.add(fd)
+                chimeIds[slug] = pool.load(fd, 1)
+            } catch (e: Exception) {
+                Diag.log("shell", "chime load failed for $slug: ${e.message}")
+            }
+        }
+        chimePool = pool
+    }
+
+    private fun playChimeNative(slugRaw: String) {
+        val slug = if (slugRaw in chimeSlugs) slugRaw else "bell"
+        val pool = chimePool ?: run { startChimeAudio(); chimePool } ?: return
+        val id = chimeIds[slug] ?: return
+        val stream = pool.play(id, 0.95f, 0.95f, 1, 0, 1f)
+        if (stream == 0) {                     // sample still decoding — play on load
+            pendingChime = slug
+            pendingChimeAt = SystemClock.elapsedRealtime()
+        }
+        Diag.log("shell", "chime $slug" + if (stream == 0) " (queued — loading)" else "")
+    }
+
+    private fun stopChimeAudio() {
+        chimePool?.release()
+        chimePool = null
+        chimeIds.clear()
+        for (fd in chimeFds) runCatching { fd.close() }
+        chimeFds.clear()
+        pendingChime = null
     }
 
     // -------------------------------------------------------- lifecycle
