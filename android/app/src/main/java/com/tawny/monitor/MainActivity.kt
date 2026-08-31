@@ -4,8 +4,10 @@ import android.animation.LayoutTransition
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
@@ -19,6 +21,7 @@ import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.net.Uri
 import android.net.wifi.WifiManager
+import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Environment
 import android.os.PowerManager
@@ -294,6 +297,9 @@ class MainActivity : AppCompatActivity() {
     private var viewersNow = 0
     private var viewersMax = MAX_VIEWERS
     private var isLive = false
+    /** Live only while this phone is the Monitor: forwards its battery to the
+     *  page, which mirrors it to every Handheld. */
+    private var batteryRx: BroadcastReceiver? = null
     /** Dim mode is showing, so the backlight is pinned near-black. */
     private var isDimmed = false
 
@@ -3626,6 +3632,7 @@ class MainActivity : AppCompatActivity() {
         isLive = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         acquireSessionLocks()
+        if (prefs.getString("role", null) == "station") startBatteryMirror()
         val hz = applyLowRefreshRate()
         Diag.log("power", "live — refresh " + (hz?.let { "→ ${it}Hz" } ?: "already lowest"))
         refreshSystemBars()
@@ -3647,6 +3654,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun endLive() {
         isLive = false
+        stopBatteryMirror()
         // ...and never left holding a phone with its camera light still on.
         // The page turns it off on its own hang-up path, but the shell ends
         // sessions by routes of its own too (the "End the call?" dialog, a load
@@ -3668,6 +3676,51 @@ class MainActivity : AppCompatActivity() {
             am.isSpeakerphoneOn = false
         }
         am.mode = AudioManager.MODE_NORMAL
+    }
+
+    /**
+     * Mirror this phone's battery to the Handhelds for the length of a Monitor
+     * session. `ACTION_BATTERY_CHANGED` is a sticky broadcast: the first
+     * `registerReceiver` returns the current reading straight away, then it
+     * fires again on every 1% step and every plug / unplug. All this does is
+     * hand each reading to public/app.js, which forwards it over the signalling
+     * channel to whoever is watching. No permission is needed to read it.
+     */
+    private fun startBatteryMirror() {
+        if (batteryRx != null) return
+        val rx = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                intent ?: return
+                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                if (level < 0 || scale <= 0) return
+                val pct = Math.round(level * 100f / scale).coerceIn(0, 100)
+                val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+                val charging = when (status) {
+                    BatteryManager.BATTERY_STATUS_CHARGING,
+                    BatteryManager.BATTERY_STATUS_FULL -> true
+                    BatteryManager.BATTERY_STATUS_DISCHARGING,
+                    BatteryManager.BATTERY_STATUS_NOT_CHARGING -> false
+                    else -> plugged != 0            // status unknown — fall back to "on a lead"
+                }
+                web?.evaluateJavascript(
+                    "window.tawnyBattery && window.tawnyBattery($pct, $charging)", null
+                )
+            }
+        }
+        batteryRx = rx
+        // ACTION_BATTERY_CHANGED is system-only, so the export flag is moot, but
+        // targetSdk 34+ wants one stated. NOT_EXPORTED is the honest answer.
+        ContextCompat.registerReceiver(
+            this, rx, IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    private fun stopBatteryMirror() {
+        batteryRx?.let { runCatching { unregisterReceiver(it) } }
+        batteryRx = null
     }
 
     // -------------------------------------------------------- lifecycle

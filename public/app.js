@@ -18,7 +18,9 @@ const el = {
   join: $('#join'), joinName: $('#join-name'),
   live: $('#live'), remote: $('#remote'), remoteAudio: $('#remote-audio'),
   local: $('#local'), loader: $('#loader'), peerAudio: $('#peer-audio'),
-  peercount: $('#peercount'),
+  peercount: $('#peercount'), peercountN: $('#peercount b'), peerlabel: $('#peerlabel'),
+  rail: $('#rail'),
+  battchip: $('#battchip'), battFill: $('#battchip .batt-fill'), battPct: $('#battchip .batt-pct'),
   sas: $('#sas'), sascode: $('#sas-code'), saschip: $('#sas-chip'),
   sasnote: $('#sas-note'), sasok: $('#sas-ok'), sasno: $('#sas-no'),
   stageNote: $('#stage-note'),
@@ -62,6 +64,10 @@ const S = {
   // thing the Monitor said, and nothing else is ever rendered.
   torchOn: false, torchSupported: false, torchFacing: null, torchTimer: null,
   torchAsk: false,            // viewer: an "on" is in flight, so a refusal can explain itself
+  // Battery. On the Monitor: this phone's charge, mirrored to every Handheld as
+  // it changes. On a Viewer: the last thing the Monitor said, rendered as-is.
+  battery: { level: null, charging: null },
+  remoteBattery: { level: null, charging: null },
   cameras: [], cameraIndex: 0, zoomLevel: 1.0, zoomHardware: false, stationZoomSupported: false
 };
 
@@ -194,7 +200,63 @@ function show(screen) {
 function status(text, kind) {
   el.statusline.textContent = text;
   el.dot.className = 'dot' + (kind ? ' ' + kind : '');
+  // A nominal state (live, or a connection still coming up) collapses to just
+  // the dot on a portrait phone; a state the user might act on keeps its word.
+  const nominal = kind === 'live' || kind === 'on' || /^waiting$/i.test(text);
+  el.rail?.classList.toggle('rail-ok', nominal);
+  bumpRail();
 }
+
+// The rail steps back to a whisper after a few quiet seconds; any call here
+// (a status change, a phone joining) brings it back to full first.
+let railRestTimer = null;
+function bumpRail() {
+  if (!el.rail) return;
+  el.rail.classList.remove('rail-rest');
+  clearTimeout(railRestTimer);
+  railRestTimer = setTimeout(() => el.rail.classList.add('rail-rest'), 5000);
+}
+
+// A short, real-sounding name for this phone, shown in the other end's rail.
+// Chrome / Android WebView expose the model directly; elsewhere the UA string
+// is the best we have, and on iOS that is only ever "iPhone" / "iPad" - still
+// short and recognisable, which is all this is for. Never persisted, never
+// sent anywhere but the paired peer.
+function shortDeviceLabel(model) {
+  const ua = navigator.userAgent || '';
+  let m = (model || '').trim();
+  if (!m) {
+    if (/iPhone/.test(ua)) m = 'iPhone';
+    else if (/iPad/.test(ua)) m = 'iPad';
+    else {
+      const paren = ua.match(/\(([^)]*)\)/);
+      const seg = paren ? paren[1].split(';').map((s) => s.trim()) : [];
+      const i = seg.findIndex((s) => /^Android\s/i.test(s));
+      m = (i >= 0 && seg[i + 1]) ? seg[i + 1] : '';
+      m = m.replace(/\s+Build\/.*$/i, '').replace(/^wv$/i, '');
+      if (!m && /Android/.test(ua)) m = 'Android';
+    }
+  }
+  if (!m) m = 'Phone';
+  m = m
+    .replace(/^SM-A505\w*/i, 'Galaxy A50')
+    .replace(/^SM-A515\w*/i, 'Galaxy A51')
+    .replace(/^SM-G97[03]\w*/i, 'Galaxy S10')
+    .replace(/^SM-G99\d\w*/i, 'Galaxy S21')
+    .replace(/^SM-/i, 'Galaxy ')
+    .replace(/[^\x20-\x7E]+/g, '').trim();
+  return m.length > 18 ? m.slice(0, 18) : m;
+}
+
+async function resolveDeviceLabel() {
+  let model = '';
+  try {
+    const v = await navigator.userAgentData?.getHighEntropyValues?.(['model']);
+    model = v?.model || '';
+  } catch {}
+  S.deviceLabel = shortDeviceLabel(model);
+}
+resolveDeviceLabel();
 
 const press = (btn, on) => btn.setAttribute('aria-pressed', on ? 'true' : 'false');
 
@@ -272,6 +334,11 @@ function renderChannels() {
     del.addEventListener('click', () => {
       if (!confirm(`Delete "${ch.name}"? Devices paired to it will stop connecting.`)) return;
       setChannels(getChannels().filter((c) => c.id !== ch.id));
+      // Drop the once-reviewed safety-code flag so a re-pair starts clean.
+      try {
+        localStorage.removeItem(`tawny.sasok.${ch.id}`);
+        localStorage.removeItem(`tawny.sas.${ch.id}`);
+      } catch {}
       renderChannels();
       toast('Monitor removed');
     });
@@ -944,8 +1011,11 @@ async function showSas(peer, attempt = 0) {
 }
 
 /** Monitor: cloud Handhelds whose code has not been confirmed yet, oldest
- *  first. LAN Handhelds never appear here - the Monitor *is* their relay. */
+ *  first. LAN Handhelds never appear here - the Monitor *is* their relay. Once
+ *  the user has vouched for this channel's code a first time, nothing is
+ *  pending: the review, like the Handheld's, happens once per monitor. */
 function sasPendingViewers() {
+  if (sasReviewed()) return [];
   return viewerPeers().filter(
     (p) => p.transport?.tag === 'cloud' && p.sas && !p.sasOk
   );
@@ -954,26 +1024,24 @@ function sasPendingViewers() {
 /**
  * Monitor: put the right code in front of the right phone.
  *
- * Two surfaces, and each is allowed to speak only where it can be honest:
- *
- *  - the "Verify:" chip in the top rail is a bare label with nowhere to say
- *    *whose* code it is, so it shows only while exactly one cloud Handheld is
- *    connected. With two or three it is hidden - there is no such thing as
- *    "the" code any more, and a chip that pretends otherwise is the bug.
- *  - the card asks about one phone at a time, pinned to that peer until the
- *    user answers or the phone goes away, and says how many are queued behind
- *    it. Re-picking the newest peer on every call would swap the digits out
- *    from under someone halfway through reading them.
+ * The code no longer lives in the top rail at all - it was there on every
+ * connection, which is exactly the always-on clutter this screen did not need.
+ * What remains is the card: it asks about one phone at a time, pinned to that
+ * peer until the user answers or the phone goes away, and says how many are
+ * queued behind it. Re-picking the newest peer on every call would swap the
+ * digits out from under someone halfway through reading them. And once the user
+ * has vouched for this channel's code once (sasReviewed), sasPendingViewers()
+ * is empty and the card stays down for good.
  */
 function syncStationSas() {
   if (S.role !== 'station') return;
-  const cloud = viewerPeers().filter((p) => p.transport?.tag === 'cloud' && p.sas);
+  el.saschip.hidden = true;              // the code never sits in the rail now
 
-  if (cloud.length === 1) {
-    el.saschip.textContent = 'Verify: ' + cloud[0].sas;
-    el.saschip.hidden = false;
-  } else {
-    el.saschip.hidden = true;
+  if (sasReviewed()) {                   // vouched for once — never ask again
+    S.sasAsk = null;
+    el.sas.hidden = true;
+    el.sas.classList.remove('sas--warn');
+    return;
   }
 
   let ask = S.sasAsk ? S.peers.get(S.sasAsk) : null;
@@ -997,32 +1065,46 @@ function syncStationSas() {
   el.sas.hidden = false;
 }
 
-/**
- * Handheld: the code for this call, on every internet call.
- *
- * There is deliberately no memory of the last one. WebRTC mints a fresh DTLS
- * certificate for every RTCPeerConnection - measured on this app's own WebView:
- * three connections in one page, three different fingerprints - and nothing
- * here persists one, so the code differs on every call *by construction*. The
- * old scheme stored the approved code and, whenever it failed to match,
- * announced that the monitor's safety code had CHANGED and that the user should
- * stop and disconnect. After the first session that fired every single time. An
- * alarm that cries wolf on every reconnect is worse than no alarm: it teaches
- * the user to dismiss the one warning that would have mattered. So this now
- * says what the check always actually was - a per-call comparison.
- */
+// Handheld: has this channel's safety code already been reviewed once?
+//
+// WebRTC mints a fresh DTLS certificate for every RTCPeerConnection - measured
+// in this app's own WebView: three connections in one page, three different
+// fingerprints - so the code is different on the next call *by construction*
+// and there is nothing to re-compare it against. The old scheme re-prompted on
+// every reconnect; after the first session that fired every single time and
+// only ever taught people to tap it away. So the review happens once per
+// channel: confirm it the first time the Handheld connects over the internet,
+// and never again. A code that could not be computed at all is still shown -
+// that is an alarm, not a review.
+const sasReviewKey = () => `tawny.sasok.${S.channel?.id}`;
+function sasReviewed() {
+  try { return !!localStorage.getItem(sasReviewKey()); } catch { return false; }
+}
+function markSasReviewed(code) {
+  try { localStorage.setItem(sasReviewKey(), code || '1'); } catch {}
+}
+
 function showViewerSas(code) {
-  el.saschip.textContent = code || '—';
-  el.saschip.hidden = false;
   // Retire the old per-channel store rather than leave a stale code behind it.
   try { localStorage.removeItem(`tawny.sas.${S.channel?.id}`); } catch {}
+
+  // Already reviewed once for this channel, and the code came through fine:
+  // say nothing at all - no card, no chip.
+  if (code && sasReviewed()) {
+    el.sas.hidden = true;
+    el.sas.classList.remove('sas--warn');
+    el.saschip.hidden = true;
+    return;
+  }
+
+  el.saschip.hidden = true;      // the code lives on the card, never in the rail
 
   el.sascode.textContent = code || 'unavailable — connection may be tampered with';
   el.sas.classList.toggle('sas--warn', !code);
   if (el.sasnote) {
     el.sasnote.textContent = code
-      ? 'A new code is drawn for every connection. Check the Monitor is showing '
-        + 'this same one right now:'
+      ? 'Check the Monitor is showing this same code. You are only asked this '
+        + 'once for this monitor.'
       : 'The safety code for this connection could not be worked out. If you did '
         + 'not expect that, disconnect.';
   }
@@ -1321,7 +1403,7 @@ function ensurePeer(id, role, transport) {
   let p = S.peers.get(id);
   if (!p) {
     p = { id, role, transport: transport || null, pc: null, stream: null,
-          iceKick: null, talking: false, audioEl: null, pendingIce: [],
+          iceKick: null, talking: false, audioEl: null, pendingIce: [], label: null,
           // This connection's safety code, and whether the Monitor's user has
           // said it matches. Both live and die with the peer: a reconnect is a
           // fresh DTLS handshake with a fresh code, so it is asked about again.
@@ -1368,6 +1450,10 @@ function removePeer(id) {
     S.torchOn = false;
     S.torchSupported = false;
     updateTorchUI();
+    // Same for the battery reading — drop it rather than leave a stale percent
+    // hanging over a monitor that is no longer connected.
+    S.remoteBattery = { level: null, charging: null };
+    updateBatteryUI();
   }
   // Monitor: the last Viewer left. Nobody is looking, so nothing justifies
   // holding an LED on in an empty room.
@@ -1440,21 +1526,34 @@ function updateStatus() {
   const vs = viewerPeers();
   if (!vs.length) { status('Waiting', null); return; }
   const live = vs.filter((p) => p.pc?.connectionState === 'connected').length;
-  status(live
-    ? `On air · ${live} watching`
-    : 'Viewer connecting', live ? 'live' : 'on');
+  // The count lives in the rail's phone glyph now, not in words here.
+  status(live ? 'On air' : 'Connecting', live ? 'live' : 'on');
 }
 
 function updatePeerChip() {
   if (!el.peercount) return;
-  if (S.role !== 'station') { el.peercount.hidden = true; return; }
+  if (S.role !== 'station') {
+    el.peercount.hidden = true;
+    if (el.peerlabel) el.peerlabel.hidden = true;
+    return;
+  }
   const n = viewerCount();
   const full = n >= MAX_VIEWERS;
   el.peercount.hidden = n === 0;
-  el.peercount.textContent = full
-    ? `${n} phones · full`
-    : n === 1 ? '1 phone' : `${n} phones`;
+  if (el.peercountN) el.peercountN.textContent = String(n);
+  el.peercount.setAttribute('aria-label',
+    `${n} phone${n === 1 ? '' : 's'} watching${full ? ', full' : ''}`);
   el.peercount.classList.toggle('is-busy', full);
+
+  // Exactly one phone watching: name it. More than one, or none: no room for a
+  // name, so just the count. The safety code is gone from here entirely - it is
+  // the first-connection card and nothing else.
+  if (el.peerlabel) {
+    const only = n === 1 ? viewerPeers()[0] : null;
+    el.peerlabel.hidden = !(only && only.label);
+    if (only && only.label) el.peerlabel.textContent = only.label;
+  }
+  bumpRail();
   // Tell the native shell how many are watching and whether there is still room
   // for another. This used to fire once, on the very first Viewer, and only
   // ever said "watching" — so the shell tore down the way back to the pairing
@@ -1532,6 +1631,12 @@ async function handle(m, entry) {
         return;
       }
       const p = ensurePeer(m.from, S.role === 'station' ? 'viewer' : 'station', entry);
+      // The Handheld names its own device in the offer, for the Monitor's rail.
+      // Peer-controlled text: printable ASCII only, kept short, only ever shown.
+      if (S.role === 'station' && typeof m.label === 'string') {
+        const clean = m.label.replace(/[^\x20-\x7E]+/g, '').trim().slice(0, 20);
+        if (clean) p.label = clean;
+      }
       await answerPeer(p, m.sdp);
       break;
     }
@@ -1659,6 +1764,17 @@ async function handle(m, entry) {
       // that springs back with no explanation.
       if (S.torchAsk && !S.torchOn) toast(torchHint());
       S.torchAsk = false;
+      break;
+    }
+    case 'battery': {
+      // Viewer: the Monitor is authoritative. Store and render, nothing else.
+      if (S.role !== 'viewer') break;
+      const lv = Number(m.level);
+      S.remoteBattery = {
+        level: Number.isFinite(lv) ? Math.max(0, Math.min(100, Math.round(lv))) : null,
+        charging: typeof m.charging === 'boolean' ? m.charging : null,
+      };
+      updateBatteryUI();
       break;
     }
     case 'bye':
@@ -1835,7 +1951,10 @@ async function makeOffer(peer, opts) {
   if (!peer.pc || peer.pc.signalingState !== 'stable') return;
   const offer = await peer.pc.createOffer(opts);
   await peer.pc.setLocalDescription(offer);
-  sig({ type: 'offer', to: peer.id, sdp: peer.pc.localDescription.toJSON() }, peer);
+  const msg = { type: 'offer', to: peer.id, sdp: peer.pc.localDescription.toJSON() };
+  // The Handheld tags its offer with a short device name for the Monitor's rail.
+  if (S.role === 'viewer') msg.label = S.deviceLabel || shortDeviceLabel('');
+  sig(msg, peer);
 }
 
 // The viewer drives renegotiation, so it asks for the ICE restart.
@@ -1874,6 +1993,11 @@ async function answerPeer(peer, sdp) {
   if (S.role === 'station') {
     S.torchSupported = await probeTorch();
     sig({ ...torchState(), to: peer.id }, peer);
+  }
+  // Current battery, so a phone that joins (or rejoins) mid-session is not
+  // stuck on a stale reading until the next 1% step.
+  if (S.role === 'station' && S.battery.level != null) {
+    sig({ ...batteryState(), to: peer.id }, peer);
   }
 }
 
@@ -2041,6 +2165,71 @@ const torchState = () => ({
 function broadcastTorch() {
   if (S.role !== 'station') return;
   for (const p of viewerPeers()) sig({ ...torchState(), to: p.id }, p);
+}
+
+// ---- monitor battery, mirrored to every Handheld ---------------------------
+// The Handheld should always show the Monitor's real charge and whether it is
+// on power. The native shell is authoritative — it reads ACTION_BATTERY_CHANGED,
+// which is exact and fires on every 1% step and every plug/unplug — and calls
+// window.tawnyBattery(). A browser Monitor falls back to the Battery Status API
+// where the engine has it. Either way the Viewer renders only what arrived.
+
+const batteryState = () => ({
+  type: 'battery', level: S.battery.level, charging: S.battery.charging,
+});
+
+function broadcastBattery() {
+  if (S.role !== 'station' || S.battery.level == null) return;
+  for (const p of viewerPeers()) sig({ ...batteryState(), to: p.id }, p);
+}
+
+// One entry point for both sources. Rebroadcasts only on an actual change, so a
+// repeated OS broadcast at the same percent costs nothing.
+function setStationBattery(level, charging) {
+  if (S.role !== 'station') return;
+  const lv = level == null || !Number.isFinite(level)
+    ? null : Math.max(0, Math.min(100, Math.round(level)));
+  const ch = typeof charging === 'boolean' ? charging : null;
+  if (lv === S.battery.level && ch === S.battery.charging) return;
+  S.battery = { level: lv, charging: ch };
+  broadcastBattery();
+}
+
+// Native shell → here, on every OS battery broadcast while a Monitor is live.
+window.tawnyBattery = (level, charging) =>
+  setStationBattery(Number(level), !!charging);
+
+// Browser Monitor fallback. No-op in the native shell (which drives the call
+// above) and on engines without the API — the Handheld simply shows no chip.
+// getBattery() hands back the same object every call, so the listeners are
+// attached once for the life of the page.
+let browserBatteryBound = false;
+async function watchBrowserBattery() {
+  if (S.role !== 'station' || S.nativeShell || !navigator.getBattery) return;
+  let b;
+  try { b = await navigator.getBattery(); } catch { return; }
+  const push = () => setStationBattery(b.level * 100, b.charging);
+  push();
+  if (browserBatteryBound) return;
+  browserBatteryBound = true;
+  b.addEventListener('levelchange', push);
+  b.addEventListener('chargingchange', push);
+}
+
+// Viewer: paint whatever the Monitor last sent. Green + a bolt when it is on
+// power; amber when it is running low on its own.
+function updateBatteryUI() {
+  if (!el.battchip) return;
+  const { level, charging } = S.remoteBattery;
+  if (S.role !== 'viewer' || level == null) { el.battchip.hidden = true; return; }
+  el.battchip.hidden = false;
+  if (el.battPct) el.battPct.textContent = level + '%';
+  if (el.battFill) el.battFill.setAttribute('width', (20 * level / 100).toFixed(1));
+  el.battchip.classList.toggle('is-charging', charging === true);
+  el.battchip.classList.toggle('is-low', charging !== true && level <= 15);
+  el.battchip.setAttribute('aria-label',
+    `Monitor battery ${level}%${charging === true ? ', charging' : ''}`);
+  bumpRail();
 }
 
 /**
@@ -2414,6 +2603,10 @@ async function start(role) {
   el.sas.hidden = true;
   el.saschip.hidden = true;
   S.sasAsk = null;
+  el.live.dataset.role = role;        // CSS trims the rail differently per role
+  S.battery = { level: null, charging: null };
+  S.remoteBattery = { level: null, charging: null };
+  updateBatteryUI();
 
   if (role === 'station') {
     el.local.srcObject = S.local;
@@ -2424,6 +2617,7 @@ async function start(role) {
     startMeter(S.local);              // dim screen shows the pet's room level
     updatePeerChip();
     keepAwake();
+    watchBrowserBattery();            // native shell drives window.tawnyBattery instead
   } else {
     for (const t of S.local.getAudioTracks()) t.enabled = false; // push-to-talk
     el.cViewer.hidden = false;
@@ -2431,9 +2625,11 @@ async function start(role) {
     updateTorchUI();
   }
 
-  // Rail label: the room name the user gave, with "monitor" appended.
-  const room = (S.channel.name || 'Pet camera').trim();
-  el.channel.textContent = /\bmonitor$/i.test(room) ? room : `${room} monitor`;
+  // Rail label: just the room name the user gave. The Handheld keeps it (you may
+  // have several monitors); on the Monitor's own screen CSS hides it - you named
+  // the pet, you know which room you are in.
+  const room = (S.channel.name || 'Pet camera').trim().replace(/\s*monitor$/i, '');
+  el.channel.textContent = room || 'Pet camera';
 
   show(el.live);
   status('Connecting', null);
@@ -2791,18 +2987,23 @@ async function setDim(on) {
 $('#btn-dim').addEventListener('click', () => setDim(true));
 el.dimmer.addEventListener('click', () => setDim(false));
 
-// One card, two roles. On the Monitor it is asking about one named peer and
-// the answer is recorded against that peer; on a Handheld it is about the one
-// connection this phone has.
+// One card, two roles. On the Monitor it is asking about one named peer; on a
+// Handheld it is about the one connection this phone has. Either way, "Looks
+// right" is also the once-per-channel acknowledgement - after it, this monitor
+// is not asked to compare codes again.
 $('#sas-ok')?.addEventListener('click', () => {
   if (S.role === 'station') {
     const p = S.sasAsk ? S.peers.get(S.sasAsk) : null;
-    if (p) p.sasOk = true;
+    if (p) { p.sasOk = true; if (p.sas) markSasReviewed(p.sas); }
     S.sasAsk = null;
-    syncStationSas();       // hand the card to whoever is next in the queue
+    syncStationSas();       // card goes away; the code no longer sits in the rail
     return;
   }
+  // Handheld: a real code the user confirmed - remember it so this channel
+  // never shows the review again. A warn state has no code worth remembering.
+  if (!el.sas.classList.contains('sas--warn')) markSasReviewed(el.sascode.textContent);
   el.sas.hidden = true;
+  el.saschip.hidden = true;
 });
 $('#sas-no')?.addEventListener('click', () => {
   if (S.role === 'station') {

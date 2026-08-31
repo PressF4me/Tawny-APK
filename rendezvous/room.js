@@ -31,7 +31,7 @@ const MAX_STATIONS = 1;
 // LocalWeb.kt and server.js.
 const RELAY = new Set([
   'offer', 'answer', 'ice', 'bye', 'chime', 'chime-ack', 'talking',
-  'cameras', 'meta', 'camera-control', 'torch'
+  'cameras', 'meta', 'camera-control', 'torch', 'battery'
 ]);
 const TICKET_TTL_MS = 24 * 60 * 60 * 1000;
 const HEX64 = /^[a-f0-9]{64}$/;

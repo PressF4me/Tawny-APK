@@ -426,7 +426,7 @@ class SignalServer(
         // transport and mysteriously not the others.
         private val RELAY = setOf(
             "offer", "answer", "ice", "bye", "chime", "chime-ack", "talking",
-            "cameras", "meta", "camera-control", "torch"
+            "cameras", "meta", "camera-control", "torch", "battery"
         )
         private val ROOM_RE = Regex("^[0-9a-f]{32}$")
         private val PROOF_RE = Regex("^[0-9a-fA-F]{64}$")

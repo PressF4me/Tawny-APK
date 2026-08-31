@@ -30,7 +30,7 @@ const HEX64 = /^[a-f0-9]{64}$/;
 // in step with ../room.js, ../../server.js and LocalWeb.kt.
 const RELAY = new Set([
   "offer", "answer", "ice", "bye", "chime", "chime-ack", "talking",
-  "cameras", "meta", "camera-control", "torch",
+  "cameras", "meta", "camera-control", "torch", "battery",
 ]);
 const MAX_PER_ROOM = 4;      // 1 Monitor + up to 3 Viewers. Mirrors ../room.js.
 const MAX_STATIONS = 1;

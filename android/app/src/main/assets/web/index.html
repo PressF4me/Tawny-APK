@@ -299,15 +299,30 @@
 
     <video id="local" playsinline autoplay muted hidden></video>
 
-    <div class="rail">
+    <div id="rail" class="rail">
       <div class="rail-left">
         <span id="dot" class="dot"></span>
         <span id="statusline">Connecting</span>
       </div>
       <div id="meter" class="meter" role="img" aria-label="Sound level at the far end"></div>
       <div class="rail-right">
-        <span id="peercount" class="tag" hidden></span>
-        <span id="sas-chip" class="tag sas-chip" title="Safety code — should match on both phones" hidden></span>
+        <span id="peercount" class="tag-count" hidden aria-label="Phones watching">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.6"/><line x1="10.5" y1="18.4" x2="13.5" y2="18.4"/></svg><b></b>
+        </span>
+        <span id="peerlabel" class="tag-device" hidden></span>
+        <!-- Handheld only: the Monitor's live battery, mirrored as it changes. -->
+        <span id="battchip" class="tag-batt" hidden>
+          <svg viewBox="0 0 30 14" aria-hidden="true" class="batt-ico">
+            <rect x="1" y="2" width="24" height="10" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <rect x="26" y="4.6" width="2.6" height="4.8" rx="1" fill="currentColor"/>
+            <rect class="batt-fill" x="3" y="4" width="20" height="6" rx="1" fill="currentColor"/>
+          </svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="batt-bolt"><path d="M13 2 5 13.5h5.5L9 22l9-12h-6l1-8Z" fill="currentColor"/></svg>
+          <b class="batt-pct"></b>
+        </span>
+        <!-- Kept only so older references resolve: the safety code no longer
+             sits in the rail, it is the first-connection card and nothing else. -->
+        <span id="sas-chip" hidden></span>
         <span id="channel"></span>
       </div>
     </div>

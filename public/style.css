@@ -529,72 +529,140 @@ button { font: inherit; color: inherit; cursor: pointer; }
   top: 0; left: 0; right: 0;
   display: flex;
   align-items: center;
-  /* The Monitor's rail carries three tags at once (phone count, safety code,
-     channel name) and used to shave the status down to "O…" on a narrow phone.
-     Let it take a second line instead: the status text is the one thing here
-     that must never be a guess. */
-  flex-wrap: wrap;
-  gap: 8px 10px;
-  padding: calc(12px + var(--safe-t)) 14px 12px;
-  /* warm shade rather than neutral black, and it fades out sooner so it eats
-     less of the picture */
-  background: linear-gradient(rgba(12, 9, 6, .58), transparent 92%);
+  /* One line, always. The old rail wrapped to two rows of ALLCAPS chips on a
+     portrait phone - that was the "all over the place". Everything here is now
+     a glyph or a short word, so it fits. */
+  flex-wrap: nowrap;
+  gap: 0 7px;
+  padding: calc(9px + var(--safe-t)) 12px 10px;
+  overflow: hidden;              /* a long label ellipsises, never spills the edge */
+  /* a light warm wash, gone well before the middle of the picture */
+  background: linear-gradient(rgba(10, 8, 5, .42), transparent 74%);
   text-transform: uppercase;
+  /* nothing in the rail is tappable - never let it eat a touch meant for the
+     video (pinch-zoom lives up here too) */
+  pointer-events: none;
+  transition: opacity .45s ease;
 }
+/* After a few quiet seconds the rail steps back to a whisper; any real change
+   (a phone joins, the monitor pauses) snaps it back to full via bumpRail(). */
+.rail.rail-rest { opacity: .3; }
+
 /* ...except the pet's own name, which is a proper noun the user typed.
    "Mochi monitor" was rendering as MOCHI MONITOR. */
 .rail #channel { text-transform: none; }
 
-/* status + channel read as translucent chips over the video */
 .rail-left, .rail-right {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
   min-width: 0;
-  padding: 6px 11px;
+  font-family: var(--text);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+
+/* The status is the one glass chip up here — dot + a short word. Everything on
+   the right (count, device name, room) is its own bare little tag, so the rail
+   is a row of small marks, not a box stuffed inside a box. */
+.rail-left {
+  flex: none;
+  max-width: 60%;
+  gap: 6px;
+  padding: 5px 9px;
+  color: var(--glass-fg);
   background: var(--glass);
   border: 1px solid var(--glass-line);
   border-radius: var(--r-chip);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  font-family: var(--text);
-  font-weight: 600;
-  font-size: 11px;
-  letter-spacing: .16em;
 }
-
-.rail-left { flex: none; max-width: 100%; color: var(--glass-fg); }
 .rail-left span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rail .meter { flex: none; }
-.rail-right { flex: 0 1 auto; margin-left: auto; color: var(--glass-dim); gap: 8px; }
-.rail-right #channel { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-right { flex: 0 1 auto; margin-left: auto; gap: 6px; color: var(--glass-dim); }
+.rail-right #channel {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 30vw;
+  padding: 3px 7px;
+  border-radius: calc(var(--r-chip) - 2px);
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
 
-/* connected-Handheld count on the Watcher. The old border was --line, a pale
-   warm hairline meant for a cream card — on video it read as a cream box. Each
-   tag now borrows its own accent instead: berry for "who is watching", sky for
-   the safety code. */
-#peercount, .sas-chip {
+/* Portrait: a nominal status is just the coloured dot - no word. Anything the
+   user might need to act on (paused, reconnecting, offline) keeps its text. */
+@media (orientation: portrait) {
+  .rail.rail-ok .rail-left { padding: 6px; gap: 0; }
+  .rail.rail-ok .rail-left #statusline { display: none; }
+}
+#live[data-role="station"] .rail #channel { display: none; }
+
+/* Watcher rail, right side: how many phones are watching (glyph + number), and
+   - when it is exactly one - that phone's own short name in place of a safety
+   code nobody needs to keep reading. Each borrows its own accent so it does not
+   read as a cream box on video. */
+#peercount, #peerlabel, #battchip {
   flex: none;
-  padding: 2px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
   border-radius: calc(var(--r-chip) - 2px);
   border: 1px solid transparent;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 #peercount {
   color: var(--berry-lit);
   border-color: color-mix(in srgb, var(--berry) 52%, transparent);
   background: color-mix(in srgb, var(--berry) 16%, transparent);
-  letter-spacing: .1em;
+  letter-spacing: .06em;
 }
+#peercount svg {
+  width: 11px; height: 11px;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+}
+#peercount b { font-weight: 700; font-size: 10.5px; }
 #peercount.is-busy {
   color: color-mix(in srgb, var(--live) 76%, #ffffff);
   border-color: color-mix(in srgb, var(--live) 60%, transparent);
   background: color-mix(in srgb, var(--live) 18%, transparent);
 }
-.sas-chip {
-  color: var(--sky-lit);
-  border-color: color-mix(in srgb, var(--sky) 52%, transparent);
-  background: color-mix(in srgb, var(--sky) 16%, transparent);
-  letter-spacing: .12em;
+#peerlabel {
+  color: var(--glass-fg);
+  border-color: var(--glass-line);
+  background: color-mix(in srgb, #ffffff 8%, transparent);
+  text-transform: none;          /* "iPhone", "Galaxy A50" — real names, not shouting */
+  letter-spacing: .01em;
+  max-width: 38vw;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Handheld: the Monitor's battery. Neutral while it runs on its own; green with
+   a bolt when it is on power; amber when it is getting low unplugged. */
+#battchip {
+  color: var(--glass-fg);
+  border-color: var(--glass-line);
+  background: color-mix(in srgb, #ffffff 8%, transparent);
+  letter-spacing: .02em;
+  gap: 3px;
+}
+#battchip .batt-ico { width: 22px; height: 10px; flex: none; }
+#battchip .batt-fill { transition: width .35s ease; }
+#battchip .batt-bolt { display: none; width: 9px; height: 9px; margin: 0 -2px; flex: none; }
+#battchip .batt-pct { font-weight: 700; font-size: 10px; }
+#battchip.is-charging {
+  color: color-mix(in srgb, var(--live) 82%, #ffffff);
+  border-color: color-mix(in srgb, var(--live) 52%, transparent);
+  background: color-mix(in srgb, var(--live) 15%, transparent);
+}
+#battchip.is-charging .batt-bolt { display: inline-block; }
+#battchip.is-low {
+  color: color-mix(in srgb, var(--alert) 85%, #ffffff);
+  border-color: color-mix(in srgb, var(--alert) 52%, transparent);
+  background: color-mix(in srgb, var(--alert) 15%, transparent);
 }
 
 #peer-audio { position: absolute; width: 0; height: 0; overflow: hidden; }

@@ -68,9 +68,10 @@ provisioned against the deployed Worker on 2026-08-29.
 
 ## `sas-presentation.mjs` — the right code beside the right phone
 
-The one probe here that speaks no protocol. It lifts `syncStationSas()` and
-`sasPendingViewers()` out of `public/app.js` *by source text* — so it cannot
-drift from what ships — and runs them against stubbed peers.
+The one probe here that speaks no protocol. It lifts `sasReviewKey` /
+`sasReviewed` / `markSasReviewed` / `sasPendingViewers()` / `syncStationSas()`
+out of `public/app.js` *by source text* — so it cannot drift from what ships —
+and runs them against stubbed peers, DOM and `localStorage`.
 
 ```bash
 node tools/probes/sas-presentation.mjs
@@ -78,14 +79,66 @@ node tools/probes/sas-presentation.mjs
 
 The invariant, asserted after every call: if the safety-code card is up, the
 digits in it are the `sas` of the peer `S.sasAsk` names, and that peer is an
-unverified **cloud** viewer. Before the per-peer rework, the Monitor wrote every
-Handheld's code into the single `#sas-chip`, so with two or three phones on the
-relay it showed whichever DTLS handshake finished last and invited the user to
-compare it against a phone whose session it had not come from.
+unverified **cloud** viewer. There is no longer a persistent `#sas-chip` in the
+rail at all — the probe asserts it stays hidden — and once the Monitor's user has
+vouched for the channel's code once (`markSasReviewed`), the card stays down even
+for a brand-new cloud viewer.
 
 Covers 1/2/3 cloud viewers, LAN-only, mixed LAN+cloud, a peer whose DTLS has not
-settled, and the pinned phone leaving mid-prompt. **9 scenarios green on
-2026-08-30.**
+settled, the pinned phone leaving mid-prompt, and the once-per-channel latch.
+**All assertions green on 2026-08-31.**
+
+## `sas-review-once.mjs` — the Handheld asks once, not every call
+
+The other side of the same card. It lifts `showViewerSas()`, `sasReviewed()` and
+`markSasReviewed()` out of `public/app.js` *by source text* and runs them against
+a stubbed DOM and `localStorage`.
+
+```bash
+node tools/probes/sas-review-once.mjs
+```
+
+Asserted: the review card shows on the first cloud connection to a channel; after
+the user answers "Looks right" the card and the top-rail chip stay down on every
+later connection (checked across ten reconnects, each with a different code, as
+WebRTC guarantees); a code that could **not** be computed still shows, because
+that is an alarm rather than a review, and a warn state is never remembered as
+one; and the once-flag is per channel, so a different monitor still gets its
+first ask. **All assertions green on 2026-08-31.**
+
+## `relay-allowlists.mjs` — the four forward lists agree
+
+Every signalling relay (`server.js`, `rendezvous/room.js`,
+`rendezvous/deno/main.ts`, `LocalWeb.kt`) keeps its own `RELAY` set of addressed
+message `type`s it will forward. A type in `sig()` but missing from one is
+dropped in silence on that transport — the drift that broke the lens picker,
+remote zoom, pet-name sync and the Light key, one relay at a time.
+
+```bash
+node tools/probes/relay-allowlists.mjs
+```
+
+Parses the `RELAY` literal out of all four files and asserts they are identical,
+and that every type in a curated required list — the call itself, sound, lens,
+`meta`, `torch`, and now `battery` (the Monitor's charge mirrored to the
+Handhelds) — is present in every one. **All four in step on 2026-08-31.**
+
+## `battery-mirror.mjs` — the Monitor's charge on the Handheld
+
+Lifts `setStationBattery` / `batteryState` / `broadcastBattery` /
+`updateBatteryUI` out of `public/app.js` and runs them against a stubbed DOM,
+peer set and `sig()`.
+
+```bash
+node tools/probes/battery-mirror.mjs
+```
+
+Asserts the two things that make the reading trustworthy on the Handheld: the
+Monitor re-sends only on a real change (a repeated broadcast at the same percent
+and state costs nothing; a 1% step or a plug/unplug always goes out), and the
+Handheld chip maps a percent to the right gauge width and the right state class
+(`is-charging` on power, `is-low` under 15% unplugged, hidden with no reading).
+**All assertions green on 2026-08-31.**
 
 ## Running the worker locally
 

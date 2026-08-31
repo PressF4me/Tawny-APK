@@ -132,31 +132,45 @@ relay holds it, a relay that swapped certificates produces a **different** code
 on each screen. If the code cannot be computed the Viewer shows a "connection
 may be tampered with" warning rather than proceeding silently.
 
-**One code per connection, not per monitor.** The code is derived from the DTLS
-certificates of one `RTCPeerConnection`, so a Monitor with three Handhelds on
-the cloud path has *three* different codes at once. It is held on the peer
-record and never in one shared slot: the Monitor asks about one phone at a time
-(a queued card naming how many are behind it), and the always-on "Verify:" chip
-in the top rail appears only while exactly one cloud Handheld is connected,
-because with two or three there is nothing it could honestly be labelling.
-Answering "Disconnect it" drops that one Handheld, not the session.
+**One code per connection.** The code is derived from the DTLS certificates of
+one `RTCPeerConnection`, so a Monitor with three Handhelds on the cloud path has
+*three* different codes at once. Each is held on its own peer record, never in a
+shared slot: the Monitor's review card asks about one phone at a time (naming how
+many are queued behind it), and answering "Disconnect it" drops that one
+Handheld, not the session. The code is **not** shown anywhere else — there is no
+persistent rail chip; a code that sat over the picture on every connection was
+clutter the live screen did not need.
+
+**Reviewed once per monitor, on both ends.** WebRTC mints a fresh DTLS
+certificate for every `RTCPeerConnection` and the app persists none, so the code
+legitimately differs on every call — it cannot degrade to "the same code as last
+time". An earlier build re-showed it on every connect and warned that the code
+had CHANGED whenever it failed to match, which from the second session onward was
+every time; that false alarm only trained users to dismiss it. Now the review
+card is shown on the **first** cloud connection to a channel — on the Handheld,
+and on the Monitor — and once that user answers "Looks right" it never returns
+for that channel. The acknowledgement is a per-channel `tawny.sasok.<id>` flag in
+`localStorage`, cleared when the channel is deleted. The trade-off is explicit
+and the same on both ends: a certificate swap attempted *after* that first review
+is not surfaced unless it also stops the code from being computed at all — in
+which case the "connection may be tampered with" warning still fires on every
+affected call. In particular, a *new* outside Handheld joining a channel whose
+code has already been vouched for is not re-reviewed.
 
 **Limitations, stated plainly:** the SAS assumes the user can compare two
 screens. On a genuinely remote session the user is not in the room with the
 Monitor, so there is only one screen to look at, and the check is weak there.
-It cannot degrade to "the same code as last time" either: WebRTC mints a fresh
-DTLS certificate for every `RTCPeerConnection` and the app persists none, so the
-code legitimately differs on every call. An earlier build stored the approved
-code and warned that the safety code had CHANGED whenever it failed to match,
-which from the second session onward was every time; that false alarm has been
-removed rather than kept as noise. Media is added and the answer is sent before
-the SAS is shown — it is an after-the-fact alarm, not a gate.
+Media is added and the answer is sent before the SAS is shown — it is an
+after-the-fact alarm, not a gate.
 
 ## Residual risk — still true
 
 - **A compromised rendezvous can attempt a certificate swap.** The SAS detects it
   only if the user actually compares codes; on a one-screen remote session that
-  is weak. This is the softest point of the remote path.
+  is weak. Both ends also review the code only on the first connection to a
+  channel, so a swap on a later reconnect — or against a new outside phone on an
+  already-vouched channel — is not surfaced unless the code cannot be computed at
+  all. This is the softest point of the remote path.
 - **Pairing codes are bearer credentials.** Anyone who photographs the QR or gets
   the copied link out of a chat app has access to that channel until it is
   deleted and every device re-paired. No per-Viewer revocation; the rendezvous

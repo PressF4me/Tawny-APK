@@ -240,7 +240,7 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MSG });
 // here. Keep it in step with LocalWeb.kt and rendezvous/room.js.
 const RELAY = new Set([
   'offer', 'answer', 'ice', 'bye', 'chime', 'chime-ack', 'talking',
-  'cameras', 'meta', 'camera-control', 'torch'
+  'cameras', 'meta', 'camera-control', 'torch', 'battery'
 ]);
 
 server.on('upgrade', (req, socket, head) => {
