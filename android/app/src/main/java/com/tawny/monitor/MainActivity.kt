@@ -1,5 +1,6 @@
 package com.tawny.monitor
 
+import android.animation.LayoutTransition
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Application
@@ -279,7 +280,10 @@ class MainActivity : AppCompatActivity() {
     private var pairOverlay: View? = null
     /** The user asked to see the camera instead of the pairing code. */
     private var pairOverlayHidden = false
-    private var pairChip: TextView? = null  // way back to the code, over the live view
+    private var pairChip: View? = null      // way back to the code, over the live view
+    /** The words behind the [+], revealed while a finger is on the chip. */
+    private var pairChipLabel: TextView? = null
+    private var pairChipHide: Runnable? = null
     /** The pairing sheet's own status line, updated as phones come and go. */
     private var pairStatus: TextView? = null
     /**
@@ -762,8 +766,7 @@ class MainActivity : AppCompatActivity() {
         (pairOverlay?.parent as? ViewGroup)?.removeView(pairOverlay)
         pairOverlay = null
         pairStatus = null
-        (pairChip?.parent as? ViewGroup)?.removeView(pairChip)
-        pairChip = null
+        removePairChip()
         pairOverlayHidden = false
         viewersNow = 0                 // a new screen knows about nobody
         viewersMax = MAX_VIEWERS
@@ -1547,55 +1550,144 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun removePairChip() {
+        pairChipHide?.let { root.removeCallbacks(it) }
+        pairChipHide = null
+        pairChipLabel = null
         pairChip?.let { (it.parent as? ViewGroup)?.removeView(it) }
         pairChip = null
     }
 
+    /** What the [+] says once you touch it. The count is the sheet's job. */
+    private fun pairChipCopy() =
+        if (viewersNow == 0) "Show the pairing code" else "Add another phone"
+
     /**
      * The one affordance for adding phones two and three.
      *
-     * It used to be a translucent "Show pairing code" chip that the shell threw
-     * away the instant the first Handheld connected — so once you had paired one
-     * phone there was no way, anywhere in the app, to reach the code again, and
-     * the Monitor looked like a one-phone device. Now it stays up, in the
-     * accent colour so it reads as an action rather than a status, saying how
-     * many more phones may join; it is retired only when the third is on.
+     * First it was a chip the shell threw away the instant a Handheld
+     * connected, which left no route back to the code at all and made the
+     * Monitor look like a one-phone device. The fix for that overcorrected: a
+     * wide berry pill reading "+ Add another phone (2 left)", parked in the
+     * middle of the top of the picture. On a monitor you leave running in a
+     * room, the loudest thing on screen should not be an administrative button.
+     *
+     * So: a 44dp [+] in smoked glass, tucked into the top-right corner below
+     * the page's own two rails, borrowing the same glass-and-accent language as
+     * the chips already in that rail. It says nothing at rest. Put a finger on
+     * it and the words unroll to its left — the glyph itself stays pinned to
+     * the corner — and the sheet follows a beat later, so the label is read
+     * rather than merely flashed. TalkBack reads the same words from the
+     * chip's content description.
+     *
+     * Lifecycle is unchanged: offered only while there is room and the sheet is
+     * down, retired when the third phone is on, back when a slot frees.
      */
     private fun syncPairChip() {
         // Full, or the sheet itself is up: nothing to offer.
         if (viewersNow >= viewersMax || pairOverlay?.visibility == View.VISIBLE) {
             removePairChip(); return
         }
-        val left = viewersMax - viewersNow
-        val label = if (viewersNow == 0) "Show pairing code"
-                    else "+  Add another phone  ($left left)"
-        pairChip?.let { it.text = label; return }
-        val chip = TextView(this).apply {
-            text = label
+        if (pairChip != null) {
+            // Only the wording moves (the first pairing is not "another"), and
+            // it is hidden at rest, so nothing on screen changes here.
+            pairChipLabel?.text = pairChipCopy()
+            pairChip?.contentDescription = pairChipCopy()
+            return
+        }
+
+        val label = TextView(this).apply {
+            text = pairChipCopy()
             textSize = Type.LABEL
             typeface = uiFontSemi
             letterSpacing = 0.06f
-            setTextColor(Hue.ON_ACCENT)
-            gravity = Gravity.CENTER
-            // Berry on the video, not smoked glass: this is the way to add a
-            // phone, and it has to look like it can be pressed.
+            setTextColor(Hue.BERRY)
+            maxLines = 1
+            includeFontPadding = false
+            visibility = View.GONE
+            setPadding(dp(4), 0, dp(8), 0)
+        }
+        val glyph = IconView(this, "plus", tint = Hue.BERRY).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
+        }
+        val chip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            // Smoked glass with an accent hairline: the same construction as
+            // the status and phone-count chips the page draws in this rail, so
+            // it reads as one more thing floating on the video rather than a
+            // slab of UI dropped on top of it.
             background = pressable(
-                roundRect(Hue.BERRY, Color.TRANSPARENT, Radius.CONTROL), Radius.CONTROL, Hue.BERRY
+                roundRect(
+                    Color.argb(150, 12, 9, 6),
+                    (Hue.BERRY and 0x00FFFFFF) or 0x8A000000.toInt(),
+                    Radius.CONTROL
+                ),
+                Radius.CONTROL, Hue.BERRY
             )
-            setPadding(dp(18), dp(11), dp(18), dp(11))
-            minHeight = dp(48)
-            tapFeedback { showPairOverlay() }
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            minimumWidth = dp(44)
+            minimumHeight = dp(44)
+            // Label first so the [+] stays welded to the right-hand corner and
+            // the words unroll leftward into open picture.
+            addView(label)
+            addView(glyph)
+            // No tooltipText: Android would float a second copy of the same
+            // words above the chip on a long press, and the label below is
+            // already showing them. contentDescription still carries them to
+            // TalkBack, which is the reader that has no glyph to go on.
+            contentDescription = pairChipCopy()
+            if (animScale > 0f) layoutTransition = LayoutTransition()
+
+            // The reveal is on touch-*down*, not on click: by the time a tap is
+            // released the sheet is on its way, and a label nobody can read is
+            // not an explanation.
+            setOnTouchListener { _, ev ->
+                when (ev.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> revealPairChipLabel()
+                    MotionEvent.ACTION_UP,
+                    MotionEvent.ACTION_CANCEL -> hidePairChipLabel(1200)
+                }
+                false        // never swallow the click
+            }
+            tapFeedback {
+                // A beat, so the words are legible before the sheet covers them.
+                postDelayed({ if (pairChip != null) showPairOverlay() }, 200)
+            }
         }
         val lp = FrameLayout.LayoutParams(WC, WC).also {
-            it.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            it.gravity = Gravity.TOP or Gravity.END
             // Clear of *both* of the page's own top rails — the "on air"
             // status line and, under it, the phone-count and pet-name tags.
             // dp(64) cleared only the first, so the chip sat straight on top of
             // "1 phone · your pet monitor".
             it.topMargin = (lastInsets.first) + dp(96)
+            it.marginEnd = dp(12)
         }
         pairChip = chip
+        pairChipLabel = label
         root.addView(chip, lp)
+    }
+
+    private fun revealPairChipLabel() {
+        pairChipHide?.let { root.removeCallbacks(it) }
+        pairChipHide = null
+        val l = pairChipLabel ?: return
+        if (l.visibility == View.VISIBLE) return
+        l.alpha = 0f
+        l.visibility = View.VISIBLE
+        if (animScale > 0f) l.animate().alpha(1f).setDuration((140 * animScale).toLong()).start()
+        else l.alpha = 1f
+    }
+
+    /** Roll the words back up, so the resting state is a bare [+] again. */
+    private fun hidePairChipLabel(delayMs: Long) {
+        pairChipHide?.let { root.removeCallbacks(it) }
+        val r = Runnable {
+            pairChipLabel?.let { it.alpha = 1f; it.visibility = View.GONE }
+            pairChipHide = null
+        }
+        pairChipHide = r
+        root.postDelayed(r, delayMs)
     }
 
     /** What the pairing sheet says under the QR, given who is already watching. */
@@ -3876,6 +3968,14 @@ private class IconView(
                 canvas.drawCircle(24f, 24f, 20f, body)
                 canvas.drawCircle(24f, 15.5f, 2.7f, cut)         // dot
                 rr(canvas, 21.4f, 20.5f, 26.6f, 34f, 2.6f, cut)  // stem
+            }
+            "plus" -> {
+                // Drawn rather than typed: a "+" set in the UI font sits a
+                // couple of units high in its line box and is a hair too light
+                // at 20dp over video. Two rounded bars on the 48-box's centre
+                // are optically true at any size.
+                rr(canvas, 21.5f, 10f, 26.5f, 38f, 2.5f, body)   // upright
+                rr(canvas, 10f, 21.5f, 38f, 26.5f, 2.5f, body)   // crossbar
             }
             "mail" -> {
                 rr(canvas, 6f, 11f, 42f, 37f, 5f, body)          // envelope
