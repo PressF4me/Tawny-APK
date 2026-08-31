@@ -57,6 +57,7 @@ const S = {
   // Torch. On the Monitor these are the truth; on a Viewer they are the last
   // thing the Monitor said, and nothing else is ever rendered.
   torchOn: false, torchSupported: false, torchFacing: null, torchTimer: null,
+  torchAsk: false,            // viewer: an "on" is in flight, so a refusal can explain itself
   cameras: [], cameraIndex: 0, zoomLevel: 1.0, zoomHardware: false, stationZoomSupported: false
 };
 
@@ -1512,6 +1513,11 @@ async function handle(m, entry) {
       S.torchSupported = !!m.supported;
       S.torchFacing = typeof m.facing === 'string' ? m.facing : null;
       updateTorchUI();
+      // We asked for light and the Monitor came back dark: it tried and the
+      // camera would not do it. Say why once, here, rather than leaving a key
+      // that springs back with no explanation.
+      if (S.torchAsk && !S.torchOn) toast(torchHint());
+      S.torchAsk = false;
       break;
     }
     case 'bye':
@@ -1721,7 +1727,7 @@ async function answerPeer(peer, sdp) {
   // And the light: a Viewer joining a session where the room is already lit
   // must show a lit key, not an "off" one over an obviously lit picture.
   if (S.role === 'station') {
-    S.torchSupported = torchCapable();
+    S.torchSupported = await probeTorch();
     sig({ ...torchState(), to: peer.id }, peer);
   }
 }
@@ -1800,24 +1806,84 @@ function retuneAll() {
 //
 // Every phone disagrees about whether that knob exists. Front cameras almost
 // never have it, plenty of rear ones don't expose it to the browser, and the
-// emulator has no LED at all. So the Monitor is the only thing that decides:
-// it reads `getCapabilities().torch` off the live track and broadcasts an
-// authoritative {on, supported, facing} to every Viewer. A Viewer never
-// guesses, never assumes, and renders only what it was told.
+// emulator has no LED at all. So the Monitor is the only thing that decides,
+// and broadcasts an authoritative {on, supported, facing} to every Viewer. A
+// Viewer never guesses, never assumes, and renders only what it was told.
+//
+// What the Monitor must NOT do is decide by asking `getCapabilities().torch`.
+// That question lies in both directions on Android/Chromium: a lamp-less
+// tablet answers `true`, and — the bug that sent us here — a Samsung A50 with
+// a perfectly good rear LED answers with no `torch` key at all, on a camera
+// whose light `applyConstraints` drives fine. The capability set can also
+// still be half-built until the pipeline has pushed frames. The constraint is
+// the arbiter, not the advertisement: we ask the camera to *do* something and
+// believe the answer.
 
 const localVideoTrack = () => S.local?.getVideoTracks?.()[0] || null;
 
-// Cameras that advertise `torch: true` and then throw when it is applied. The
-// capability is simply a lie on some drivers — a tablet with no lamp at all
-// still reports one — and the only way to find out is to ask. Kept on the
-// track, so switching lens gives that camera its own fair try.
+// The verdicts, kept on the track itself so a lens switch or a recovered
+// capture gives that camera its own fair try, and so nothing has to be reset
+// by hand.
+//   torchProven — drove its light, whatever getCapabilities() had to say.
+//   torchDud    — refused an attempt to *light* it. A hard no: we stop asking.
+//   torchUnsure — refused the silent probe. Enough to tell a Viewer the key
+//                 is unlikely to do anything, and NOT enough to refuse the
+//                 press: the probe is an off-write, and if some driver
+//                 answered it differently from the on-write that actually
+//                 matters, the phone with the working LED must still win. One
+//                 real attempt settles it either way.
 const torchDud = new WeakSet();
+const torchProven = new WeakSet();
+const torchUnsure = new WeakSet();
 
-/** Does the track we are *currently sending* expose a controllable light? */
+/**
+ * The cheap read, for the places that cannot wait: only ever true once a track
+ * has been proven, or while it is still claiming a torch it hasn't been asked
+ * for yet. Never the last word — probeTorch() is.
+ */
 function torchCapable() {
   const t = localVideoTrack();
   if (!t || t.readyState !== 'live' || torchDud.has(t)) return false;
+  if (torchProven.has(t)) return true;
+  if (S.facing === 'user') return false;
   try { return t.getCapabilities?.().torch === true; } catch { return false; }
+}
+
+/**
+ * Find out for real whether the live track can drive its light, and remember.
+ *
+ * A declared `torch: true` is taken at face value (a camera that claims one
+ * and then refuses it is caught later, by pushTorch). Everything else is
+ * settled by *writing* `torch: false` at the track: on a camera with a lamp
+ * that is a no-op — it is already off, nothing flashes, the user sees nothing
+ * — and on one without, Chromium rejects it. Resolve means the knob is there.
+ *
+ * Like every torch write this replaces the track's constraint set rather than
+ * adding to it (see pushTorch); it is a once-per-track cost and the capture
+ * keeps the format it is already running at.
+ */
+async function probeTorch() {
+  const t = localVideoTrack();
+  if (!t || t.readyState !== 'live') return false;
+  if (torchProven.has(t)) return true;
+  if (torchDud.has(t) || torchUnsure.has(t)) return false;   // asked once, that's enough
+  // The front lens is the one case we settle without asking: no phone we have
+  // met has a lamp beside the selfie camera, and the Viewer's hint already
+  // says to flip the Monitor round.
+  if (S.facing === 'user') return false;
+  try {
+    if (t.getCapabilities?.().torch === true) { torchProven.add(t); return true; }
+  } catch {}
+  try {
+    await t.applyConstraints({ advanced: [{ torch: false }] });
+    torchProven.add(t);
+    diag('torch: light present (capability unreported, probe accepted)');
+    return true;
+  } catch (e) {
+    torchUnsure.add(t);
+    diag(`torch: this camera has no light (probe refused, ${e && e.name})`);
+    return false;
+  }
 }
 
 const torchState = () => ({
@@ -1829,10 +1895,15 @@ function broadcastTorch() {
   for (const p of viewerPeers()) sig({ ...torchState(), to: p.id }, p);
 }
 
-/** Re-read the capability off the live track and tell everyone watching. */
-function refreshTorchSupport() {
+/**
+ * Settle the question on the live track and tell everyone watching. Called
+ * whenever the track underneath us changes — session start, lens switch,
+ * camera flip, recovered capture — so a Viewer's key is right *before* the
+ * first tap rather than after a failed one.
+ */
+async function refreshTorchSupport() {
   if (S.role !== 'station') return;
-  S.torchSupported = torchCapable();
+  S.torchSupported = await probeTorch();
   if (!S.torchSupported) S.torchOn = false;
   broadcastTorch();
 }
@@ -1871,8 +1942,21 @@ async function setTorch(on, why) {
   on = !!on;
   clearTimeout(S.torchTimer);
   S.torchTimer = null;
-  S.torchSupported = torchCapable();
-  if (on && !S.torchSupported) { S.torchOn = false; broadcastTorch(); return; }
+
+  const t = localVideoTrack();
+  const live = !!t && t.readyState === 'live';
+  // The only two refusals worth making before trying: there is no camera left
+  // to light, or it is the front one. Anything else rear-facing gets the push
+  // — a camera that stays dark costs the Viewer one "nothing happened, here's
+  // why", which is cheaper than a key we wrongly greyed out forever.
+  if (on && (!live || torchDud.has(t) || S.facing === 'user')) {
+    S.torchSupported = false;
+    S.torchOn = false;
+    diag(`torch refused (${!live ? 'no live camera'
+      : S.facing === 'user' ? 'front camera' : 'camera has no light'})`);
+    broadcastTorch();
+    return;
+  }
   // Turning it *off* is still attempted when the capability has already gone
   // with the track — a stale "on" must never be the last thing a Viewer was
   // told, and a failed off must never latch. But on a phone whose camera has
@@ -1881,6 +1965,12 @@ async function setTorch(on, why) {
   // every single session end, which is noise that hides real faults.
   const worthPushing = on || S.torchOn || S.torchSupported;
   const ok = worthPushing ? await pushTorch(on) : false;
+  // The attempt is what decides, not what the camera advertised: a torch that
+  // lit is a torch, and one that threw on the way on is this track's dud.
+  if (on) {
+    if (ok) torchProven.add(t); else torchDud.add(t);
+    S.torchSupported = ok;
+  }
   S.torchOn = on && ok;
   if (S.torchOn) {
     S.torchTimer = setTimeout(() => {
@@ -2006,7 +2096,7 @@ async function switchLens(index) {
     S.cameraIndex = index;
     S.zoomLevel = 1.0;
     updateLensUI();
-    refreshTorchSupport();
+    await refreshTorchSupport();
   } catch { toast('Could not switch lens.'); }
 }
 
@@ -2147,6 +2237,7 @@ async function start(role) {
   S.torchOn = false;
   S.torchSupported = role === 'station' && torchCapable();
   S.torchFacing = null;
+  S.torchAsk = false;
   clearTimeout(S.torchTimer);
   S.torchTimer = null;
   watchLocalTracks();
@@ -2193,7 +2284,10 @@ async function start(role) {
   tellNative('live', { role });
   connectAll();
 
-  if (role === 'station') openPair();
+  // Settle the light question now, on the track we have just opened, so the
+  // first Viewer to join is told the truth about this camera before it can
+  // press anything. It is one constraint write and nothing lights up.
+  if (role === 'station') { refreshTorchSupport(); openPair(); }
 }
 
 // ---------------------------------------------------------- capture loss
@@ -2271,7 +2365,7 @@ async function reacquireLocal() {
     diag('capture recovered');
     // A brand-new track: the light is off, and whether it can come back on is
     // a question about this track, not the dead one.
-    refreshTorchSupport();
+    await refreshTorchSupport();
     for (const p of S.peers.values()) sig({ type: 'meta', to: p.id, paused: false }, p);
     tellNative('resumed', {});
     updateStatus();
@@ -2361,12 +2455,18 @@ $('#btn-torch')?.addEventListener('click', () => {
   if (S.role !== 'viewer') return;
   const sp = stationPeer();
   if (!sp) return toast('No monitor connected yet.');
-  if (!S.torchSupported) return toast(torchHint());
+  // Note what is NOT here: a refusal of our own. The Monitor is the only end
+  // that knows, and the only end holding the camera — so even a key we have
+  // drawn as unavailable still asks, and the Monitor either lights up or says
+  // why. A Viewer that refuses on its own behalf is how a working LED on the
+  // other side of the house stays dark forever.
   const want = !S.torchOn;
+  S.torchAsk = want;
   sig({ type: 'torch', to: sp.id, on: want }, sp);
-  // The press state moves now so the key feels connected to the thumb; the
-  // Monitor's reply lands within a frame or two and is what actually sets it.
-  press($('#btn-torch'), want);
+  // The press state moves now so the key feels connected to the thumb — but
+  // only when we have been told there is a light; otherwise it would blink on
+  // and straight back off. The Monitor's reply is what actually sets it.
+  if (S.torchSupported) press($('#btn-torch'), want);
 });
 
 $('#btn-cam').addEventListener('click', async () => {
@@ -2481,7 +2581,7 @@ $('#btn-flip').addEventListener('click', async () => {
   }
   // New camera, new answer to "does this one have a light?" — and S.facing has
   // moved, so the Viewer's hint can now say which way to flip it back.
-  refreshTorchSupport();
+  await refreshTorchSupport();
   toast(S.facing === 'user' ? 'Front camera' : 'Rear camera');
   btn.disabled = false;
 });
