@@ -1,12 +1,14 @@
-// How the full-frame video sits in the stage, and how the Monitor shapes its
-// capture. Lifts screenIsWide / idealCaptureSize / fitVideo out of public/app.js
-// by source text.
+// The full-frame picture and the Monitor's capture shape.
+//
+// Two rules:
+//   * the stage always shows the WHOLE frame — `object-fit: contain`, every
+//     orientation. Turning to landscape is when you want all of the room, not
+//     its top cropped away to lose a bar.
+//   * the Monitor's capture takes its long axis from how the phone is held
+//     (idealCaptureSize), at a fixed ~540p budget — which is what keeps the
+//     bars small, or gone when both ends face the same way.
 //
 //   node tools/probes/video-fit.mjs
-//
-// The rule under test: fill (cover) when the picture and the screen face the
-// same way, box (contain) when they don't — aspect-driven, no device or
-// resolution assumptions. And the capture's long axis follows the orientation.
 
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -14,7 +16,9 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const src = fs.readFileSync(path.join(here, '..', '..', 'public', 'app.js'), 'utf8');
+const root = path.join(here, '..', '..');
+const src = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'public', 'style.css'), 'utf8');
 
 const grabFn = (name) => {
   const start = src.search(new RegExp(`function ${name}\\(`));
@@ -33,55 +37,26 @@ const check = (label, cond, detail) => {
   else { fails++; console.log('  FAIL ' + label + (detail ? ' :: ' + detail : '')); }
 };
 
-function ctxFor(winW, winH) {
-  const ctx = {
-    window: { innerWidth: winW, innerHeight: winH, screen: {} },
-    console,
-  };
+function ctxFor(w, h) {
+  const ctx = { window: { innerWidth: w, innerHeight: h, screen: {} }, console };
   vm.createContext(ctx);
-  vm.runInContext(
-    [grabFn('screenIsWide'), grabFn('idealCaptureSize'), grabFn('fitVideo')].join('\n'),
-    ctx,
-  );
+  vm.runInContext([grabFn('screenIsWide'), grabFn('idealCaptureSize')].join('\n'), ctx);
   return ctx;
 }
 
-const vid = (w, h, hidden = false) => {
-  const v = { videoWidth: w, videoHeight: h, hidden, style: { objectFit: 'contain' } };
-  return v;
-};
-
-// ---- fitVideo: the four orientation pairings ----------------------------
-console.log('\nlandscape screen (2340 x 1080)');
+// ---- the stage never crops -------------------------------------------------
+console.log('\nstage fit (stylesheet)');
 {
-  const { fitVideo } = ctxFor(2340, 1080);
-  let v = vid(1280, 720); fitVideo(v);
-  check('wide feed  -> cover (no side bars)', v.style.objectFit === 'cover', v.style.objectFit);
-  v = vid(720, 1280); fitVideo(v);
-  check('tall feed  -> contain (whole frame)', v.style.objectFit === 'contain', v.style.objectFit);
+  const rule = css.match(/#remote\s*\{[\s\S]*?\}/);
+  check('#remote rule exists', !!rule);
+  const body = rule ? rule[0] : '';
+  check('#remote is object-fit: contain', /object-fit:\s*contain/.test(body), body);
+  check('#remote never object-fit: cover', !/object-fit:\s*cover/.test(body));
+  check('app.js no longer sets objectFit inline',
+    !/\.style\.objectFit\s*=/.test(src));
 }
 
-console.log('\nportrait screen (1080 x 2340)');
-{
-  const { fitVideo } = ctxFor(1080, 2340);
-  let v = vid(720, 1280); fitVideo(v);
-  check('tall feed  -> cover', v.style.objectFit === 'cover', v.style.objectFit);
-  v = vid(1280, 720); fitVideo(v);
-  check('wide feed  -> contain (the accepted letterbox)', v.style.objectFit === 'contain', v.style.objectFit);
-}
-
-console.log('\nsquare-ish edge + no metadata');
-{
-  const { fitVideo } = ctxFor(1600, 1600);
-  let v = vid(1000, 1000); fitVideo(v);
-  check('square feed on square screen -> cover', v.style.objectFit === 'cover');
-  v = vid(0, 0); fitVideo(v);
-  check('no metadata -> style cleared (stylesheet decides)', v.style.objectFit === '');
-  v = vid(1280, 720, true); fitVideo(v);
-  check('hidden element -> style cleared', v.style.objectFit === '');
-}
-
-// ---- idealCaptureSize: long axis follows the orientation ---------------
+// ---- capture shape follows the orientation -------------------------------
 console.log('\nidealCaptureSize');
 {
   const wide = ctxFor(2000, 1000).idealCaptureSize();
@@ -91,8 +66,19 @@ console.log('\nidealCaptureSize');
   check('portrait: height is the long axis',
     tall.width.ideal === 540 && tall.height.ideal === 960, JSON.stringify(tall));
   const hd = ctxFor(2000, 1000).idealCaptureSize(1280, 720);
-  check('custom size keeps its long/short split',
+  check('a custom size keeps its long/short split',
     hd.width.ideal === 1280 && hd.height.ideal === 720);
+  const sq = ctxFor(1500, 1500);
+  check('square screen counts as wide (>= comparison)', sq.screenIsWide() === true);
+}
+
+// ---- every capture path goes through idealCaptureSize ------------------
+console.log('\nno fixed capture rectangle survives');
+{
+  // width/height ideals should only ever appear via idealCaptureSize(...)
+  const stray = [...src.matchAll(/width:\s*\{\s*ideal:\s*\d+\s*\}\s*,\s*height:\s*\{\s*ideal:\s*\d+\s*\}/g)];
+  check('no literal "width:{ideal},height:{ideal}" pair left in a getUserMedia call',
+    stray.length === 0, stray.map((m) => m[0]).join(' | '));
 }
 
 console.log(fails ? `\n${fails} FAILURE(S)` : '\nall assertions passed');

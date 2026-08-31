@@ -420,9 +420,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #remote {
   width: 100%;
   height: 100%;
-  /* Start boxed so nothing is hidden before the first frame; fitVideo() in
-     app.js then switches to `cover` whenever the picture and the screen face
-     the same way, so a landscape feed on a landscape phone has no side bars. */
+  /* Always the whole frame, every orientation — turning to landscape is when
+     you want to see all of the room, not have its top cropped to lose a bar.
+     app.js matches the capture shape to how the sending phone is held, which is
+     what keeps the bars small (or gone, when both ends face the same way). */
   object-fit: contain;
   background: var(--stage);
   display: block;

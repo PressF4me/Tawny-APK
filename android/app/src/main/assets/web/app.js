@@ -1857,7 +1857,7 @@ function newPC(peer) {
       playSoon(el.remoteAudio);
       el.remote.srcObject = stream;
       el.remote.hidden = !hasVideo;
-      if (hasVideo) { playSoon(el.remote); fitVideos(); }
+      if (hasVideo) playSoon(el.remote);
       el.loader.hidden = true;
       if (!S.remotePaused) stageNote(null);
       startMeter(stream);           // meter the Watcher's room
@@ -1947,7 +1947,6 @@ function featureVideo(peer, stream) {
   playSoon(el.remote);
   el.local.classList.remove('fill');   // our own camera → corner PiP
   el.local.hidden = false;
-  fitVideos();
 }
 function unfeature(id) {
   if (S.featured !== id) return;
@@ -1956,7 +1955,6 @@ function unfeature(id) {
   el.remote.hidden = true;
   el.local.classList.add('fill');
   el.local.hidden = false;
-  fitVideos();
 }
 
 // Viewer side: open the connection to the Watcher.
@@ -2582,22 +2580,12 @@ function cameraConstraints() {
   };
 }
 
-// How the full-frame video sits in the stage. Fill the screen when the picture
-// and the screen face the same way — you have turned the phone to match the
-// camera, so bars would be pointless — and box it when they don't, so a
-// sideways feed on an upright phone still shows the whole room. Driven only by
-// the two aspect ratios: every phone, every resolution, either way up.
-function fitVideo(v) {
-  if (!v) return;
-  const vw = v.videoWidth, vh = v.videoHeight;
-  if (v.hidden || !vw || !vh) { v.style.objectFit = ''; return; }
-  v.style.objectFit = (vw >= vh) === screenIsWide() ? 'cover' : 'contain';
-}
-function fitVideos() {
-  fitVideo(el.remote);
-  if (el.local.classList.contains('fill')) fitVideo(el.local);
-  else el.local.style.objectFit = '';     // hand the PiP back to the stylesheet
-}
+// The full-frame video (#remote, and the Monitor's own #local.fill) is always
+// shown whole — `object-fit: contain` in the stylesheet, in every orientation.
+// It is never filled-and-cropped: turning the phone to landscape is exactly
+// when you want to see the *whole* room, not have its top cut off to spare a
+// bar. Matching the capture shape to how the phone is held (idealCaptureSize)
+// is what keeps those bars small — or gone, when both ends face the same way.
 
 async function start(role) {
   if (!S.channel) return;
@@ -2676,7 +2664,6 @@ async function start(role) {
     el.cStation.hidden = true;
     updateTorchUI();
   }
-  fitVideos();
 
   // Rail label: just the room name the user gave. The Handheld keeps it (you may
   // have several monitors); on the Monitor's own screen CSS hides it - you named
@@ -3229,32 +3216,19 @@ function reopenAfterRestore() {
   connectAll();
 }
 
-// ------------------------------------------------------- orientation & fit
-
-// Re-fit the picture whenever the screen turns or the incoming frame changes
-// shape (the far phone rotated, or the bitrate ladder stepped the resolution).
-// `resize` on a <video> fires on both.
-for (const ev of ['resize', 'orientationchange']) {
-  window.addEventListener(ev, () => {
-    fitVideos();
-    reshapeCapture();          // station only; keeps the sent frame matched to how the phone is held
-  });
-}
-for (const v of [el.remote, el.local]) {
-  v.addEventListener('loadedmetadata', fitVideos);
-  v.addEventListener('resize', fitVideos);
-}
+// ----------------------------------------------------------- orientation
 
 // Station: when the Monitor is turned, ask the camera for a frame shaped to the
-// new orientation, so a phone laid on its side actually sends a wide picture
-// rather than a portrait one with the room rotated into it. Debounced, and a
-// no-op off the Monitor or before a track exists.
+// new orientation, so a phone laid on its side sends a genuinely wide picture
+// (and an upright one a tall picture) — not a fixed shape with the room rotated
+// or letterboxed into it. Debounced, only when the orientation actually flips,
+// and a no-op off the Monitor or before a track exists.
 let reshapeTimer = null;
 let lastCaptureWide = null;
 function reshapeCapture() {
   if (S.role !== 'station' || !S.local) return;
   const wide = screenIsWide();
-  if (wide === lastCaptureWide) return;     // only when the orientation flips
+  if (wide === lastCaptureWide) return;
   lastCaptureWide = wide;
   clearTimeout(reshapeTimer);
   reshapeTimer = setTimeout(async () => {
@@ -3265,6 +3239,8 @@ function reshapeCapture() {
       try { await t.applyConstraints(c); } catch {}
     }
     for (const peer of S.peers.values()) tuneVideoSender(peer);
-    fitVideos();
   }, 350);
+}
+for (const ev of ['resize', 'orientationchange']) {
+  window.addEventListener(ev, reshapeCapture);
 }

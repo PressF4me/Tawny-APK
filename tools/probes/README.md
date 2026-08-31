@@ -157,22 +157,25 @@ sanitised slug and never touches WebAudio, an unknown slug falls back to the
 default, and a browser Monitor still plays through WebAudio. **Green on
 2026-08-31.**
 
-## `video-fit.mjs` — fill the screen, or box the frame
+## `video-fit.mjs` — the whole frame, and a capture shaped to the phone
 
-Lifts `screenIsWide` / `idealCaptureSize` / `fitVideo` out of `public/app.js`.
+Lifts `screenIsWide` / `idealCaptureSize` out of `public/app.js` and reads the
+`#remote` rule out of `style.css`.
 
 ```bash
 node tools/probes/video-fit.mjs
 ```
 
-The full-frame video fills the stage (`cover`, no bars) when the picture and the
-screen face the same way — you have turned the phone to match the camera — and
-is boxed (`contain`, whole frame) when they don't, so a sideways feed on an
-upright phone still shows the whole room. The Monitor's capture takes its long
-axis from the orientation too, at a fixed ~540p budget. Both are aspect-driven
-only: asserts all four orientation pairings, the square and no-metadata edges,
-and that `idealCaptureSize` swaps width/height with the orientation for any
-requested size. **Green on 2026-08-31.**
+Two rules. The stage always shows the **whole** frame — `#remote` is
+`object-fit: contain` in every orientation, never `cover`, and app.js sets no
+inline `objectFit` (turning to landscape is when you want all of the room, not
+its top cropped to lose a bar). The Monitor's capture takes its **long axis from
+how the phone is held** — `idealCaptureSize()` swaps width/height with the
+orientation at a fixed ~540p budget — which is what keeps the bars small, or
+gone when both ends face the same way. Asserts the stylesheet rule, the
+orientation swap for any requested size, the `>=` square-screen edge, and that
+no fixed `width:{ideal},height:{ideal}` rectangle is left in a getUserMedia
+call. **Green on 2026-08-31.**
 
 ## Running the worker locally
 
