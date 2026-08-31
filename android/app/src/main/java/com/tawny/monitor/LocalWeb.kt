@@ -423,8 +423,10 @@ class SignalServer(
         private val PROOF_RE = Regex("^[0-9a-fA-F]{64}$")
         private const val MAX_ROOMS = 32
         private const val MAX_PER_IP = 8
-        // 1 Monitor + up to 5 Viewers. Mirrors public/app.js.
-        private const val MAX_PER_ROOM = 6
+        // 1 Monitor + up to 3 Viewers. Mirrors public/app.js MAX_VIEWERS and
+        // the rendezvous. Fixed at three: nothing reads a pref or an intent
+        // extra to raise it.
+        private const val MAX_PER_ROOM = 4
         /** Sockets challenged but not yet admitted. */
         private const val MAX_PENDING = 64
         private const val ADMIT_TIMEOUT_MS = 5_000L

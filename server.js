@@ -26,7 +26,7 @@ const TURN_MODE = process.env.TURN_MODE || 'auto';
 const TURN_URLS = list(process.env.TAWNY_TURN_URLS);
 const TURN_SECRET = process.env.TAWNY_TURN_SECRET || '';
 
-const MAX_PER_ROOM = 6;      // one Watcher + up to five Handhelds
+const MAX_PER_ROOM = 4;      // one Watcher + up to three Handhelds
 const MAX_STATIONS = 1;
 const MAX_PER_IP = 6;
 const MAX_TOTAL = 64;

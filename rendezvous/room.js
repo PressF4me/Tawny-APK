@@ -15,7 +15,11 @@
 //
 // Uses the WebSocket Hibernation API so an idle room costs nothing.
 
-const MAX_PER_ROOM = 6;      // 1 Watcher + up to 5 Handhelds
+// 1 Watcher + up to 3 Handhelds. Three is the product's answer, not a tunable:
+// it is the same number in public/app.js (MAX_VIEWERS), LocalWeb.kt, server.js
+// and the Deno port, and there is no setting, query param or header that moves
+// it. A fourth Handheld is turned away with 4003 and told why.
+const MAX_PER_ROOM = 4;
 const MAX_STATIONS = 1;
 // Addressed control messages the relay will forward. `cameras`, `meta` and
 // `camera-control` were missing, so the lens picker, remote zoom and pet-name

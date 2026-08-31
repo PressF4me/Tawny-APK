@@ -30,7 +30,7 @@ const RELAY = new Set([
   "offer", "answer", "ice", "bye", "chime", "chime-ack", "talking",
   "cameras", "meta", "camera-control",
 ]);
-const MAX_PER_ROOM = 6;
+const MAX_PER_ROOM = 4;      // 1 Monitor + up to 3 Viewers. Mirrors ../room.js.
 const MAX_STATIONS = 1;
 const TICKET_TTL = 24 * 60 * 60_000;
 

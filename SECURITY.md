@@ -95,7 +95,8 @@ Now:
   map entry is created on admission rather than on connection — refused
   connections used to leave permanent empty rooms behind, walking the map toward
   `MAX_ROOMS`.
-- Caps: `MAX_ROOMS = 32`, `MAX_PER_IP = 8`, `MAX_PER_ROOM = 6`,
+- Caps: `MAX_ROOMS = 32`, `MAX_PER_IP = 8`, `MAX_PER_ROOM = 4` (one Monitor plus
+  the three Viewers the product allows),
   `MAX_PENDING = 64`.
 
 The bundled asset server on `127.0.0.1` bounds its request line (8 KB), header
