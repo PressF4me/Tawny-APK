@@ -281,6 +281,23 @@ function diag(line) {
   tellNative('diag', { line: s });
 }
 
+// A script error that reaches the top is a bug we want in the flight recorder,
+// not just the console the phone cannot show. WebView reports the line as 1 for
+// anything reached through evaluateJavascript, so lean on the stack instead.
+const errFrame = (e) => {
+  const st = (e && (e.error?.stack || e.reason?.stack || e.stack)) || '';
+  return String(st).split('\n').slice(0, 3).map((l) => l.trim()).join('  ');
+};
+addEventListener('error', (e) => {
+  diag(`js error: ${e.message || e.error?.message || e} @ ${e.filename || '?'}:${e.lineno || 0}` +
+    (errFrame(e) ? `  ${errFrame(e)}` : ''));
+});
+addEventListener('unhandledrejection', (e) => {
+  const r = e.reason;
+  diag(`js rejection: ${(r && (r.message || r)) || 'unknown'}` +
+    (errFrame(e) ? `  ${errFrame(e)}` : ''));
+});
+
 function audioCtx() {
   if (!S.ac) S.ac = new (window.AudioContext || window.webkitAudioContext)();
   if (S.ac.state === 'suspended') S.ac.resume();
@@ -1793,6 +1810,7 @@ async function handle(m, entry) {
         level: Number.isFinite(lv) ? Math.max(0, Math.min(100, Math.round(lv))) : null,
         charging: typeof m.charging === 'boolean' ? m.charging : null,
       };
+      diag(`battery <- ${S.remoteBattery.level}% charging=${S.remoteBattery.charging}`);
       updateBatteryUI();
       break;
     }
@@ -2211,6 +2229,7 @@ function setStationBattery(level, charging) {
   const ch = typeof charging === 'boolean' ? charging : null;
   if (lv === S.battery.level && ch === S.battery.charging) return;
   S.battery = { level: lv, charging: ch };
+  diag(`battery -> ${lv}% charging=${ch} (${viewerPeers().length} viewer(s))`);
   broadcastBattery();
 }
 

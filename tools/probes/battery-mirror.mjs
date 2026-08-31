@@ -52,6 +52,7 @@ const ctx = {
   viewerPeers: () => [{ id: 'v1' }, { id: 'v2' }],
   sig: (obj) => sent.push(obj),
   bumpRail: () => {},
+  diag: () => {},
 };
 for (const k of ['battchip', 'battFill', 'battPct']) ctx.el[k] = mkEl();
 vm.createContext(ctx);

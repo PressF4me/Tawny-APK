@@ -3720,12 +3720,14 @@ class MainActivity : AppCompatActivity() {
                     BatteryManager.BATTERY_STATUS_NOT_CHARGING -> false
                     else -> plugged != 0            // status unknown — fall back to "on a lead"
                 }
+                Diag.log("shell", "battery $pct% charging=$charging (status=$status plugged=$plugged)")
                 web?.evaluateJavascript(
                     "window.tawnyBattery && window.tawnyBattery($pct, $charging)", null
                 )
             }
         }
         batteryRx = rx
+        Diag.log("shell", "battery mirror on")
         // ACTION_BATTERY_CHANGED is system-only, so the export flag is moot, but
         // targetSdk 34+ wants one stated. NOT_EXPORTED is the honest answer.
         ContextCompat.registerReceiver(
