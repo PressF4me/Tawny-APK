@@ -169,10 +169,10 @@ touch them**. No big-bang rewrite; the churn risk outweighs the tidiness.
 test, no JS tests for the `app.js` signalling state machine (`handle()` /
 `openSignal()` — intricate, has regressed repeatedly). Direction: a small Node
 harness that drives two fake peers through `rendezvous/room.js` for the common
-flows (join order, Monitor drop/rejoin, 5-viewer cap, ticket expiry, re-key),
+flows (join order, Monitor drop/rejoin, 3-viewer cap, ticket expiry, re-key),
 plus a documented **on-device manual matrix** in `docs/` that the user runs on
 the A50 + T10Pro: same-WiFi; Monitor-WiFi/Viewer-cellular; both-cellular;
-background mid-call; network drop mid-call; 5 viewers; rename mid-session; theme
+background mid-call; network drop mid-call; 3 viewers; rename mid-session; theme
 flip mid-session. Wire the Node harness into CI once the repo has a remote.
 
 ### F. `server.js` (self-host reference) is knowingly stale
