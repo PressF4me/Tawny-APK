@@ -263,6 +263,15 @@ private const val DIM_BRIGHTNESS = 0.004f
  */
 private const val MIN_REFRESH_HZ = 30f
 
+/**
+ * Phones that may watch one Monitor at once. Hardcoded, and hardcoded in four
+ * other places that each independently refuse a fourth: public/app.js
+ * (MAX_VIEWERS), LocalWeb.kt and the two rendezvous ports (MAX_PER_ROOM = this
+ * + 1). Nothing here reads it from prefs, an intent extra or the page — the
+ * page reports the ceiling back and the shell only uses it for wording.
+ */
+private const val MAX_VIEWERS = 3
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var root: FrameLayout
@@ -270,7 +279,16 @@ class MainActivity : AppCompatActivity() {
     private var pairOverlay: View? = null
     /** The user asked to see the camera instead of the pairing code. */
     private var pairOverlayHidden = false
-    private var pairChip: View? = null   // QR shown over the Watcher's live view while waiting
+    private var pairChip: TextView? = null  // way back to the code, over the live view
+    /** The pairing sheet's own status line, updated as phones come and go. */
+    private var pairStatus: TextView? = null
+    /**
+     * How many Handhelds are watching, and the fixed ceiling. The page is the
+     * only writer (Bridge "watching"/"waiting"); the shell never invents a
+     * count and has no way to raise the ceiling.
+     */
+    private var viewersNow = 0
+    private var viewersMax = MAX_VIEWERS
     private var isLive = false
     /** Dim mode is showing, so the backlight is pinned near-black. */
     private var isDimmed = false
@@ -743,9 +761,12 @@ class MainActivity : AppCompatActivity() {
         swipeNav(null, null)
         (pairOverlay?.parent as? ViewGroup)?.removeView(pairOverlay)
         pairOverlay = null
+        pairStatus = null
         (pairChip?.parent as? ViewGroup)?.removeView(pairChip)
         pairChip = null
         pairOverlayHidden = false
+        viewersNow = 0                 // a new screen knows about nobody
+        viewersMax = MAX_VIEWERS
         web?.let {
             (it.parent as? ViewGroup)?.removeView(it)
             it.loadUrl("about:blank")
@@ -1513,41 +1534,77 @@ class MainActivity : AppCompatActivity() {
     private fun hidePairOverlay() {
         pairOverlayHidden = true
         pairOverlay?.visibility = View.GONE
-        showPairChip()
+        syncPairChip()
         refreshSystemBars()
     }
 
     private fun showPairOverlay() {
         pairOverlayHidden = false
-        pairChip?.let { (it.parent as? ViewGroup)?.removeView(it) }
-        pairChip = null
+        removePairChip()
+        pairStatus?.text = pairSheetStatus().uppercase()
         pairOverlay?.visibility = View.VISIBLE
         refreshSystemBars()
     }
 
-    /** A small chip over the video: the way back to the pairing code. */
-    private fun showPairChip() {
-        if (pairChip != null) return
+    private fun removePairChip() {
+        pairChip?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        pairChip = null
+    }
+
+    /**
+     * The one affordance for adding phones two and three.
+     *
+     * It used to be a translucent "Show pairing code" chip that the shell threw
+     * away the instant the first Handheld connected — so once you had paired one
+     * phone there was no way, anywhere in the app, to reach the code again, and
+     * the Monitor looked like a one-phone device. Now it stays up, in the
+     * accent colour so it reads as an action rather than a status, saying how
+     * many more phones may join; it is retired only when the third is on.
+     */
+    private fun syncPairChip() {
+        // Full, or the sheet itself is up: nothing to offer.
+        if (viewersNow >= viewersMax || pairOverlay?.visibility == View.VISIBLE) {
+            removePairChip(); return
+        }
+        val left = viewersMax - viewersNow
+        val label = if (viewersNow == 0) "Show pairing code"
+                    else "+  Add another phone  ($left left)"
+        pairChip?.let { it.text = label; return }
         val chip = TextView(this).apply {
-            text = "Show pairing code"
+            text = label
             textSize = Type.LABEL
             typeface = uiFontSemi
             letterSpacing = 0.06f
-            setTextColor(Color.WHITE)
+            setTextColor(Hue.ON_ACCENT)
             gravity = Gravity.CENTER
-            background = pressable(roundRect(0x99000000.toInt(), 0x33FFFFFF, Radius.CHIP), Radius.CHIP)
-            setPadding(dp(14), dp(9), dp(14), dp(9))
-            minHeight = dp(44)
+            // Berry on the video, not smoked glass: this is the way to add a
+            // phone, and it has to look like it can be pressed.
+            background = pressable(
+                roundRect(Hue.BERRY, Color.TRANSPARENT, Radius.CONTROL), Radius.CONTROL, Hue.BERRY
+            )
+            setPadding(dp(18), dp(11), dp(18), dp(11))
+            minHeight = dp(48)
             tapFeedback { showPairOverlay() }
         }
         val lp = FrameLayout.LayoutParams(WC, WC).also {
             it.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            // Clear of the page's own status rail, which sits under the system
-            // bar inset plus its own padding.
-            it.topMargin = (lastInsets.first) + dp(64)
+            // Clear of *both* of the page's own top rails — the "on air"
+            // status line and, under it, the phone-count and pet-name tags.
+            // dp(64) cleared only the first, so the chip sat straight on top of
+            // "1 phone · your pet monitor".
+            it.topMargin = (lastInsets.first) + dp(96)
         }
         pairChip = chip
         root.addView(chip, lp)
+    }
+
+    /** What the pairing sheet says under the QR, given who is already watching. */
+    private fun pairSheetStatus() = when {
+        viewersNow == 0 -> "Waiting for a phone to connect"
+        viewersNow == 1 -> "1 phone watching · ${viewersMax - 1} more can join"
+        viewersNow < viewersMax ->
+            "$viewersNow phones watching · ${viewersMax - viewersNow} more can join"
+        else -> "$viewersNow phones watching · that is the maximum"
     }
 
     private var lastInsets: Pair<Int, Int> = 0 to 0
@@ -3034,11 +3091,15 @@ class MainActivity : AppCompatActivity() {
         col.addView(
             body(
                 "On the other phone, open Tawny and tap \u201cI want to watch a " +
-                    "monitor\u201d, then point its camera at this code.",
+                    "monitor\u201d, then point its camera at this code. Up to " +
+                    "$MAX_VIEWERS phones can watch this monitor \u2014 the same code " +
+                    "works for each of them.",
                 maxW = 300
             )
         )
-        col.addView(waitingRow("Waiting for a viewer to connect"))
+        val statusRow = waitingRow(pairSheetStatus())
+        pairStatus = statusRow.getChildAt(1) as? TextView
+        col.addView(statusRow)
         // You cannot aim a pet camera through a full-screen QR code. Let the
         // person setting the Monitor up check the framing without giving up the
         // pairing screen.
@@ -3127,6 +3188,43 @@ class MainActivity : AppCompatActivity() {
         root.addView(themeToggleView())
     }
 
+    /**
+     * Turned away because the monitor already has its three phones.
+     *
+     * This screen exists because the refusal used to land on "Monitor isn't on
+     * yet" — the shell threw the page's message away and guessed from the role.
+     * The monitor was on, and watching; the guess sent the user to check a
+     * phone that was working perfectly.
+     */
+    private fun showMonitorFull(message: String) {
+        screen = "full"
+        if (isFinishing) return
+        Diag.log("shell", "showMonitorFull — refused, monitor already has $MAX_VIEWERS phones")
+        clearScreen()
+        swipeNav(back = { showHandheldHome() }, forward = null)
+        val col = column(scroll = false)
+        col.addView(IconView(this, "phone", behind = Hue.BG).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(60), dp(60)).also {
+                it.bottomMargin = dp(6)
+                it.gravity = Gravity.CENTER_HORIZONTAL
+            }
+        })
+        col.addView(TextView(this).apply {
+            text = "That monitor is full"
+            setTextColor(Hue.TEXT)
+            textSize = 24f
+            typeface = uiFontSemi
+            gravity = Gravity.CENTER
+            layoutParams = lp(topMargin = 12)
+        })
+        col.addView(body(message, maxW = 300))
+        col.addView(gap(8))
+        col.addView(primary("Try again") { goLive("viewer") })
+        col.addView(link("Go back") { showHandheldHome() })
+        mountCentered(col)
+        root.addView(themeToggleView())
+    }
+
     // ----------------------------------------------------------- bridge
 
     inner class Bridge {
@@ -3151,17 +3249,33 @@ class MainActivity : AppCompatActivity() {
                     }
                     // Monitor: a Viewer connected / all disconnected — show or
                     // hide the pairing-QR overlay over the live view.
+                    // Monitor: the number of Handhelds watching changed. The
+                    // page sends this on every change of count — not once, on
+                    // the first Viewer, which is what used to strand the user
+                    // with no route back to the pairing code and therefore no
+                    // way to add phones two and three.
                     "watching" -> {
-                        // Someone is actually watching: the code is done with,
-                        // and so is the chip that offers to bring it back.
+                        viewersNow = obj.optInt("n", 1)
+                        viewersMax = obj.optInt("max", MAX_VIEWERS).coerceIn(1, MAX_VIEWERS)
+                        // A phone just joined, so drop the sheet and show the
+                        // camera — but keep offering the code while there is
+                        // still room, because that is the whole "add another
+                        // phone" affordance.
                         pairOverlayHidden = false
-                        pairChip?.let { c -> (c.parent as? ViewGroup)?.removeView(c) }
-                        pairChip = null
                         pairOverlay?.visibility = View.GONE
+                        syncPairChip()
                         refreshSystemBars()
                     }
                     "waiting" -> {
-                        if (!pairOverlayHidden) pairOverlay?.visibility = View.VISIBLE
+                        viewersNow = 0
+                        viewersMax = obj.optInt("max", MAX_VIEWERS).coerceIn(1, MAX_VIEWERS)
+                        if (!pairOverlayHidden) {
+                            removePairChip()
+                            pairStatus?.text = pairSheetStatus().uppercase()
+                            pairOverlay?.visibility = View.VISIBLE
+                        } else {
+                            syncPairChip()
+                        }
                         refreshSystemBars()
                     }
                     // The OS took the camera back (screen off / backgrounded).
@@ -3185,8 +3299,16 @@ class MainActivity : AppCompatActivity() {
                     "unreachable" -> showMonitorOffline()
                     "error" -> {
                         endLive()
-                        if (prefs.getString("role", null) == "viewer") showMonitorOffline()
-                        else showError(message ?: "Could not start the session")
+                        // The page says *why* when it knows. Only fall back to
+                        // guessing from the role when it doesn't.
+                        when {
+                            obj.optString("reason") == "full" ->
+                                showMonitorFull(
+                                    message ?: "This monitor already has $MAX_VIEWERS phones watching."
+                                )
+                            prefs.getString("role", null) == "viewer" -> showMonitorOffline()
+                            else -> showError(message ?: "Could not start the session")
+                        }
                     }
                 }
             }
