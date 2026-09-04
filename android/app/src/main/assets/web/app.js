@@ -2812,6 +2812,7 @@ async function switchLens(index) {
       audio: false
     });
     const nt = ns.getVideoTracks()[0];
+    await fixCaptureAxis(nt);
     try { nt.contentHint = 'motion'; } catch {}
     for (const [, p] of S.peers) {
       const sender = p.pc?.getSenders().find((s) => s.track?.kind === 'video');
@@ -2939,10 +2940,41 @@ function screenIsWide() {
   return (window.screen?.orientation?.type || '').startsWith('landscape')
     || window.innerWidth >= window.innerHeight;
 }
+
+// Some Android WebView camera pipelines hand back frames with width and
+// height transposed from whatever was asked for — request a tall frame and
+// get a wide one, pixel-for-pixel swapped rather than merely relabelled, and
+// consistently so for arbitrary (non-16:9) sizes too. That is what made the
+// picture "always wide": every ideal aspect this app asked for came back
+// rotated a quarter turn from what it held. captureAxisSwapped, once set by
+// fixCaptureAxis() below, makes every idealCaptureSize() call ask for the
+// *opposite* of what is wanted, so the buggy pipeline lands on the right
+// shape. Devices that do not have the bug never trip the detector, so this
+// costs them nothing.
+let captureAxisSwapped = false;
+
 function idealCaptureSize(long = 960, short = 540) {
-  return screenIsWide()
+  const wide = screenIsWide() !== captureAxisSwapped;
+  return wide
     ? { width: { ideal: long }, height: { ideal: short } }
     : { width: { ideal: short }, height: { ideal: long } };
+}
+
+/** Call right after opening a video track, while it is still known which
+ *  shape was actually asked for. Flips captureAxisSwapped (once, for the
+ *  rest of the session) and re-applies the corrected shape if the camera
+ *  handed back the perpendicular one. */
+async function fixCaptureAxis(track) {
+  if (!track || captureAxisSwapped) return;
+  const s = track.getSettings();
+  if (s.width == null || s.height == null || s.width === s.height) return;
+  const askedWide = screenIsWide();
+  const gotWide = s.width > s.height;
+  if (gotWide === askedWide) return;
+  captureAxisSwapped = true;
+  diag(`capture axis swapped by the camera (asked ${askedWide ? 'wide' : 'tall'}, ` +
+    `got ${s.width}x${s.height}) — compensating from here on`);
+  try { await track.applyConstraints(idealCaptureSize()); } catch {}
 }
 
 function cameraConstraints() {
@@ -2989,6 +3021,7 @@ async function start(role) {
       ? 'Camera and microphone access was blocked. Allow it for this site, then try again.'
       : `Could not open the camera or microphone (${err.name}).`);
   }
+  if (role === 'station') await fixCaptureAxis(S.local.getVideoTracks()[0]);
 
   S.captureLost = false;
   // A fresh session starts dark on both sides. The Monitor works out whether
@@ -3357,6 +3390,7 @@ $('#btn-flip').addEventListener('click', async () => {
   }
 
   const track = stream.getVideoTracks()[0];
+  await fixCaptureAxis(track);
   try { track.contentHint = 'motion'; } catch {}
   S.local.addTrack(track);
   el.local.srcObject = S.local;
