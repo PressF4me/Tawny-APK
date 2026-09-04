@@ -199,6 +199,39 @@ link carries `c` and `e` on both the web and native sides, that `adopt()`
 refuses a lapsed `e` with the expiry sentence, and that the refusal travels as
 `bye {reason:'expired'}`. **Green on 2026-09-04.**
 
+## `orientation.mjs` — the picture matches how the phone is held
+
+`video-fit.mjs` covers the *shape* of the picture; this covers which way up it
+is. Lifts `quarter` and `applyRotation` out of `public/app.js` and runs them
+against stubbed video elements, then reads `style.css` and `MainActivity.kt` for
+the parts that are not functions.
+
+```bash
+node tools/probes/orientation.mjs
+```
+
+The gap it exists for: `getUserMedia` hands the page frames turned to the
+**window**, and with auto-rotate off the window is not the phone — a Monitor
+lying on its side keeps a portrait window and streams a room lying on its side,
+and nothing at either end can tell, because nothing at either end can see past
+the window. The shell reads the accelerometer and reports two angles, both
+clockwise from the phone's natural orientation; the correction is their
+difference.
+
+Asserted: the correction is `(windowCW - deviceCW) mod 360` for all sixteen
+pairings, and is always 0 when the window tracks the phone (auto-rotate on —
+i.e. this changes nothing about the behaviour that shipped before); all four
+quarters are reachable, not just 0/180; a quarter turn swaps the element's box
+to the stage transposed, because fitting first and turning after lands a picture
+wider than the stage for `overflow: hidden` to crop — with the numbers for the
+real case (a 540×960 frame on a 400×800 stage) both ways; going back to 0 clears
+everything it set; the stylesheet carries the rules at a specificity that beats
+`#local.fill { transform: none }`; the Monitor publishes `rot` in `meta` (already
+on all four relay forward lists, so no relay changed) and a Viewer applies it
+live; and the shell's `Display.getRotation()` table inverts 90/270, does not
+chatter at a 45° boundary, keeps the last reading when the phone is flat, and
+only holds the sensor while the live screen is up. **Green on 2026-09-04.**
+
 ## Running the worker locally
 
 ```bash

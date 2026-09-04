@@ -18,6 +18,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.hardware.SensorManager
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
@@ -37,6 +38,8 @@ import android.view.GestureDetector
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
+import android.view.OrientationEventListener
+import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -814,6 +817,7 @@ class MainActivity : AppCompatActivity() {
         scannerStop?.invoke(); scannerStop = null
         swipeNav(null, null)
         stopPairCountdown()
+        stopOrientationWatch()   // only the live WebView has anything to tell
         (pairOverlay?.parent as? ViewGroup)?.removeView(pairOverlay)
         pairOverlay = null
         pairStatus = null
@@ -3241,6 +3245,9 @@ class MainActivity : AppCompatActivity() {
                         "pairExp:$pairCodeExpArg})",
                     null
                 )
+                // Only the live screen has a WebView to tell, so this is where
+                // the accelerometer goes on. clearScreen() turns it back off.
+                startOrientationWatch()
             }
 
             override fun onReceivedError(
@@ -3979,10 +3986,104 @@ class MainActivity : AppCompatActivity() {
         pendingChime = null
     }
 
+    // ------------------------------------------------------- orientation
+    //
+    // The picture has to match how the phone is *held*, and the window is not
+    // a reliable witness to that. With auto-rotate off — a rotation lock, or
+    // simply the default on a handset that has been propped on a shelf for
+    // hours — the Activity stays portrait however the phone is lying, so the
+    // window never turns, the page's `screen.orientation` never changes, and
+    // Chromium keeps handing getUserMedia frames turned to a portrait window.
+    // The Monitor then streams a room lying on its side and nothing at either
+    // end can tell, because nothing at either end can see past the window.
+    //
+    // So read the accelerometer directly and report both angles to the page,
+    // which works out the difference and turns the picture (its own preview,
+    // and every Handheld's, over the `meta` message it already sends).
+    //
+    // Both angles are **degrees clockwise from the phone's natural
+    // orientation** — the units OrientationEventListener already reports in
+    // ("90 = the device's left side is at the top", which is a quarter turn
+    // clockwise). Display.getRotation() is documented as "the rotation of the
+    // drawn graphics on the screen, which is the opposite direction of the
+    // physical rotation of the device", so it is inverted into the same units
+    // below. If a device ever disagrees, the `orientation device=… window=…`
+    // line in the diagnostics log is what to read, and [windowRotationCW] is
+    // the one table to change.
+
+    private var orientWatch: OrientationEventListener? = null
+    private var lastDeviceCW = -1
+    private var lastWindowCW = -1
+
+    private fun windowRotationCW(): Int {
+        val r = try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) display?.rotation ?: Surface.ROTATION_0
+            else @Suppress("DEPRECATION") windowManager.defaultDisplay.rotation
+        } catch (e: Exception) { Surface.ROTATION_0 }
+        return when (r) {
+            Surface.ROTATION_90 -> 270
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 90
+            else -> 0
+        }
+    }
+
+    /** Push the current pair of angles at the page, if either has moved. */
+    private fun pushOrientation(deviceCW: Int = lastDeviceCW.coerceAtLeast(0)) {
+        val w = windowRotationCW()
+        if (deviceCW == lastDeviceCW && w == lastWindowCW) return
+        lastDeviceCW = deviceCW
+        lastWindowCW = w
+        Diag.log("shell", "orientation device=$deviceCW window=$w")
+        web?.evaluateJavascript(
+            "window.tawnyOrientation && window.tawnyOrientation($deviceCW,$w)", null
+        )
+    }
+
+    private fun startOrientationWatch() {
+        if (orientWatch != null || web == null) return
+        val w = object : OrientationEventListener(this, SensorManager.SENSOR_DELAY_NORMAL) {
+            override fun onOrientationChanged(deg: Int) {
+                // Flat on a table, or being carried: no usable reading. Keep
+                // the last one rather than snapping the picture to north.
+                if (deg == ORIENTATION_UNKNOWN) return
+                val q = ((deg + 45) / 90 * 90) % 360
+                // A phone held near a 45° boundary would otherwise flip back
+                // and forth on every degree of hand-shake. Only take a new
+                // quarter once the reading is clearly inside it.
+                if (q != lastDeviceCW) {
+                    val off = ((deg - q + 540) % 360) - 180
+                    if (abs(off) > 30) return
+                }
+                pushOrientation(q)
+            }
+        }
+        if (!w.canDetectOrientation()) {
+            // No accelerometer (a tablet in a dock, an emulator). The window is
+            // then the only witness there is, which is the old behaviour.
+            Diag.log("shell", "orientation: no sensor — following the window only")
+            pushOrientation(windowRotationCW())
+            return
+        }
+        w.enable()
+        orientWatch = w
+        pushOrientation(windowRotationCW())   // a first reading before the sensor speaks
+    }
+
+    private fun stopOrientationWatch() {
+        orientWatch?.disable()
+        orientWatch = null
+        lastDeviceCW = -1
+        lastWindowCW = -1
+    }
+
     // -------------------------------------------------------- lifecycle
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
+        // The window turned. The phone may not have (a fold, a resize), so
+        // re-read both angles rather than assuming they moved together.
+        pushOrientation()
         // System light/dark flip (uiMode is in configChanges so we aren't
         // recreated). Reload the palette and refresh what's on screen.
         Hue.load(this)
@@ -3999,6 +4100,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        // Nobody is turning a phone whose app is not on screen, and the sensor
+        // is not free.
+        stopOrientationWatch()
         web?.evaluateJavascript(
             "window.dispatchEvent(new Event('tawny:background'))", null
         )
@@ -4006,6 +4110,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        startOrientationWatch()
         if (isLive) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             // Window attributes only bind while the window is showing, so both
@@ -4022,6 +4127,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         endLive()
         releaseSessionLocks()   // belt and braces: nothing may outlive the Activity
+        stopOrientationWatch()
         stopScanner()
         stopServers()
         scene?.stop()

@@ -94,6 +94,39 @@ launch with `-camera-back virtualscene`.
   drags on.
 - A real two-phone media test needs hardware.
 
+## Orientation
+
+The picture follows how the **Monitor** is physically held, in all four
+quarters, on the Monitor's own preview and on every Viewer at once — including
+mid-session, and including with auto-rotate switched off.
+
+That last case is the whole reason there is code for this. `getUserMedia` hands
+the WebView frames already turned to the *window*, so as long as the window
+rotates with the phone the page needs to do nothing. With a rotation lock the
+window never moves, `screen.orientation` never changes, and a Monitor lying on
+its side streams a room lying on its side with nothing at either end able to
+see past the window. So `MainActivity` watches the accelerometer and reports two
+angles to the page — how the phone is held, and how far the window believes it
+has turned, both in degrees clockwise from the phone's natural orientation. The
+difference is the correction; the Monitor applies it to its own preview and
+publishes it to every Handheld in the `meta` message it already sends.
+
+- The correction is 0 whenever the window tracks the phone, so auto-rotate on
+  behaves exactly as it did before.
+- A quarter turn also transposes the video element's box, or `object-fit:
+  contain` would fit the picture to the stage and *then* turn it past the
+  stage's edges, and `overflow: hidden` would crop it.
+- The **capture shape** deliberately still follows the window, not the phone:
+  after a quarter-turn correction the displayed picture is wide exactly when the
+  window was tall. `idealCaptureSize()` is unchanged.
+- In a plain browser there is no accelerometer reading to be had, so the
+  correction stays 0. A Viewer's own rotation lock is not corrected either —
+  that would turn the picture while leaving the rail and controls where they
+  are.
+- Checking it on device: `orientation device=… window=…` in the diagnostics log
+  (long-press the version stamp) is the pair of angles as the shell read them.
+  `windowRotationCW()` is the one table to change if a device disagrees.
+
 ## Background / screen-off
 
 Camera and mic run **only while the app is foregrounded**. The Monitor keeps the

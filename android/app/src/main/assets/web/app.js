@@ -49,6 +49,10 @@ const S = {
   // it stops admitting new phones. On a Viewer: the code it scanned, presented
   // once to the Monitor to be let in. See PAIR_TTL_MS.
   pairCode: null, pairSeen: null,
+  // How far this phone's own camera frames are off from the world (0/90/180/
+  // 270, clockwise), and — on a Viewer — what the Monitor last said about its
+  // own. Both are 0 until the native shell reports an accelerometer reading.
+  rot: 0, remoteRot: 0,
   // Signaling transports (0-2). A Handheld commits to one; the Watcher may hold
   // its LAN relay and the rendezvous at once.
   signals: [], committedTag: null, raceTimer: null, myId: null,
@@ -1912,6 +1916,17 @@ async function handle(m, entry) {
     }
     case 'meta': {
       if (S.role !== 'viewer') break;
+      // Which way up the Monitor is holding its picture. Handled first and on
+      // its own: it rides the same message as the pause flag and the pet name,
+      // and either of those may `break` before the end.
+      if (typeof m.rot === 'number' && Number.isFinite(m.rot)) {
+        const rot = quarter(m.rot);
+        if (rot !== S.remoteRot) {
+          S.remoteRot = rot;
+          diag(`monitor orientation <- rotate ${rot}`);
+          applyRemoteRotation();
+        }
+      }
       // The Monitor lost its camera (its screen went off, or the app was
       // backgrounded). Say so, instead of leaving a frozen frame up.
       if (typeof m.paused === 'boolean') {
@@ -2148,6 +2163,7 @@ function featureVideo(peer, stream) {
   playSoon(el.remote);
   el.local.classList.remove('fill');   // our own camera → corner PiP
   el.local.hidden = false;
+  applyRotations();                    // the PiP is the far phone's camera, not ours
 }
 function unfeature(id) {
   if (S.featured !== id) return;
@@ -2156,6 +2172,7 @@ function unfeature(id) {
   el.remote.hidden = true;
   el.local.classList.add('fill');
   el.local.hidden = false;
+  applyRotations();
 }
 
 // Viewer side: open the connection to the Watcher.
@@ -2212,9 +2229,14 @@ async function answerPeer(peer, sdp) {
   if (S.role === 'station' && S.cameras.length > 1) {
     sig({ type: 'cameras', list: S.cameras.map((c) => ({ index: c.index, label: c.label })), zoomSupported: S.zoomHardware, to: peer.id }, peer);
   }
-  // Always sync the current pet name so the viewer's session card stays up to date.
-  if (S.role === 'station' && S.channel?.name) {
-    sig({ type: 'meta', petName: S.channel.name, to: peer.id }, peer);
+  // Always sync the current pet name so the viewer's session card stays up to
+  // date — and which way up this phone is holding the picture, so a Handheld
+  // joining a Monitor that is already lying on its side sees the room the right
+  // way round from its first frame rather than after the next turn.
+  if (S.role === 'station') {
+    const meta = { type: 'meta', rot: S.rot, to: peer.id };
+    if (S.channel?.name) meta.petName = S.channel.name;
+    sig(meta, peer);
   }
   // And the light: a Viewer joining a session where the room is already lit
   // must show a lit key, not an "off" one over an obviously lit picture.
@@ -2849,6 +2871,11 @@ async function start(role) {
     if (!androidNative) preloadChimes();
   }
 
+  // A fresh session knows nothing about the far phone's orientation until it
+  // says so; a leftover from the last one would turn the first frame wrongly.
+  S.remoteRot = 0;
+  applyRemoteRotation();
+
   el.remote.srcObject = null;
   el.remoteAudio.srcObject = null;
   el.remote.hidden = true;
@@ -2872,6 +2899,7 @@ async function start(role) {
     keepAwake();
     watchBrowserBattery();            // native shell drives window.tawnyBattery instead
     lastCaptureWide = screenIsWide(); // getUserMedia above already matched this
+    applyOwnRotation();               // the shell may already have reported a turn
   } else {
     for (const t of S.local.getAudioTracks()) t.enabled = false; // push-to-talk
     el.cViewer.hidden = false;
@@ -3114,10 +3142,19 @@ $('#btn-cam').addEventListener('click', async () => {
 $('#btn-snap').addEventListener('click', () => {
   const v = el.remote;
   if (!v.videoWidth) return toast('Nothing to capture yet.');
+  // A snapshot must come out the way the picture looked on screen. The frame
+  // itself is turned to the Monitor's *window*, so a Monitor whose window is
+  // pinned while the phone lies on its side sends a sideways frame that the
+  // stage is correcting with a rotation — put the same turn in the PNG.
+  const rot = S.role === 'viewer' ? quarter(S.remoteRot) : 0;
+  const odd = rot === 90 || rot === 270;
   const c = document.createElement('canvas');
-  c.width = v.videoWidth;
-  c.height = v.videoHeight;
-  c.getContext('2d').drawImage(v, 0, 0);
+  c.width = odd ? v.videoHeight : v.videoWidth;
+  c.height = odd ? v.videoWidth : v.videoHeight;
+  const ctx = c.getContext('2d');
+  ctx.translate(c.width / 2, c.height / 2);
+  if (rot) ctx.rotate(rot * Math.PI / 180);
+  ctx.drawImage(v, -v.videoWidth / 2, -v.videoHeight / 2);
   const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
   const name = `tawny-${stamp}.png`;
 
@@ -3451,12 +3488,115 @@ function reopenAfterRestore() {
 }
 
 // ----------------------------------------------------------- orientation
+//
+// Two halves, and only one of them existed before.
+//
+// **Shape.** When the Monitor is turned, ask the camera for a frame shaped to
+// the new orientation, so a phone laid on its side sends a genuinely wide
+// picture (and an upright one a tall picture) — not a fixed shape with the room
+// letterboxed into it. That is reshapeCapture() below, and it follows the
+// *window*, which is right: getUserMedia hands us frames already turned to
+// whatever way up the window is.
+//
+// **Which way is up.** The window is not always the phone. With auto-rotate off
+// — a rotation lock, or just the Samsung default on a handset that has been
+// propped on a shelf for hours — the Activity stays portrait however the phone
+// is physically lying, so the window never moves, `screen.orientation` never
+// changes, and Chromium keeps delivering frames turned to a portrait window.
+// A Monitor on its side then sends a picture of a room lying on *its* side, and
+// nothing at either end could tell, because nothing at either end could see
+// past the window. That is the gap this fills.
+//
+// The native shell watches the accelerometer and reports two angles, both in
+// degrees clockwise from the phone's natural orientation: how the phone is
+// actually being held, and how far the window believes it has turned. The
+// difference is how far the delivered frame is off from the world, and it is
+// the same four values on both ends:
+//
+//     correction = (windowCW - deviceCW + 360) % 360
+//
+// Auto-rotate on: the two track each other, the correction is 0, and this is
+// exactly the behaviour that shipped before. Auto-rotate off: the window is
+// pinned, the correction is the whole of the phone's turn, and the picture is
+// put right — on the Monitor's own preview, and on every Viewer, because the
+// Monitor publishes the number in the `meta` message it already sends.
+//
+// In a plain browser there is no accelerometer reading to be had (the shell is
+// the only source), so the correction stays 0 and nothing changes.
+//
+// Note the *capture* shape still follows the window and not the phone, and that
+// is not an oversight: after a quarter-turn correction the displayed picture is
+// wide exactly when the window was tall. windowIsWide XOR oddCorrection is
+// physicalIsWide, by construction.
 
-// Station: when the Monitor is turned, ask the camera for a frame shaped to the
-// new orientation, so a phone laid on its side sends a genuinely wide picture
-// (and an upright one a tall picture) — not a fixed shape with the room rotated
-// or letterboxed into it. Debounced, only when the orientation actually flips,
-// and a no-op off the Monitor or before a track exists.
+// A phone is held one of four ways; anything between is on its way to one of
+// them. Everything here snaps to a quarter turn.
+const quarter = (deg) => ((Math.round(Number(deg) / 90) * 90) % 360 + 360) % 360;
+
+/**
+ * Turn a stage video so the room is the way up the sending phone is held.
+ *
+ * A quarter turn also has to swap the element's box. `object-fit: contain` fits
+ * the picture into the box it is *given*, and then the rotation happens — so a
+ * stage-shaped box turned 90° lands a picture wider than the stage, which
+ * `overflow: hidden` then crops. Cropping the live picture is the one thing
+ * this app does not do (see the `contain` note above `start()`), so for the odd
+ * quarters the element is sized to the stage transposed and re-centred, and the
+ * fit is computed against the space the picture will actually occupy.
+ */
+function applyRotation(v, deg) {
+  if (!v) return;
+  const q = quarter(deg);
+  const odd = q === 90 || q === 270;
+  v.style.setProperty('--rot', `${q}deg`);
+  if (odd) {
+    const stage = v.parentElement;
+    v.style.setProperty('--rot-w', `${stage?.clientHeight || 0}px`);
+    v.style.setProperty('--rot-h', `${stage?.clientWidth || 0}px`);
+  } else {
+    v.style.removeProperty('--rot-w');
+    v.style.removeProperty('--rot-h');
+  }
+  v.classList.toggle('rot', q !== 0);
+  v.classList.toggle('rot-q', odd);
+}
+
+/**
+ * The Monitor's own full-frame preview. Never the corner PiP: that is the far
+ * phone's talk-back camera, which is not ours to turn.
+ */
+function applyOwnRotation() {
+  const own = S.role === 'station' && el.local.classList.contains('fill');
+  applyRotation(el.local, own ? S.rot : 0);
+}
+
+/** The picture from the Monitor, turned by whatever the Monitor last said. */
+function applyRemoteRotation() {
+  applyRotation(el.remote, S.role === 'viewer' ? S.remoteRot : 0);
+}
+
+function applyRotations() { applyOwnRotation(); applyRemoteRotation(); }
+
+/** Monitor: tell every Handheld which way up its picture is. */
+function broadcastOrientation() {
+  if (S.role !== 'station') return;
+  broadcast({ type: 'meta', rot: S.rot });
+}
+
+/**
+ * The native shell's reading. Both angles are degrees clockwise from the
+ * phone's natural orientation; see the note at the top of this section.
+ */
+window.tawnyOrientation = function (deviceCW, windowCW) {
+  const rot = quarter(Number(windowCW || 0) - Number(deviceCW || 0));
+  if (rot === S.rot) return false;
+  S.rot = rot;
+  diag(`orientation device=${deviceCW} window=${windowCW} → rotate ${rot}`);
+  applyOwnRotation();
+  broadcastOrientation();
+  return true;
+};
+
 let reshapeTimer = null;
 let lastCaptureWide = null;
 function reshapeCapture() {
@@ -3476,5 +3616,15 @@ function reshapeCapture() {
   }, 350);
 }
 for (const ev of ['resize', 'orientationchange']) {
-  window.addEventListener(ev, reshapeCapture);
+  window.addEventListener(ev, () => {
+    reshapeCapture();
+    // The stage changed shape, so a quarter-turned video's transposed box has
+    // to be measured again.
+    applyRotations();
+  });
 }
+// A `resize` on the <video> is the far phone turning, or the bitrate ladder
+// stepping resolution. Either way the box the picture is fitted into may need
+// re-measuring.
+el.remote.addEventListener('resize', applyRemoteRotation);
+el.local.addEventListener('resize', applyOwnRotation);
