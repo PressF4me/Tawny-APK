@@ -33,6 +33,7 @@ const el = {
   pair: $('#pair'), pairName: $('#pair-name'), qr: $('#qr'),
   pairProfile: $('#pair-profile'), pairCustomWrap: $('#pair-custom-wrap'),
   pairCustom: $('#pair-custom'), pairUrl: $('#pair-url'), pairWarn: $('#pair-warn'),
+  pairExpiry: $('#pair-expiry'),
   editor: $('#editor'), editorTitle: $('#editor-title'), editorName: $('#editor-name'),
   editorHint: $('#editor-hint'),
   scanner: $('#scanner'), scanVideo: $('#scan-video'), scanHint: $('#scan-hint'),
@@ -44,6 +45,14 @@ const el = {
 const S = {
   role: null, channel: null, roomId: null, signalUrl: null, nativeShell: false,
   cfg: { stun: [], authRequired: false }, token: '',
+  // Pairing codes. On the Monitor: the code currently on screen and the moment
+  // it stops admitting new phones. On a Viewer: the code it scanned, presented
+  // once to the Monitor to be let in. See PAIR_TTL_MS.
+  pairCode: null, pairSeen: null,
+  // How far this phone's own camera frames are off from the world (0/90/180/
+  // 270, clockwise), and — on a Viewer — what the Monitor last said about its
+  // own. Both are 0 until the native shell reports an accelerometer reading.
+  rot: 0, remoteRot: 0,
   // Signaling transports (0-2). A Handheld commits to one; the Watcher may hold
   // its LAN relay and the rendezvous at once.
   signals: [], committedTag: null, raceTimer: null, myId: null,
@@ -56,6 +65,10 @@ const S = {
   // so a second phone connecting mid-read cannot swap the code out.
   sasAsk: null,
   ice: [], iceTimer: null, relayOnly: false,  // filled by fetchIce() when a rendezvous is configured
+  // The relay actually in use. Starts as S.cfg.rendezvous — which is the user's
+  // own when they set one on the Servers screen — and moves to the built-in
+  // tunnel if that one will not answer. See fallBackToDefault().
+  relayBase: null,
   facing: 'environment', micOn: true, camSending: false,
   wake: null, meterStop: null, ac: null, closing: false, dimmed: false,
   editing: null, scanStop: null, pending: null,
@@ -84,6 +97,22 @@ const MAX_VIEWERS = 3;
 const FULL_MESSAGE =
   `This monitor is full (${MAX_VIEWERS} phones). Close Tawny on one of the `
   + 'other phones, then try this code again.';
+
+// How long a pairing code is good for.
+//
+// A photograph of a QR, or a `tawny://pair` link forwarded through a chat app,
+// is a bearer credential: it carries the channel key. Ten minutes is how long
+// that credential can be *used to pair a new phone*. It is not a session
+// timeout — a phone that finished pairing inside the window keeps working
+// afterwards, for as long as the channel exists.
+const PAIR_TTL_MS = 10 * 60 * 1000;
+
+// The one sentence a phone sees when it arrives with a code that has run out,
+// wherever the refusal came from — its own pre-flight check on the scanned
+// link, or the Monitor turning it away over LAN or the internet relay.
+const EXPIRED_MESSAGE =
+  'That pairing code has expired. Show a new code on the monitor phone and '
+  + 'scan it again.';
 
 // Candidates buffered before setRemoteDescription. A real negotiation sends a
 // couple of dozen; anything past this is a peer filling memory.
@@ -351,10 +380,15 @@ function renderChannels() {
     del.addEventListener('click', () => {
       if (!confirm(`Delete "${ch.name}"? Devices paired to it will stop connecting.`)) return;
       setChannels(getChannels().filter((c) => c.id !== ch.id));
-      // Drop the once-reviewed safety-code flag so a re-pair starts clean.
+      // Drop the once-reviewed safety-code flag, this phone's pairing bond and
+      // (on a Monitor) the list of phones it had let in, so a re-pair starts
+      // clean — and so a deleted channel really does stop admitting its old
+      // Handhelds rather than remembering them past the delete.
       try {
         localStorage.removeItem(`tawny.sasok.${ch.id}`);
         localStorage.removeItem(`tawny.sas.${ch.id}`);
+        localStorage.removeItem(`tawny.bond.${ch.id}`);
+        localStorage.removeItem(`tawny.paired.${ch.id}`);
       } catch {}
       renderChannels();
       toast('Monitor removed');
@@ -462,7 +496,8 @@ $('#setup-handheld').addEventListener('click', () => {
   const link = prompt('Paste the pairing link shown on the Watcher:');
   if (link == null) return;
   if (!adopt(link.trim())) {
-    note(el.setupNote, 'That was not a Tawny pairing link. Try scanning it with your phone camera instead.');
+    note(el.setupNote, lastPairError
+      || 'That was not a Tawny pairing link. Try scanning it with your phone camera instead.');
   }
 });
 
@@ -510,11 +545,105 @@ function chosenBase() {
 }
 
 // ------------------------------------------------------------- pairing
+//
+// ---- a pairing code stops working after ten minutes -------------------------
+//
+// The awkward truth first: the 128-bit channel key travels *inside* the pairing
+// code, and the key is what every relay admits a device on. So an expiry cannot
+// be a check the bearer of the code performs on itself — a client that lies
+// about the clock, or simply an older build, would walk straight through it —
+// and it cannot be a check the relay performs either, because the relay is
+// handed the same long-lived room id and admission ticket by an expired code as
+// by a fresh one. (The rendezvous ticket is a *different* thing with a
+// different life; see SECURITY.md, "Signaling admission".)
+//
+// What actually holds is the Monitor. It is the only party that knows when it
+// put a code on screen, it is the party that owns the camera, and every
+// transport funnels through it: on the LAN it *is* the relay, and over the
+// internet it still answers every offer itself. So:
+//
+//   * every code carries a random `c` and its deadline `e`;
+//   * the Monitor keeps `c` and rotates it every ten minutes, by its own clock;
+//   * a phone that has never been let in must present the `c` the Monitor is
+//     showing *now*, or it is refused before a single track is attached;
+//   * a phone that HAS been let in is remembered by a `pid` it minted itself,
+//     so an established Handheld never has to re-pair.
+//
+// `e` in the link is a courtesy, not the enforcement: it lets the scanning
+// phone say "this code expired" immediately instead of dialling into a refusal.
+// Lying about it buys nothing — the Monitor refuses either way.
+
+const PAIRED_KEY = () => `tawny.paired.${S.channel?.id}`;
+const BOND_KEY = () => `tawny.bond.${S.channel?.id}`;
+// One Monitor holds three phones; twice that is room for a household that has
+// re-installed a couple of times, and small enough that a stolen code cannot
+// quietly enrol an army.
+const MAX_REMEMBERED_PEERS = 8;
+const HEX32 = /^[a-f0-9]{32}$/;
+
+/** Monitor: mint the code that goes on screen, and start its ten minutes. */
+function newPairCode(ttl = PAIR_TTL_MS) {
+  const b = new Uint8Array(8);
+  crypto.getRandomValues(b);
+  S.pairCode = { c: b64url(b), exp: Date.now() + ttl };
+  return S.pairCode;
+}
+
+/** Milliseconds left on the code currently on screen; 0 when there isn't one. */
+function pairCodeLeft() {
+  return S.pairCode ? Math.max(0, S.pairCode.exp - Date.now()) : 0;
+}
+
+/**
+ * Viewer: the id this phone is known to the Monitor by once it has been let in.
+ * Per channel, minted here, never derived from anything identifying, and never
+ * sent anywhere but the paired Monitor.
+ */
+function bondId() {
+  if (!S.channel) return null;
+  let v = null;
+  try { v = localStorage.getItem(BOND_KEY()); } catch {}
+  if (!HEX32.test(v || '')) {
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    v = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+    try { localStorage.setItem(BOND_KEY(), v); } catch {}
+  }
+  return v;
+}
+
+const knownPeers = () => readJSON(PAIRED_KEY(), []);
+function rememberPeer(pid) {
+  const list = knownPeers().filter((x) => x !== pid);
+  list.push(pid);
+  writeJSON(PAIRED_KEY(), list.slice(-MAX_REMEMBERED_PEERS));
+}
+
+/**
+ * Monitor: is this offer allowed to have the camera?
+ *
+ * Fails closed on every path — no code on screen, no `pc` in the offer, a `pc`
+ * that is not the current one, or a deadline that has passed. Enrolling a new
+ * phone is the only branch that writes anything.
+ */
+function pairingAllowed(m) {
+  const pid = typeof m.pid === 'string' && HEX32.test(m.pid) ? m.pid : null;
+  if (pid && knownPeers().includes(pid)) return true;
+  const code = S.pairCode;
+  if (!code || !code.c) return false;
+  if (typeof m.pc !== 'string' || m.pc !== code.c) return false;
+  if (Date.now() > code.exp) return false;
+  if (pid) rememberPeer(pid);
+  return true;
+}
 
 function pairLink() {
   const base = chosenBase();
+  const code = S.pairCode || newPairCode();
   const frag = new URLSearchParams({ k: S.channel.key, n: S.channel.name, r: 'viewer' });
   if (S.token) frag.set('t', S.token);
+  frag.set('c', code.c);
+  frag.set('e', String(Math.floor(code.exp / 1000)));
   return `${base}#${frag}`;
 }
 
@@ -560,12 +689,39 @@ function refreshPair() {
   }
 }
 
+// A Monitor left sitting on its pairing screen must never be showing a code
+// that stopped working while nobody was looking. The sheet counts the code
+// down out loud and mints a fresh one the moment it lapses.
+let pairTicker = null;
+function tickPairSheet() {
+  if (!el.pairExpiry || el.pair.hidden) return;
+  if (pairCodeLeft() <= 0) {
+    newPairCode();
+    refreshPair();
+    return;
+  }
+  const s = Math.ceil(pairCodeLeft() / 1000);
+  el.pairExpiry.textContent =
+    `This code works for another ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}. `
+    + 'A fresh one appears here when it runs out.';
+}
+
 function openPair() {
   // The native shell runs its own pairing screen.
   if (S.nativeShell) return;
   renderProfiles();
+  if (pairCodeLeft() <= 0) newPairCode();
   refreshPair();
   el.pair.hidden = false;
+  tickPairSheet();
+  clearInterval(pairTicker);
+  pairTicker = setInterval(tickPairSheet, 1000);
+}
+
+function closePair() {
+  el.pair.hidden = true;
+  clearInterval(pairTicker);
+  pairTicker = null;
 }
 
 el.pairProfile.addEventListener('change', () => {
@@ -583,7 +739,7 @@ el.pairCustom.addEventListener('input', () => {
   refreshPair();
 });
 
-$('#pair-close').addEventListener('click', () => { el.pair.hidden = true; });
+$('#pair-close').addEventListener('click', closePair);
 $('#pair-copy').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(pairLink());
@@ -626,7 +782,7 @@ async function openScanner() {
       if (found.length) {
         const ok = adopt(found[0].rawValue);
         if (ok) { S.scanStop(); return; }
-        el.scanHint.textContent = 'That code is not a Tawny pairing code.';
+        el.scanHint.textContent = lastPairError || 'That code is not a Tawny pairing code.';
       }
     } catch {}
     setTimeout(loop, 250);
@@ -646,9 +802,15 @@ $('#scan-close').addEventListener('click', () => S.scanStop?.());
 // this set can only ever be refused, so refuse the whole link now instead of
 // half-adopting a channel that will fail admission later.
 const TICKET_RE = /^[A-Za-z0-9_-]{8,64}$/;
+const PAIRCODE_RE = /^[A-Za-z0-9_-]{8,32}$/;
+
+// Why the last adopt() failed, when "that isn't a Tawny link" would be a lie.
+// Cleared on every attempt; read by the three callers for their own note.
+let lastPairError = null;
 
 // Import a pairing link. Returns true when it was a valid one.
 function adopt(raw) {
+  lastPairError = null;
   let hash;
   try { hash = new URL(raw, location.href).hash.slice(1); }
   catch { return false; }
@@ -662,6 +824,18 @@ function adopt(raw) {
     if (!TICKET_RE.test(token)) return false;
     S.token = token;
   }
+
+  // The code's own deadline. Checked here so a code that ran out is refused
+  // where the user is looking, in a sentence that tells them what to do —
+  // rather than dialling out and failing at the far end. The Monitor checks it
+  // again for real; this is only the fast, kind path.
+  const exp = Number(p.get('e'));
+  if (Number.isFinite(exp) && exp > 0 && Date.now() > exp * 1000) {
+    lastPairError = EXPIRED_MESSAGE;
+    return false;
+  }
+  const code = p.get('c');
+  S.pairSeen = code && PAIRCODE_RE.test(code) ? code : null;
 
   const list = getChannels();
   let ch = list.find((c) => c.key === key);
@@ -946,10 +1120,58 @@ function synthChime(ac, kind) {
 // Watcher's LAN IP) — nothing listens for an inbound connection. Media stays
 // peer-to-peer; the rendezvous never sees a frame or the channel key.
 
+const wsBase = (u) => (u ? String(u).replace(/^http/i, 'ws').replace(/\/+$/, '') : null);
+
+/**
+ * The relay to dial. This is the user's own when they have set one (the Servers
+ * screen behind the diagnostics hatch), otherwise the one this build ships
+ * with — and after a fallback it is whichever one is actually working.
+ */
 function rendezvousBase() {
-  const rv = S.cfg.rendezvous;
-  if (!rv) return null;
-  return rv.replace(/^http/i, 'ws').replace(/\/+$/, '');
+  return S.relayBase || wsBase(S.cfg.rendezvous);
+}
+
+/**
+ * The built-in tunnel, kept in reserve behind a custom relay.
+ *
+ * This is the whole safety net on the custom-server feature: a rendezvous URL
+ * typed into a settings field is exactly the kind of thing that is wrong, or
+ * right and then goes down at 3am, and a pet monitor that answers "watch from
+ * anywhere" with silence because of it is worse than one that quietly uses the
+ * default. Null when there is nothing to fall back to (no custom relay set, or
+ * a LAN-only build).
+ */
+const fallbackBase = () => wsBase(S.cfg.rendezvousFallback);
+
+// How long a custom relay gets to say `welcome` before it is treated as the
+// wrong address. It has already accepted the socket by then, so a dial counter
+// will never notice: pointing at a host that speaks WebSocket but not Tawny is
+// the failure that would otherwise hang forever.
+const RELAY_HELLO_MS = 8000;
+
+/**
+ * Give up on the user's relay and use the built-in one.
+ *
+ * Both ends apply the same rule, so a relay that is genuinely down sends the
+ * Monitor and every Handheld to the same place and they still meet. Only ever
+ * one way: the fallback is never traded back for the custom relay mid-session,
+ * because a flapping server would then cost a reconnection every time.
+ */
+function fallBackToDefault(entry, why) {
+  const fb = fallbackBase();
+  if (!fb || entry.usingFallback || entry.base === fb) return false;
+  diag(`custom relay unusable (${why}) — falling back to the built-in tunnel`);
+  toast('Your own server did not answer. Using Tawny’s relay instead.');
+  entry.usingFallback = true;
+  entry.base = fb;
+  entry.retry = 0;
+  entry.refused = 0;
+  entry.swapping = true;
+  S.relayBase = fb;
+  clearTimeout(S.iceTimer);
+  fetchIce();                       // TURN credentials come from the relay too
+  try { entry.ws?.close(); } catch {}
+  return true;
 }
 
 async function sha256hex(s) {
@@ -1203,16 +1425,27 @@ function openSignal(base, tag) {
   // socket opens. `refused` counts admissions the relay turned down, which
   // happen after the socket is open — so it needs its own counter, cleared only
   // by an actual welcome, or a Monitor bounced by a ghost would re-dial forever.
-  const entry = { tag, ws: null, retry: 0, refused: 0, dead: false };
+  // `base` lives on the entry rather than in the closure: a cloud transport
+  // pointed at a custom relay may swap it for the built-in tunnel mid-flight.
+  const entry = { tag, base, ws: null, retry: 0, refused: 0, dead: false };
   S.signals.push(entry);
+  // Only a custom cloud relay has anywhere to fall back to.
+  const canFallBack = () => tag === 'cloud' && !entry.usingFallback && !!fallbackBase();
   const dial = () => {
     if (entry.dead || S.closing) return;
-    diag(`dial ${tag} ${String(base || 'same-origin').replace(/^wss?:\/\//, '')} room=${S.roomId}`);
-    const ws = new WebSocket(wsURLFor(base));
+    diag(`dial ${tag} ${String(entry.base || 'same-origin').replace(/^wss?:\/\//, '')} room=${S.roomId}`);
+    const ws = new WebSocket(wsURLFor(entry.base));
     entry.ws = ws;
     ws.onopen = async () => {
       entry.retry = 0;
       diag(`${tag} open; hello role=${S.role} ticket=${S.token ? 'yes' : 'MISSING'}`);
+      // A host that accepts the socket and then says nothing is the classic
+      // "that is not a Tawny relay" — no dial ever fails, so nothing else here
+      // would ever notice.
+      clearTimeout(entry.helloTimer);
+      if (canFallBack()) {
+        entry.helloTimer = setTimeout(() => fallBackToDefault(entry, 'no welcome'), RELAY_HELLO_MS);
+      }
 
       // The LAN leg is plain ws:// on a shared Wi-Fi, so the raw ticket must
       // never go out on it — anyone sniffing the network would get the room id
@@ -1255,6 +1488,8 @@ function openSignal(base, tag) {
       // Membership traffic only — offer/answer/ice would drown the log.
       if (m.type === 'welcome') {
         entry.refused = 0;
+        clearTimeout(entry.helloTimer);   // this relay works; stop watching it
+        entry.helloTimer = null;
         diag(`${tag} welcome id=${m.id} peers=${(m.peers || []).length}`);
       }
       else if (m.type === 'peer-joined') diag(`${tag} peer-joined ${m.role || '?'} ${m.id}`);
@@ -1263,7 +1498,12 @@ function openSignal(base, tag) {
     };
     ws.onclose = (ev) => {
       diag(`${tag} close ${ev.code}${ev.reason ? ' "' + ev.reason + '"' : ''} retry=${entry.retry}`);
+      clearTimeout(entry.helloTimer);
+      entry.helloTimer = null;
       if (entry.dead || S.closing) return;
+
+      // We hung this socket up on purpose to move to the built-in tunnel.
+      if (entry.swapping) { entry.swapping = false; setTimeout(dial, 250); return; }
 
       // The relay handed this room to a device that proved the channel key —
       // the same pairing, on another phone. Terminal, but not a fault, and not
@@ -1311,13 +1551,24 @@ function openSignal(base, tag) {
         return bail(
           ev.code === 4003 ? FULL_MESSAGE
           : ev.code === 4004 ? 'This monitor is already running on another phone.'
-          : 'That code has expired. Show a fresh one on the other phone and scan it again.',
-          ev.code === 4003 ? 'full' : undefined
+          // 4008 is the relay's own refusal — a ticket that no longer matches
+          // the room. Different cause from the Monitor's pairing gate, same
+          // thing to do about it, so it gets the same sentence and the same
+          // screen in the native shell.
+          : EXPIRED_MESSAGE,
+          ev.code === 4003 ? 'full' : ev.code === 4008 ? 'expired' : undefined
         );
       }
 
       for (const p of [...S.peers.values()]) if (p.transport === entry) removePeer(p.id);
       updateStatus();
+
+      // Below the fatal codes on purpose: 4003/4004/4008 are a relay that is
+      // working and answering, and swapping it out for another would be the
+      // wrong response to a real refusal. What lands here is the relay not
+      // answering at all — a wrong address, a host that is down, a TLS
+      // failure. Two of those in a row is enough to tell it from a blip.
+      if (canFallBack() && entry.retry >= 1 && fallBackToDefault(entry, `close ${ev.code}`)) return;
 
       const wait = Math.min(1000 * 2 ** entry.retry++, 15000);
 
@@ -1347,6 +1598,8 @@ function openSignal(base, tag) {
 
 function closeSignal(entry) {
   entry.dead = true;
+  clearTimeout(entry.helloTimer);
+  entry.helloTimer = null;
   // ws.onclose bails on `entry.dead` before it reaches its own cleanup loop, so
   // closing a transport on purpose used to strand every peer that was riding
   // it: dead RTCPeerConnections stayed in S.peers, viewerCount() over-reported
@@ -1368,6 +1621,10 @@ function connectAll() {
   S.signals = [];
   S.committedTag = null;
   clearTimeout(S.raceTimer);
+  // Sticky for the session: once a custom relay has been given up on, a
+  // background/foreground cycle must not spend another eight seconds
+  // rediscovering that. start() clears it.
+  S.relayBase = S.relayBase || wsBase(S.cfg.rendezvous);
   const rv = rendezvousBase();
   if (S.role === 'station') {
     if (S.signalUrl) openSignal(S.signalUrl, 'lan');
@@ -1425,7 +1682,11 @@ function broadcast(obj) {
 // Short-lived TURN credentials, issued by the rendezvous per room. No secret
 // ships in the app; nothing is fetched at all on a LAN-only build.
 async function fetchIce() {
-  const rv = S.cfg.rendezvous;
+  // Whichever relay is actually in use — a custom one until it stops
+  // answering, the built-in tunnel after that. Asking a relay we have already
+  // abandoned for TURN credentials would leave the one call that genuinely
+  // needs a relay (both peers behind carrier NAT) with nowhere to go.
+  const rv = rendezvousBase() || S.cfg.rendezvous;
   if (!rv) { S.ice = []; return; }
   const httpBase = rv.replace(/^ws/i, 'http').replace(/\/+$/, '');
   try {
@@ -1696,7 +1957,7 @@ async function handle(m, entry) {
         // Browser Monitor: the pairing sheet closes only once the third phone
         // is on. Closing it at the first one is what made "add another phone"
         // feel like it had been taken away.
-        if (viewerCount() >= MAX_VIEWERS) el.pair.hidden = true;
+        if (viewerCount() >= MAX_VIEWERS) closePair();
         updatePeerChip();
         updateStatus();
       }
@@ -1712,6 +1973,16 @@ async function handle(m, entry) {
       if (S.role === 'station' && !S.peers.has(m.from) && viewerCount() >= MAX_VIEWERS) {
         diag(`offer refused: ${MAX_VIEWERS} viewers already`);
         refuseAsFull(m.from, entry);
+        return;
+      }
+      // The pairing gate. This is the only place a phone the Monitor has never
+      // seen becomes one it has, and it sits above ensurePeer/answerPeer —
+      // answerPeer attaches the live camera and microphone, so nothing may
+      // reach it on a code that has run out. Already-known phones (a `pid` the
+      // Monitor recorded when it first let them in) sail past.
+      if (S.role === 'station' && !S.peers.has(m.from) && !pairingAllowed(m)) {
+        diag(`offer refused: pairing code expired or never seen (${m.from})`);
+        sig({ type: 'bye', to: m.from, reason: 'expired' }, { transport: entry });
         return;
       }
       const p = ensurePeer(m.from, S.role === 'station' ? 'viewer' : 'station', entry);
@@ -1780,6 +2051,17 @@ async function handle(m, entry) {
     }
     case 'meta': {
       if (S.role !== 'viewer') break;
+      // Which way up the Monitor is holding its picture. Handled first and on
+      // its own: it rides the same message as the pause flag and the pet name,
+      // and either of those may `break` before the end.
+      if (typeof m.rot === 'number' && Number.isFinite(m.rot)) {
+        const rot = quarter(m.rot);
+        if (rot !== S.remoteRot) {
+          S.remoteRot = rot;
+          diag(`monitor orientation <- rotate ${rot}`);
+          applyRemoteRotation();
+        }
+      }
       // The Monitor lost its camera (its screen went off, or the app was
       // backgrounded). Say so, instead of leaving a frozen frame up.
       if (typeof m.paused === 'boolean') {
@@ -1867,6 +2149,9 @@ async function handle(m, entry) {
       // ordinary hang-up and must stay one — a plain `bye` ends the call, it
       // does not accuse the Monitor of being full.
       if (m.reason === 'full' && S.role === 'viewer') return bail(FULL_MESSAGE, 'full');
+      // Refused at the pairing gate: the code this phone arrived with is no
+      // longer the one the Monitor is showing. Say that, not "call ended".
+      if (m.reason === 'expired' && S.role === 'viewer') return bail(EXPIRED_MESSAGE, 'expired');
       removePeer(m.from);
       if (!S.peers.size) status(S.role === 'viewer' ? 'Call ended' : 'Waiting', null);
       break;
@@ -1876,8 +2161,13 @@ async function handle(m, entry) {
 // --------------------------------------------------------------- webrtc
 
 function iceServers() {
-  if (S.ice && S.ice.length) return S.ice;
-  return (S.cfg.stun || []).map((urls) => ({ urls }));
+  // A TURN server named on the Servers screen goes first and is never dropped:
+  // it is the one the user actually asked for. Whatever the rendezvous issues
+  // stays underneath it, so a custom entry that turns out to be wrong costs
+  // nothing — the built-in relay is still in the list.
+  const mine = Array.isArray(S.cfg.turn) ? S.cfg.turn : [];
+  if (S.ice && S.ice.length) return [...mine, ...S.ice];
+  return [...mine, ...(S.cfg.stun || []).map((urls) => ({ urls }))];
 }
 
 /** Push a newly-fetched ICE server list into connections that already exist. */
@@ -2013,6 +2303,7 @@ function featureVideo(peer, stream) {
   playSoon(el.remote);
   el.local.classList.remove('fill');   // our own camera → corner PiP
   el.local.hidden = false;
+  applyRotations();                    // the PiP is the far phone's camera, not ours
 }
 function unfeature(id) {
   if (S.featured !== id) return;
@@ -2021,6 +2312,7 @@ function unfeature(id) {
   el.remote.hidden = true;
   el.local.classList.add('fill');
   el.local.hidden = false;
+  applyRotations();
 }
 
 // Viewer side: open the connection to the Watcher.
@@ -2038,7 +2330,15 @@ async function makeOffer(peer, opts) {
   await peer.pc.setLocalDescription(offer);
   const msg = { type: 'offer', to: peer.id, sdp: peer.pc.localDescription.toJSON() };
   // The Handheld tags its offer with a short device name for the Monitor's rail.
-  if (S.role === 'viewer') msg.label = S.deviceLabel || shortDeviceLabel('');
+  if (S.role === 'viewer') {
+    msg.label = S.deviceLabel || shortDeviceLabel('');
+    // …and with what gets it past the pairing gate: the id this phone is known
+    // by once the Monitor has let it in, plus — the first time, or after the
+    // Monitor forgot it — the code the user actually scanned.
+    const pid = bondId();
+    if (pid) msg.pid = pid;
+    if (S.pairSeen) msg.pc = S.pairSeen;
+  }
   sig(msg, peer);
 }
 
@@ -2069,9 +2369,14 @@ async function answerPeer(peer, sdp) {
   if (S.role === 'station' && S.cameras.length > 1) {
     sig({ type: 'cameras', list: S.cameras.map((c) => ({ index: c.index, label: c.label })), zoomSupported: S.zoomHardware, to: peer.id }, peer);
   }
-  // Always sync the current pet name so the viewer's session card stays up to date.
-  if (S.role === 'station' && S.channel?.name) {
-    sig({ type: 'meta', petName: S.channel.name, to: peer.id }, peer);
+  // Always sync the current pet name so the viewer's session card stays up to
+  // date — and which way up this phone is holding the picture, so a Handheld
+  // joining a Monitor that is already lying on its side sees the room the right
+  // way round from its first frame rather than after the next turn.
+  if (S.role === 'station') {
+    const meta = { type: 'meta', rot: S.rot, to: peer.id };
+    if (S.channel?.name) meta.petName = S.channel.name;
+    sig(meta, peer);
   }
   // And the light: a Viewer joining a session where the room is already lit
   // must show a lit key, not an "off" one over an obviously lit picture.
@@ -2610,6 +2915,7 @@ function initPinch() {
 function bail(msg, reason) {
   diag(`bail: ${msg}`);
   S.closing = true;
+  closePair();
   closeAllSignals();
   S.local?.getTracks().forEach((t) => t.stop());
   teardownAll();
@@ -2658,6 +2964,11 @@ async function start(role) {
   if (!S.channel) return;
   S.role = role;
   S.pending = null;
+  // A Monitor is never without a live pairing code: pairingAllowed() fails
+  // closed on a missing one, so a station that reached here without a code
+  // from the shell would refuse every phone rather than let one in.
+  if (role === 'station' && pairCodeLeft() <= 0) newPairCode();
+  S.relayBase = null;   // a new session gives the user's own relay a fresh try
   S.roomId = await roomIdFor(S.channel.key);
   diag(`start role=${role} room=${S.roomId} lan=${S.signalUrl || '-'} ` +
     `rv=${rendezvousBase() || 'NONE'} ticket=${S.token ? 'yes' : 'MISSING'}`);
@@ -2702,6 +3013,11 @@ async function start(role) {
     if (!androidNative) preloadChimes();
   }
 
+  // A fresh session knows nothing about the far phone's orientation until it
+  // says so; a leftover from the last one would turn the first frame wrongly.
+  S.remoteRot = 0;
+  applyRemoteRotation();
+
   el.remote.srcObject = null;
   el.remoteAudio.srcObject = null;
   el.remote.hidden = true;
@@ -2725,6 +3041,7 @@ async function start(role) {
     keepAwake();
     watchBrowserBattery();            // native shell drives window.tawnyBattery instead
     lastCaptureWide = screenIsWide(); // getUserMedia above already matched this
+    applyOwnRotation();               // the shell may already have reported a turn
   } else {
     for (const t of S.local.getAudioTracks()) t.enabled = false; // push-to-talk
     el.cViewer.hidden = false;
@@ -2847,6 +3164,7 @@ async function keepAwake() {
 
 function hangUp() {
   S.closing = true;
+  closePair();     // stop the pairing sheet's countdown minting codes at nobody
   setDim(false);   // never leave the live screen with the backlight pinned down
   // ...and never walk away from a phone with its light still burning. Stopping
   // the tracks below releases the camera and drops the torch with it; this is
@@ -2967,10 +3285,19 @@ $('#btn-cam').addEventListener('click', async () => {
 $('#btn-snap').addEventListener('click', () => {
   const v = el.remote;
   if (!v.videoWidth) return toast('Nothing to capture yet.');
+  // A snapshot must come out the way the picture looked on screen. The frame
+  // itself is turned to the Monitor's *window*, so a Monitor whose window is
+  // pinned while the phone lies on its side sends a sideways frame that the
+  // stage is correcting with a rotation — put the same turn in the PNG.
+  const rot = S.role === 'viewer' ? quarter(S.remoteRot) : 0;
+  const odd = rot === 90 || rot === 270;
   const c = document.createElement('canvas');
-  c.width = v.videoWidth;
-  c.height = v.videoHeight;
-  c.getContext('2d').drawImage(v, 0, 0);
+  c.width = odd ? v.videoHeight : v.videoWidth;
+  c.height = odd ? v.videoWidth : v.videoHeight;
+  const ctx = c.getContext('2d');
+  ctx.translate(c.width / 2, c.height / 2);
+  if (rot) ctx.rotate(rot * Math.PI / 180);
+  ctx.drawImage(v, -v.videoWidth / 2, -v.videoHeight / 2);
   const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
   const name = `tawny-${stamp}.png`;
 
@@ -3182,6 +3509,29 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
   }
   S.signalUrl = signalUrl || null;              // may be null on a cloud-only pairing
   if (rendezvousUrl) S.cfg.rendezvous = rendezvousUrl;
+  // The Servers screen (behind the diagnostics hatch). `fallback` is the
+  // built-in tunnel, sent only when the user has named a relay of their own —
+  // it is what fallBackToDefault() drops back to.
+  const srv = opts && opts.servers;
+  if (srv && typeof srv === 'object') {
+    if (typeof srv.fallback === 'string' && srv.fallback) S.cfg.rendezvousFallback = srv.fallback;
+    if (Array.isArray(srv.stun) && srv.stun.length) {
+      // Kept under its own name as well: init()'s config.json read runs *after*
+      // this (it is behind an await) and rebuilds S.cfg, so a plain `stun`
+      // would be quietly replaced by the build's list a moment later.
+      S.cfg.stunCustom = srv.stun.filter((u) => typeof u === 'string');
+      S.cfg.stun = S.cfg.stunCustom;
+    }
+    if (Array.isArray(srv.turn) && srv.turn.length) S.cfg.turn = srv.turn;
+  }
+  // The shell draws the QR, so the shell owns the pairing code. On a Monitor
+  // that is the code on screen plus the deadline it is counting down; on a
+  // Handheld it is the code the user scanned, presented once to get in.
+  const pc = opts && typeof opts.pairCode === 'string' ? opts.pairCode : null;
+  if (pc && PAIRCODE_RE.test(pc)) {
+    if (role === 'station') S.pairCode = { c: pc, exp: Number(opts.pairExp) || (Date.now() + PAIR_TTL_MS) };
+    else S.pairSeen = pc;
+  }
   if (token) {
     if (!TICKET_RE.test(token)) return false;   // same guard as adopt()
     S.token = token;
@@ -3206,6 +3556,18 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
   return true;
 };
 
+/**
+ * The shell rotated the pairing code on its overlay — take the new one as the
+ * only code that now admits a phone. Called from the countdown in
+ * MainActivity's pairing sheet; a no-op anywhere else.
+ */
+window.tawnyPairCode = function (code, expMs) {
+  if (S.role !== 'station' || typeof code !== 'string' || !PAIRCODE_RE.test(code)) return false;
+  S.pairCode = { c: code, exp: Number(expMs) || (Date.now() + PAIR_TTL_MS) };
+  diag(`pairing code rotated — ${Math.round(pairCodeLeft() / 1000)}s left`);
+  return true;
+};
+
 (async function init() {
   if ('BarcodeDetector' in window) el.chScan.hidden = false;
   initThemeToggle();
@@ -3222,10 +3584,17 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
     if (r.ok) {
       const j = await r.json();
       S.cfg = {
-        stun: Array.isArray(j.stun) ? j.stun : [],
+        // A shell value wins over the build's, here as for the rendezvous:
+        // this rebuild runs *after* tawnyStart() and would otherwise put the
+        // build's STUN list back over the user's.
+        stunCustom: S.cfg.stunCustom,
+        stun: S.cfg.stunCustom?.length ? S.cfg.stunCustom
+          : (Array.isArray(j.stun) ? j.stun : []),
         turnMode: j.turnMode || S.cfg.turnMode || 'auto',
         rendezvous: S.cfg.rendezvous || j.rendezvous || '',   // shell value wins
-        authRequired: !!j.authRequired
+        authRequired: !!j.authRequired,
+        rendezvousFallback: S.cfg.rendezvousFallback,
+        turn: S.cfg.turn
       };
     }
   } catch {}
@@ -3240,7 +3609,7 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
     // Clear the key out of the address bar before anything else can see it.
     history.replaceState(null, '', location.pathname + location.search);
     if (adopt(raw)) landed = true;            // adopt() shows the join screen
-    else note(el.chNote, 'That pairing link was not valid.');
+    else note(el.chNote, lastPairError || 'That pairing link was not valid.');
   }
 
   if (!landed) {
@@ -3284,12 +3653,115 @@ function reopenAfterRestore() {
 }
 
 // ----------------------------------------------------------- orientation
+//
+// Two halves, and only one of them existed before.
+//
+// **Shape.** When the Monitor is turned, ask the camera for a frame shaped to
+// the new orientation, so a phone laid on its side sends a genuinely wide
+// picture (and an upright one a tall picture) — not a fixed shape with the room
+// letterboxed into it. That is reshapeCapture() below, and it follows the
+// *window*, which is right: getUserMedia hands us frames already turned to
+// whatever way up the window is.
+//
+// **Which way is up.** The window is not always the phone. With auto-rotate off
+// — a rotation lock, or just the Samsung default on a handset that has been
+// propped on a shelf for hours — the Activity stays portrait however the phone
+// is physically lying, so the window never moves, `screen.orientation` never
+// changes, and Chromium keeps delivering frames turned to a portrait window.
+// A Monitor on its side then sends a picture of a room lying on *its* side, and
+// nothing at either end could tell, because nothing at either end could see
+// past the window. That is the gap this fills.
+//
+// The native shell watches the accelerometer and reports two angles, both in
+// degrees clockwise from the phone's natural orientation: how the phone is
+// actually being held, and how far the window believes it has turned. The
+// difference is how far the delivered frame is off from the world, and it is
+// the same four values on both ends:
+//
+//     correction = (windowCW - deviceCW + 360) % 360
+//
+// Auto-rotate on: the two track each other, the correction is 0, and this is
+// exactly the behaviour that shipped before. Auto-rotate off: the window is
+// pinned, the correction is the whole of the phone's turn, and the picture is
+// put right — on the Monitor's own preview, and on every Viewer, because the
+// Monitor publishes the number in the `meta` message it already sends.
+//
+// In a plain browser there is no accelerometer reading to be had (the shell is
+// the only source), so the correction stays 0 and nothing changes.
+//
+// Note the *capture* shape still follows the window and not the phone, and that
+// is not an oversight: after a quarter-turn correction the displayed picture is
+// wide exactly when the window was tall. windowIsWide XOR oddCorrection is
+// physicalIsWide, by construction.
 
-// Station: when the Monitor is turned, ask the camera for a frame shaped to the
-// new orientation, so a phone laid on its side sends a genuinely wide picture
-// (and an upright one a tall picture) — not a fixed shape with the room rotated
-// or letterboxed into it. Debounced, only when the orientation actually flips,
-// and a no-op off the Monitor or before a track exists.
+// A phone is held one of four ways; anything between is on its way to one of
+// them. Everything here snaps to a quarter turn.
+const quarter = (deg) => ((Math.round(Number(deg) / 90) * 90) % 360 + 360) % 360;
+
+/**
+ * Turn a stage video so the room is the way up the sending phone is held.
+ *
+ * A quarter turn also has to swap the element's box. `object-fit: contain` fits
+ * the picture into the box it is *given*, and then the rotation happens — so a
+ * stage-shaped box turned 90° lands a picture wider than the stage, which
+ * `overflow: hidden` then crops. Cropping the live picture is the one thing
+ * this app does not do (see the `contain` note above `start()`), so for the odd
+ * quarters the element is sized to the stage transposed and re-centred, and the
+ * fit is computed against the space the picture will actually occupy.
+ */
+function applyRotation(v, deg) {
+  if (!v) return;
+  const q = quarter(deg);
+  const odd = q === 90 || q === 270;
+  v.style.setProperty('--rot', `${q}deg`);
+  if (odd) {
+    const stage = v.parentElement;
+    v.style.setProperty('--rot-w', `${stage?.clientHeight || 0}px`);
+    v.style.setProperty('--rot-h', `${stage?.clientWidth || 0}px`);
+  } else {
+    v.style.removeProperty('--rot-w');
+    v.style.removeProperty('--rot-h');
+  }
+  v.classList.toggle('rot', q !== 0);
+  v.classList.toggle('rot-q', odd);
+}
+
+/**
+ * The Monitor's own full-frame preview. Never the corner PiP: that is the far
+ * phone's talk-back camera, which is not ours to turn.
+ */
+function applyOwnRotation() {
+  const own = S.role === 'station' && el.local.classList.contains('fill');
+  applyRotation(el.local, own ? S.rot : 0);
+}
+
+/** The picture from the Monitor, turned by whatever the Monitor last said. */
+function applyRemoteRotation() {
+  applyRotation(el.remote, S.role === 'viewer' ? S.remoteRot : 0);
+}
+
+function applyRotations() { applyOwnRotation(); applyRemoteRotation(); }
+
+/** Monitor: tell every Handheld which way up its picture is. */
+function broadcastOrientation() {
+  if (S.role !== 'station') return;
+  broadcast({ type: 'meta', rot: S.rot });
+}
+
+/**
+ * The native shell's reading. Both angles are degrees clockwise from the
+ * phone's natural orientation; see the note at the top of this section.
+ */
+window.tawnyOrientation = function (deviceCW, windowCW) {
+  const rot = quarter(Number(windowCW || 0) - Number(deviceCW || 0));
+  if (rot === S.rot) return false;
+  S.rot = rot;
+  diag(`orientation device=${deviceCW} window=${windowCW} → rotate ${rot}`);
+  applyOwnRotation();
+  broadcastOrientation();
+  return true;
+};
+
 let reshapeTimer = null;
 let lastCaptureWide = null;
 function reshapeCapture() {
@@ -3309,5 +3781,15 @@ function reshapeCapture() {
   }, 350);
 }
 for (const ev of ['resize', 'orientationchange']) {
-  window.addEventListener(ev, reshapeCapture);
+  window.addEventListener(ev, () => {
+    reshapeCapture();
+    // The stage changed shape, so a quarter-turned video's transposed box has
+    // to be measured again.
+    applyRotations();
+  });
 }
+// A `resize` on the <video> is the far phone turning, or the bitrate ladder
+// stepping resolution. Either way the box the picture is fitted into may need
+// re-measuring.
+el.remote.addEventListener('resize', applyRemoteRotation);
+el.local.addEventListener('resize', applyOwnRotation);

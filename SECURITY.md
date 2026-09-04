@@ -29,18 +29,64 @@ The key never leaves the device. Every relay is told only
 cannot be reversed to the key or the name, and cannot be enumerated.
 
 Pairing carries the key in a QR / `tawny://pair` link:
-`tawny://pair?k=<key>&n=<name>&h=<lan-ip:port>&t=<ticket>`.
+`tawny://pair?k=<key>&n=<name>&h=<lan-ip:port>&t=<ticket>&c=<code>&e=<expiry>`.
 
 - `h` is the Monitor's home-LAN address. `parsePairing` accepts it **only** if it
   is an RFC1918 / link-local address; a public IP in a pairing link is dropped
   (and, if that leaves nothing to dial, the link is rejected). `h` is omitted
   entirely when the Monitor has no Wi-Fi.
-- `t` is a short per-pairing **admission ticket** for the rendezvous (below).
+- `t` is a long-lived **admission ticket** for the rendezvous (below). It is a
+  different thing from `c`, with a different life.
+- `c` and `e` are the pairing code and its deadline — see the next section.
 - The **in-app scanner** joins immediately — the user aimed the camera on
   purpose. Any **externally-supplied** link (`ACTION_VIEW`, exported + BROWSABLE
   intent-filter) is gated by a "Connect to '<name>'?" dialog that names the
   target and its address and warns when it would replace an existing pairing.
   `handlePairLink` never acts silently.
+
+## Pairing codes expire after ten minutes
+
+A pairing code is a bearer credential: whoever photographs the QR, or is
+forwarded the link out of a chat app, holds the channel key. Ten minutes is how
+long that credential may be used to **pair a new phone**. It is not a session
+timeout — a phone that finished pairing inside the window keeps working
+afterwards, indefinitely, and is never asked to re-pair.
+
+The awkward part of the rule is where it can possibly be enforced. Not by the
+bearer: the scanning phone can lie about its clock, or simply be an older build.
+Not by the relay either: an expired code hands a relay the same room id and the
+same admission ticket as a fresh one, so there is nothing there to tell them
+apart. The one party that knows when a code went on screen is the **Monitor** —
+and it is also the party that owns the camera and answers every offer, on the
+LAN and through the rendezvous alike. So:
+
+- every code carries a random `c` and its deadline `e`;
+- the Monitor holds `c` and rotates it every ten minutes **by its own clock**,
+  redrawing the QR in place and telling the page (`window.tawnyPairCode`) which
+  code now counts. The pairing sheet shows the remaining time in words, so a
+  Monitor left sitting on that screen is never displaying a dead code;
+- a phone the Monitor has never admitted must present the `c` the Monitor is
+  showing *now*, in its `offer`, before `answerPeer` attaches a single track.
+  Anything else — no code, a previous code, a code past its deadline, no code on
+  the Monitor at all — is refused with `bye {reason:'expired'}`;
+- a phone the Monitor **has** admitted is remembered by a 128-bit `pid` the
+  phone minted for itself (`tawny.bond.<channel>`, per channel, never derived
+  from anything identifying, sent only to the paired Monitor). At most 8 are
+  remembered per channel, and the list is dropped when the channel is deleted.
+
+`e` in the link is a courtesy, not the enforcement: it lets the scanning phone
+say "this code expired, get a fresh one" immediately rather than dialling into a
+refusal, and the native shell shows the same screen whether the refusal came
+from that pre-flight check or from the Monitor. Lying about it buys nothing.
+
+**Stated plainly:** this bounds who can *newly pair*, not what a leaked key can
+eventually reach. Someone who photographs a live code and uses it inside those
+ten minutes is paired for good — as they are today — and someone who holds the
+key can still compute the room id and the ticket. Rotating a channel's key,
+which is what would actually revoke a leak, still means re-pairing every phone
+and is not what this does. What it removes is the standing risk of an old QR
+photograph, a screenshot in a chat thread, or a printed code on a fridge staying
+live for the life of the channel.
 
 ## Signaling admission — the `hello` handshake
 
@@ -135,10 +181,13 @@ UID boundary, so any other app on the device with `INTERNET` can reach it.
   from leaving the device. The relay origin is not known at build time, so
   `AssetHttpServer` is told it (`ws://127.0.0.1:<port>` on the Monitor,
   `ws://<monitor-lan-ip>:<port>` on a Handheld) before the page is served, and
-  names it verbatim. The page's own `<meta>` CSP carries a placeholder that is
-  substituted with the same list at serve time, so the two cannot drift; served
-  unsubstituted it is an unknown source expression, which matches nothing and
-  fails closed;
+  names it verbatim. The rendezvous side stays a **list**, never a wildcard —
+  the build's own host, plus one an advanced user has set on the Servers screen,
+  so a custom relay not on that list is blocked before it ever gets a socket and
+  `AssetHttpServer` is rebuilt whenever the list changes. The page's own `<meta>`
+  CSP carries a placeholder that is substituted with the same source list at
+  serve time, so the two cannot drift; served unsubstituted it is an unknown
+  source expression, which matches nothing and fails closed;
 - `onPermissionRequest` grants camera/mic capture only for that host **and**
   only what the OS has already granted the app; `shouldOverrideUrlLoading` /
   `setDownloadListener` pass only `http(s)` to `ACTION_VIEW` (`intent://`,
@@ -201,10 +250,13 @@ after-the-fact alarm, not a gate.
   channel, so a swap on a later reconnect — or against a new outside phone on an
   already-vouched channel — is not surfaced unless the code cannot be computed at
   all. This is the softest point of the remote path.
-- **Pairing codes are bearer credentials.** Anyone who photographs the QR or gets
-  the copied link out of a chat app has access to that channel until it is
-  deleted and every device re-paired. No per-Viewer revocation; the rendezvous
-  ticket's 24 h expiry is the only automatic limit.
+- **Pairing codes are bearer credentials, for ten minutes.** A code now stops
+  admitting new phones ten minutes after the Monitor shows it (above), so an old
+  photograph of a QR or a link left in a chat thread no longer pairs. Inside
+  that window it still does: anyone who catches a *live* code is paired for good,
+  because the channel key travels in it. There is still no per-Viewer
+  revocation, and deleting the channel and re-pairing every phone is still the
+  only way to undo a leak.
 - **The channel key lives in `localStorage`** (WebView DOM storage) and app
   prefs, unencrypted at rest. The CSP makes script injection hard but not
   impossible; the key is still readable by anyone with the unlocked device.
@@ -217,6 +269,17 @@ after-the-fact alarm, not a gate.
 - **Rendezvous rate-limit / ticket state is in memory** (Node reference) or per
   Durable Object (Cloudflare) / per isolate (Deno — pin one region). A restart
   clears the Node one.
+- **A custom relay is another operator in the threat model.** The Servers screen
+  (behind the diagnostics hatch) lets an advanced user point the app at their
+  own rendezvous and TURN. Whoever runs that service gets exactly what the
+  operator of the built-in one gets, and no more: the opaque room id, the
+  admission ticket, and the ability to attempt a certificate swap that the SAS
+  is there to catch. It never sees the channel key or a video frame. Two
+  practical notes: `ws://` is accepted for a relay on your own network and the
+  save warns that the signalling is then readable on the path (the media stays
+  DTLS-SRTP either way), and the relay is *preferred*, not substituted — if it
+  will not answer, the session falls back to the built-in tunnel rather than
+  losing the remote path — an availability choice, not a security one.
 - **Node/Deno `server.js` can be run without tickets** (`REQUIRE_TICKET=off`) for
   a LAN-style self-host; in that mode any viewer with the room id is admitted.
 - **No audit log** of who joined when, and no alert on a new device pairing.

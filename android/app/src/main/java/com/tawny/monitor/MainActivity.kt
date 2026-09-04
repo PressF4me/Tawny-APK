@@ -18,6 +18,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.hardware.SensorManager
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
@@ -37,6 +38,8 @@ import android.view.GestureDetector
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
+import android.view.OrientationEventListener
+import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -510,6 +513,7 @@ class MainActivity : AppCompatActivity() {
             "handheld" -> showHandheldHome()
             "offline" -> showMonitorOffline()
             "diag" -> showDiagnostics()
+            "servers" -> showServers()
             "about" -> showAbout()
             "lntip" -> showLightningTip()
             // Only if there is still something to list, else fall through to the
@@ -633,6 +637,9 @@ class MainActivity : AppCompatActivity() {
 
     /** "Connect to this monitor?" — the gate on every externally supplied link. */
     private fun confirmPairing(p: Pairing) {
+        // Say "expired" before "connect to this?" — asking someone to approve a
+        // link that cannot work is a worse dialog than the one that explains.
+        if (p.expired) { pairingExpired(); return }
         val paired = prefs.getString("channelKey", null)
         val replacing = !paired.isNullOrBlank() && paired != p.key
         // Deliberately not the host:port. The address is meaningless to the
@@ -654,18 +661,47 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * The single funnel every pairing goes through — the in-app scanner, a
+     * pasted link and an external `tawny://pair` intent alike. The expiry check
+     * lives here rather than in each caller so a new way in cannot skip it.
+     */
     private fun joinAsHandheld(p: Pairing) {
         stopScanner()
+        if (p.expired) { pairingExpired(); return }
         Diag.log("shell", "pair accepted name=\"${p.name}\" lan=${p.signal ?: "-"} " +
-            "ticket=${if (p.token.isNullOrBlank()) "MISSING" else "yes"}")
+            "ticket=${if (p.token.isNullOrBlank()) "MISSING" else "yes"} " +
+            "code=${if (p.code == null) "none" else "yes"}")
         prefs.edit()
             .apply { if (p.signal != null) putString("signalUrl", p.signal) else remove("signalUrl") }
             .apply { if (p.token != null) putString("pairToken", p.token) else remove("pairToken") }
+            .apply { if (p.code != null) putString("pairCode", p.code) else remove("pairCode") }
             .putString("channelKey", p.key)
             .putString("channelName", p.name)
             .putString("role", "viewer")
             .apply()
         goLive("viewer")
+    }
+
+    /**
+     * A code that ran out, said the same way wherever it was noticed — this
+     * phone's own check on the scanned link, or the Monitor turning the offer
+     * away over LAN or the relay (Bridge "error", reason `expired`).
+     */
+    private fun pairingExpired() {
+        Diag.log("shell", "pairing refused — code expired")
+        stopScanner()
+        themedDialog(
+            title = "That code has expired",
+            body = "Pairing codes stop working ten minutes after the monitor phone " +
+                "shows them, so an old photo of one cannot be used later.\n\n" +
+                "On the monitor phone, go back to its pairing screen — it shows a " +
+                "fresh code — and scan that one.",
+            primaryLabel = "Scan again",
+            onPrimary = { onHandheld() },
+            secondaryLabel = "Not now",
+            onSecondary = { showRole() }
+        )
     }
 
     /** Manual fallback when the camera can't get a clean read. */
@@ -781,9 +817,13 @@ class MainActivity : AppCompatActivity() {
         playScene?.stop(); playScene = null
         scannerStop?.invoke(); scannerStop = null
         swipeNav(null, null)
+        stopPairCountdown()
+        stopOrientationWatch()   // only the live WebView has anything to tell
         (pairOverlay?.parent as? ViewGroup)?.removeView(pairOverlay)
         pairOverlay = null
         pairStatus = null
+        pairCountdown = null
+        pairQrView = null
         removePairChip()
         pairOverlayHidden = false
         viewersNow = 0                 // a new screen knows about nobody
@@ -1360,7 +1400,167 @@ class MainActivity : AppCompatActivity() {
                 secondaryLabel = "Keep it"
             )
         })
+        // The other thing behind this hatch. Same reasoning as the hatch
+        // itself: a support surface, not a feature.
+        outer.addView(link(
+            if (customRendezvous().isNotBlank()) "Servers — using your own"
+            else "Servers (advanced)"
+        ) { showServers() })
         root.addView(outer)
+    }
+
+    /**
+     * Point Tawny at your own rendezvous / TURN, at runtime.
+     *
+     * `tawny.rendezvousUrl` in `local.properties` has always existed, but it is
+     * a build-time property — so the only person who could use their own relay
+     * was whoever compiled the APK. Everyone who installs the app had no way at
+     * all, which for a project whose whole pitch is "your video does not go
+     * through anybody's cloud" is the wrong way round.
+     *
+     * Nothing here can take the remote path down. A custom relay is *preferred*,
+     * never substituted: if it does not answer, the page falls back to the
+     * built-in tunnel and says so (see openSignal/fetchIce in public/app.js).
+     * Blank fields mean "use the defaults", which is also the reset.
+     */
+    private fun showServers() {
+        clearScreen()
+        screen = "servers"
+        swipeNav(back = { showDiagnostics() }, forward = null)
+
+        val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+        val col = column(scroll = true)
+        col.addView(backLink { showDiagnostics() })
+        col.addView(heading("Servers", "For running Tawny on your own infrastructure."))
+        col.addView(aboutBody(
+            "On your own Wi-Fi none of this is used: the monitor phone carries " +
+                "the session itself and nothing leaves the house. These apply to " +
+                "watching from somewhere else, which needs a small always-on " +
+                "service to introduce the two phones — and, when neither can be " +
+                "reached directly, a TURN relay to forward the (still encrypted) " +
+                "media. Deploy steps are in rendezvous/README.md.\n\n" +
+                "Leave a field empty to use Tawny's own. If your relay cannot be " +
+                "reached, the app falls back to Tawny's rather than failing — a " +
+                "wrong address here costs a few seconds, not a working app."
+        ))
+
+        fun field(label: String, hint: String, key: String, password: Boolean = false): EditText {
+            col.addView(TextView(this).apply {
+                text = label
+                setTextColor(Hue.DIM)
+                textSize = Type.LABEL
+                letterSpacing = 0.1f
+                typeface = uiFontSemi
+                layoutParams = lp(topMargin = 20)
+            })
+            val input = EditText(this).apply {
+                this.hint = hint
+                inputType = if (password)
+                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                else
+                    InputType.TYPE_TEXT_VARIATION_URI
+                setSingleLine()
+                setTextColor(Hue.TEXT)
+                setHintTextColor(Hue.DIM)
+                typeface = uiFont
+                textSize = Type.BODY
+                background = roundRect(Hue.BG, Hue.LINE)
+                setPadding(dp(14), dp(13), dp(14), dp(13))
+                minHeight = dp(48)
+                layoutParams = lp(topMargin = 6)
+                setText(prefs.getString(key, ""))
+            }
+            col.addView(input)
+            return input
+        }
+
+        val rvIn = field("Rendezvous", "wss://relay.example.net", PREF_RENDEZVOUS)
+        val stunIn = field("STUN (comma separated)", "stun:stun.example.net:3478", PREF_STUN)
+        val turnIn = field("TURN (comma separated)", "turns:turn.example.net:5349", PREF_TURN)
+        val userIn = field("TURN username", "", PREF_TURN_USER)
+        val passIn = field("TURN password", "", PREF_TURN_PASS, password = true)
+
+        val note = TextView(this).apply {
+            setTextColor(Hue.DIM)
+            textSize = 12.5f
+            typeface = uiFont
+            setLineSpacing(0f, 1.35f)
+            layoutParams = lp(topMargin = 14)
+            text = if (customRendezvous().isNotBlank())
+                "Now using your rendezvous. Tawny's stays as the fallback."
+            else "Using Tawny's rendezvous" +
+                (if (BuildConfig.RENDEZVOUS_URL.isBlank()) " — none in this build (LAN only)." else ".")
+        }
+        col.addView(note)
+
+        col.addView(primary("Save") {
+            val rv = rvIn.text.toString().trim()
+            val bad = buildString {
+                if (rv.isNotBlank() && !RELAY_URL_RE.matches(rv))
+                    append("The rendezvous address must start with wss:// (or ws:// on your own LAN).\n\n")
+                val stunBad = stunIn.text.toString().split(',').map { it.trim() }
+                    .filter { it.isNotEmpty() && !STUN_URL_RE.matches(it) }
+                if (stunBad.isNotEmpty())
+                    append("STUN addresses must start with stun: or stuns: — check ${stunBad.first()}.\n\n")
+                val turnBad = turnIn.text.toString().split(',').map { it.trim() }
+                    .filter { it.isNotEmpty() && !TURN_URL_RE.matches(it) }
+                if (turnBad.isNotEmpty())
+                    append("TURN addresses must start with turn: or turns: — check ${turnBad.first()}.")
+            }.trim()
+            if (bad.isNotEmpty()) {
+                themedDialog(
+                    title = "Check that address",
+                    body = bad,
+                    primaryLabel = "Back", onPrimary = {}
+                )
+                return@primary
+            }
+            prefs.edit()
+                .putString(PREF_RENDEZVOUS, rv)
+                .putString(PREF_STUN, stunIn.text.toString().trim())
+                .putString(PREF_TURN, turnIn.text.toString().trim())
+                .putString(PREF_TURN_USER, userIn.text.toString().trim())
+                .putString(PREF_TURN_PASS, passIn.text.toString())
+                .apply()
+            Diag.log("shell", "servers saved rv=${rv.ifBlank { "default" }}")
+            // The asset server bakes the allowed relay hosts into its CSP, and
+            // the live page has already read the old settings — so both are
+            // rebuilt on the next session rather than patched underneath one.
+            stopServers()
+            if (rv.isNotBlank() && rv.startsWith("ws://")) {
+                themedDialog(
+                    title = "Saved — one warning",
+                    body = "ws:// is not encrypted. It is fine for a relay on your own " +
+                        "network, but over the internet anyone on the path can read the " +
+                        "signalling. (Your video and sound stay encrypted either way.)\n\n" +
+                        "Takes effect on the next session.",
+                    primaryLabel = "OK", onPrimary = { showDiagnostics() }
+                )
+            } else {
+                toast("Saved — takes effect on the next session")
+                showDiagnostics()
+            }
+        })
+        col.addView(link("Use Tawny's servers") {
+            themedDialog(
+                title = "Back to Tawny's servers?",
+                body = "Your addresses are cleared from this phone.",
+                primaryLabel = "Clear",
+                onPrimary = {
+                    prefs.edit()
+                        .remove(PREF_RENDEZVOUS).remove(PREF_STUN).remove(PREF_TURN)
+                        .remove(PREF_TURN_USER).remove(PREF_TURN_PASS)
+                        .apply()
+                    stopServers()
+                    toast("Back to Tawny's servers")
+                    showServers()
+                },
+                secondaryLabel = "Keep them"
+            )
+        })
+        col.addView(gap(16))
+        scroll.addView(col)
+        root.addView(scroll)
     }
 
     /**
@@ -1555,6 +1755,7 @@ class MainActivity : AppCompatActivity() {
     private fun hidePairOverlay() {
         pairOverlayHidden = true
         pairOverlay?.visibility = View.GONE
+        stopPairCountdown()
         syncPairChip()
         refreshSystemBars()
     }
@@ -1564,6 +1765,10 @@ class MainActivity : AppCompatActivity() {
         removePairChip()
         pairStatus?.text = pairSheetStatus().uppercase()
         pairOverlay?.visibility = View.VISIBLE
+        // Coming back to the sheet after a while: whatever is drawn on it may
+        // have lapsed while nobody was looking. The tick below notices on its
+        // first run and mints a fresh one.
+        startPairCountdown()
         refreshSystemBars()
     }
 
@@ -2580,6 +2785,7 @@ class MainActivity : AppCompatActivity() {
                             .putString("channelName", name)
                             .remove("myToken")        // fresh channel → fresh admission ticket
                             .apply()
+                        pairCode = null               // …and a fresh pairing code with it
                         startWatcher(ip)
                     }
                 } else {
@@ -2905,27 +3111,146 @@ class MainActivity : AppCompatActivity() {
 
     private fun newKey() = randToken(16)
 
-    /** Whether this build can reach a Handheld off the LAN. */
-    private val hasRendezvous get() = BuildConfig.RENDEZVOUS_URL.isNotBlank()
+    // ------------------------------------------------- servers (advanced)
+    //
+    // `tawny.rendezvousUrl` in local.properties is a *build-time* setting, so
+    // the only person who could ever point Tawny at their own relay was
+    // whoever compiled the APK. Someone who installs from Play — which is
+    // everyone — had no way at all. These five prefs are the runtime version.
+    //
+    // Deliberately behind the diagnostics hatch rather than in About: it is a
+    // support surface, not a feature, and a normal user has no business being
+    // shown a WebSocket URL field.
+    //
+    // The built-in relay is never *replaced*, only preferred against: a custom
+    // rendezvous that cannot be reached hands the session back to the default
+    // tunnel rather than taking the remote path down with it (the fallback
+    // lives in openSignal()/fetchIce() in public/app.js, because that is where
+    // the failure is visible). A bad URL typed in here costs a few seconds, not
+    // a working app.
+
+    private val PREF_RENDEZVOUS = "srvRendezvous"
+    private val PREF_STUN = "srvStun"
+    private val PREF_TURN = "srvTurn"
+    private val PREF_TURN_USER = "srvTurnUser"
+    private val PREF_TURN_PASS = "srvTurnPass"
+
+    /** `wss://host[:port][/path]` — or `ws://` for a relay on your own LAN. */
+    private val RELAY_URL_RE = Regex("^wss?://[A-Za-z0-9._~%\\-]+(:\\d{1,5})?(/[^\\s?#]*)?$")
+    private val STUN_URL_RE = Regex("^stuns?:[^\\s,]+$")
+    private val TURN_URL_RE = Regex("^turns?:[^\\s,]+$")
+
+    private fun customRendezvous(): String =
+        prefs.getString(PREF_RENDEZVOUS, "")?.trim().orEmpty()
+            .takeIf { RELAY_URL_RE.matches(it) }.orEmpty()
+
+    /** What the page should dial first: the user's relay if they set one. */
+    private fun preferredRendezvous(): String =
+        customRendezvous().ifBlank { BuildConfig.RENDEZVOUS_URL }
+
+    /** Whether this install can reach a Handheld off the LAN, by any route. */
+    private val hasRendezvous get() = preferredRendezvous().isNotBlank()
+
+    private fun csvPref(key: String, scheme: Regex): List<String> =
+        prefs.getString(key, "").orEmpty().split(',')
+            .map { it.trim() }.filter { it.isNotEmpty() && scheme.matches(it) }
 
     /**
-     * `tawny://pair?k=&n=&h=<lan ip:port>&t=<token>`. `h` is dropped when Wi-Fi
-     * is down or the Watcher is relay-only; `t` (a short per-pairing admission
-     * ticket for the rendezvous) is added only when this build has one.
+     * The server settings, as the page reads them (`opts.servers`).
+     *
+     * `fallback` is the built-in tunnel, and it is only sent when a custom
+     * rendezvous is in play — it is what the page drops back to when the user's
+     * relay does not answer. Both ends of a call apply the same rule, so a
+     * relay that is genuinely down sends the Monitor and the Handheld to the
+     * same place and they still meet.
+     *
+     * Custom STUN *replaces* the built-in list (a self-hoster who names their
+     * own STUN usually means "only mine"); custom TURN is added *ahead of*
+     * whatever `/turn` issues, so a working built-in relay is still there
+     * underneath a TURN server that turns out to be wrong.
+     */
+    private fun serversJson(): String {
+        val custom = customRendezvous()
+        val turn = csvPref(PREF_TURN, TURN_URL_RE)
+        val o = org.json.JSONObject()
+        if (custom.isNotBlank() && BuildConfig.RENDEZVOUS_URL.isNotBlank()) {
+            o.put("fallback", BuildConfig.RENDEZVOUS_URL)
+        }
+        csvPref(PREF_STUN, STUN_URL_RE).takeIf { it.isNotEmpty() }
+            ?.let { o.put("stun", org.json.JSONArray(it)) }
+        if (turn.isNotEmpty()) {
+            o.put("turn", org.json.JSONArray().put(org.json.JSONObject().apply {
+                put("urls", org.json.JSONArray(turn))
+                prefs.getString(PREF_TURN_USER, "")?.takeIf { it.isNotBlank() }
+                    ?.let { put("username", it) }
+                prefs.getString(PREF_TURN_PASS, "")?.takeIf { it.isNotBlank() }
+                    ?.let { put("credential", it) }
+            }))
+        }
+        return o.toString()
+    }
+
+    // ---- pairing codes expire after ten minutes ----------------------------
+    //
+    // See the long note above `pairLink()` in public/app.js for why the deadline
+    // has to be the *Monitor's*: the channel key rides inside the code, so no
+    // check the bearer performs on itself, and none the relay performs, can
+    // hold. What this side owns is the code on screen — `pairCode`, rotated
+    // every [PAIR_TTL_MS] while the pairing sheet is up — and handing it to the
+    // page, which is the thing that actually answers a Handheld's offer.
+
+    private val PAIR_TTL_MS = 10 * 60 * 1000L
+
+    /** The code on screen right now, and the moment it stops admitting phones. */
+    private var pairCode: String? = null
+    private var pairCodeExp = 0L
+    private var pairTick: Runnable? = null
+    private var pairCountdown: TextView? = null
+    /** Rebuilds the `tawny://pair` payload around whatever code is current. */
+    private var rebuildPairPayload: (() -> String)? = null
+
+    private fun pairCodeLeftMs() = if (pairCode == null) 0L else pairCodeExp - System.currentTimeMillis()
+
+    /** Mint the next pairing code. 8 bytes: short enough to keep the QR light. */
+    private fun rotatePairCode(): String {
+        val c = randToken(8)
+        pairCode = c
+        pairCodeExp = System.currentTimeMillis() + PAIR_TTL_MS
+        return c
+    }
+
+    private fun currentPairCode(): String = pairCode?.takeIf { pairCodeLeftMs() > 0 } ?: rotatePairCode()
+
+    /**
+     * `tawny://pair?k=&n=&h=<lan ip:port>&t=<token>&c=<code>&e=<unix seconds>`.
+     *
+     * `h` is dropped when Wi-Fi is down or the Watcher is relay-only; `t` (the
+     * long-lived rendezvous admission ticket) is added only when this build can
+     * reach a relay. `c` is the pairing code and `e` is when it lapses — `e` is
+     * a courtesy so a scanning phone can say "expired" without dialling, and `c`
+     * is what the Monitor actually checks.
      */
     private fun pairingPayload(ip: String?, sigPort: Int, key: String, name: String, token: String?) =
         buildString {
             append("tawny://pair?k=${Uri.encode(key)}&n=${Uri.encode(name)}")
             if (ip != null) append("&h=$ip:$sigPort")
             if (token != null) append("&t=${Uri.encode(token)}")
+            append("&c=${Uri.encode(currentPairCode())}")
+            append("&e=${pairCodeExp / 1000}")
         }
 
     private data class Pairing(
         val signal: String?,   // ws://<lan-ip>:<port>, or null for relay-only
         val key: String,
         val name: String,
-        val token: String?
-    )
+        val token: String?,
+        /** The pairing code from `c`, presented to the Monitor to be let in. */
+        val code: String?,
+        /** `e` in epoch millis, or 0 when the code carried no deadline. */
+        val expiresAt: Long
+    ) {
+        val expired get() = expiresAt > 0 && System.currentTimeMillis() > expiresAt
+    }
 
     /** RFC1918 / link-local only — `h` in a pairing link is always a home-LAN address. */
     private fun isPrivateHost(hostPort: String): Boolean {
@@ -2952,7 +3277,10 @@ class MainActivity : AppCompatActivity() {
         // Nothing to dial: no usable LAN address and this build has no internet relay.
         if (h == null && !hasRendezvous) return null
         val name = (uri.getQueryParameter("n") ?: "Pet camera").take(40)
-        return Pairing(h?.let { "ws://$it" }, key, name, token)
+        val code = uri.getQueryParameter("c")
+            ?.takeIf { Regex("^[A-Za-z0-9_-]{8,32}$").matches(it) }
+        val exp = uri.getQueryParameter("e")?.toLongOrNull()?.takeIf { it > 0 }?.times(1000) ?: 0L
+        return Pairing(h?.let { "ws://$it" }, key, name, token, code, exp)
     }
 
     private fun qrBitmap(text: String, sizePx: Int): Bitmap {
@@ -2980,8 +3308,15 @@ class MainActivity : AppCompatActivity() {
 
     /** Serves the bundled web app on 127.0.0.1. Both roles need it. */
     private fun ensureAssetServer(): Int {
-        val s = assetServer ?: AssetHttpServer(applicationContext, 8809).also { assetServer = it }
-        return s.port
+        // The page's CSP names the relay hosts it may reach, and an advanced
+        // user can change theirs between sessions — so a cached server whose
+        // header no longer lists the right host has to go, or the new relay is
+        // blocked before it gets a socket and the failure is invisible.
+        val hosts = listOfNotNull(
+            relayHost(BuildConfig.RENDEZVOUS_URL), relayHost(customRendezvous())
+        )
+        assetServer?.let { if (it.relayHosts == hosts) return it.port else { it.stop(); assetServer = null } }
+        return AssetHttpServer(applicationContext, 8809, hosts).also { assetServer = it }.port
     }
 
     /**
@@ -3070,20 +3405,28 @@ class MainActivity : AppCompatActivity() {
                     else prefs.getString("pairToken", null)
         prefs.edit().putString("role", role).apply()
         val ip = lanIp()      // was enumerated three times in a row, on the UI thread
-        val pairPayload = if (role == "station")
-            pairingPayload(ip, signalServer?.boundPort ?: 0, key, name, token)
-        else null
+        // A Monitor going live mints (or keeps) the code its QR advertises; a
+        // Handheld carries the code it scanned, which the Monitor checks once.
+        val sigPort = signalServer?.boundPort ?: 0
+        rebuildPairPayload =
+            if (role == "station") ({ pairingPayload(ip, sigPort, key, name, token) }) else null
+        val pairPayload = rebuildPairPayload?.invoke()
+        val code = if (role == "station") pairCode else prefs.getString("pairCode", null)
+        val codeExp = if (role == "station") pairCodeExp else 0L
+        val rv = preferredRendezvous()
         Diag.log("shell", "goLive role=$role lan=${ip ?: "-"} signal=${signal ?: "-"} " +
-            "rv=${BuildConfig.RENDEZVOUS_URL.ifBlank { "NONE" }} " +
-            "ticket=${if (token.isNullOrBlank()) "MISSING" else "yes"}")
+            "rv=${rv.ifBlank { "NONE" }}${if (customRendezvous().isNotBlank()) " (custom)" else ""} " +
+            "ticket=${if (token.isNullOrBlank()) "MISSING" else "yes"} " +
+            "paircode=${if (code.isNullOrBlank()) "none" else "yes"}")
         showWeb("http://127.0.0.1:$httpPort/#native", role, key, name, signal,
-            BuildConfig.RENDEZVOUS_URL, token, pairPayload)
+            rv, token, pairPayload, code, codeExp)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun showWeb(
         url: String, role: String, key: String, name: String,
-        signal: String?, rendezvous: String, token: String?, pairPayload: String? = null
+        signal: String?, rendezvous: String, token: String?, pairPayload: String? = null,
+        pairCodeArg: String? = null, pairCodeExpArg: Long = 0L
     ) {
         clearScreen()
         val serverHost = Uri.parse(url).host
@@ -3168,9 +3511,14 @@ class MainActivity : AppCompatActivity() {
                     "window.tawnyStart && window.tawnyStart(" +
                         "${jsStr(role)},${jsStr(key)},${jsStr(name)}," +
                         "${signal?.let { jsStr(it) } ?: "null"},${jsStr(rendezvous)}," +
-                        "${token?.let { jsStr(it) } ?: "null"},{theme:${jsStr(currentTheme())}})",
+                        "${token?.let { jsStr(it) } ?: "null"},{theme:${jsStr(currentTheme())}," +
+                        "pairCode:${pairCodeArg?.let { jsStr(it) } ?: "null"}," +
+                        "pairExp:$pairCodeExpArg,servers:${serversJson()}})",
                     null
                 )
+                // Only the live screen has a WebView to tell, so this is where
+                // the accelerometer goes on. clearScreen() turns it back off.
+                startOrientationWatch()
             }
 
             override fun onReceivedError(
@@ -3229,10 +3577,24 @@ class MainActivity : AppCompatActivity() {
         col.addView(qr)
         // A 640x640 ZXing encode is not free, and this runs on the way into a
         // live session where the UI thread is already busy.
-        io.execute {
-            val bmp = try { qrBitmap(payload, 640) } catch (e: Exception) { null }
-            runOnUiThread { if (bmp != null && qr.isAttachedToWindow) qr.setImageBitmap(bmp) }
+        pairQrView = qr
+        pairPayloadNow = payload
+        drawPairQr(payload)
+
+        // The code has ten minutes in it, and a Monitor is a phone left sitting
+        // on this screen \u2014 so a silent deadline would mean a dead code on
+        // display with nothing to say why the far phone was refused. Count it
+        // down in words, and mint the next one in place when it runs out.
+        pairCountdown = TextView(this).apply {
+            setTextColor(Hue.DIM)
+            textSize = 12.5f
+            typeface = uiFont
+            gravity = Gravity.CENTER
+            setLineSpacing(0f, 1.35f)
+            layoutParams = lp(topMargin = 10, centerH = true)
         }
+        col.addView(pairCountdown)
+
         col.addView(
             body(
                 "On the other phone, open Tawny and tap \u201cI already have a " +
@@ -3249,7 +3611,10 @@ class MainActivity : AppCompatActivity() {
         // person setting the Monitor up check the framing without giving up the
         // pairing screen.
         col.addView(link("See what the camera sees") { hidePairOverlay() })
-        col.addView(link("Show as link") { showPairText(payload) })
+        // Deliberately the *current* payload, not the one this sheet was built
+        // with: the code behind it rotates, and handing out a stale link would
+        // be the exact failure the countdown exists to prevent.
+        col.addView(link("Show as link") { showPairText(pairPayloadNow ?: payload) })
         col.addView(link("Rename this monitor") {
             promptRoomName { newName ->
                 prefs.edit().putString("channelName", newName).apply()
@@ -3257,7 +3622,66 @@ class MainActivity : AppCompatActivity() {
             }
         })
         scroll.addView(col)
+        startPairCountdown()
         return scroll
+    }
+
+    // ---- the pairing code's ten minutes, on screen -------------------------
+
+    /** The QR image on the pairing sheet, and the payload currently drawn in it. */
+    private var pairQrView: ImageView? = null
+    private var pairPayloadNow: String? = null
+
+    /** Encode off the UI thread — a 640x640 ZXing encode is not free. */
+    private fun drawPairQr(payload: String) {
+        val target = pairQrView ?: return
+        io.execute {
+            val bmp = try { qrBitmap(payload, 640) } catch (e: Exception) { null }
+            runOnUiThread { if (bmp != null && target.isAttachedToWindow) target.setImageBitmap(bmp) }
+        }
+    }
+
+    /**
+     * Rebuild the pairing payload around a freshly minted code, redraw the QR,
+     * and tell the page — which is the side that actually refuses a Handheld —
+     * which code now counts. Without that last step the sheet would show a new
+     * code the Monitor did not accept.
+     */
+    private fun refreshPairCode() {
+        val build = rebuildPairPayload ?: return
+        rotatePairCode()
+        val payload = build()
+        pairPayloadNow = payload
+        drawPairQr(payload)
+        web?.evaluateJavascript(
+            "window.tawnyPairCode && window.tawnyPairCode(" +
+                "${jsStr(pairCode ?: "")},$pairCodeExp)", null
+        )
+        Diag.log("shell", "pairing code rotated — ${PAIR_TTL_MS / 1000}s")
+    }
+
+    private fun startPairCountdown() {
+        stopPairCountdown()
+        if (pairCountdown == null) return
+        val tick = object : Runnable {
+            override fun run() {
+                val left = pairCodeLeftMs()
+                if (left <= 0) refreshPairCode()
+                val secs = ((if (left <= 0) PAIR_TTL_MS else left) / 1000).toInt()
+                pairCountdown?.text =
+                    "This code works for another %d:%02d. A fresh one appears here when it runs out."
+                        .format(secs / 60, secs % 60)
+                pairTick = this
+                root.postDelayed(this, 1000)
+            }
+        }
+        pairTick = tick
+        root.post(tick)
+    }
+
+    private fun stopPairCountdown() {
+        pairTick?.let { root.removeCallbacks(it) }
+        pairTick = null
     }
 
     /** The palette the WebView should use right now — "light" or "dark". Honours
@@ -3463,6 +3887,11 @@ class MainActivity : AppCompatActivity() {
                                 showMonitorFull(
                                     message ?: "This monitor already has $MAX_VIEWERS phones watching."
                                 )
+                            // The Monitor (or the relay) refused the code this
+                            // phone arrived with. Same screen as the scanner's
+                            // own pre-flight refusal, so the ten minutes reads
+                            // as one rule wherever it is noticed.
+                            obj.optString("reason") == "expired" -> pairingExpired()
                             prefs.getString("role", null) == "viewer" -> showMonitorOffline()
                             else -> showError(message ?: "Could not start the session")
                         }
@@ -3837,10 +4266,104 @@ class MainActivity : AppCompatActivity() {
         pendingChime = null
     }
 
+    // ------------------------------------------------------- orientation
+    //
+    // The picture has to match how the phone is *held*, and the window is not
+    // a reliable witness to that. With auto-rotate off — a rotation lock, or
+    // simply the default on a handset that has been propped on a shelf for
+    // hours — the Activity stays portrait however the phone is lying, so the
+    // window never turns, the page's `screen.orientation` never changes, and
+    // Chromium keeps handing getUserMedia frames turned to a portrait window.
+    // The Monitor then streams a room lying on its side and nothing at either
+    // end can tell, because nothing at either end can see past the window.
+    //
+    // So read the accelerometer directly and report both angles to the page,
+    // which works out the difference and turns the picture (its own preview,
+    // and every Handheld's, over the `meta` message it already sends).
+    //
+    // Both angles are **degrees clockwise from the phone's natural
+    // orientation** — the units OrientationEventListener already reports in
+    // ("90 = the device's left side is at the top", which is a quarter turn
+    // clockwise). Display.getRotation() is documented as "the rotation of the
+    // drawn graphics on the screen, which is the opposite direction of the
+    // physical rotation of the device", so it is inverted into the same units
+    // below. If a device ever disagrees, the `orientation device=… window=…`
+    // line in the diagnostics log is what to read, and [windowRotationCW] is
+    // the one table to change.
+
+    private var orientWatch: OrientationEventListener? = null
+    private var lastDeviceCW = -1
+    private var lastWindowCW = -1
+
+    private fun windowRotationCW(): Int {
+        val r = try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) display?.rotation ?: Surface.ROTATION_0
+            else @Suppress("DEPRECATION") windowManager.defaultDisplay.rotation
+        } catch (e: Exception) { Surface.ROTATION_0 }
+        return when (r) {
+            Surface.ROTATION_90 -> 270
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 90
+            else -> 0
+        }
+    }
+
+    /** Push the current pair of angles at the page, if either has moved. */
+    private fun pushOrientation(deviceCW: Int = lastDeviceCW.coerceAtLeast(0)) {
+        val w = windowRotationCW()
+        if (deviceCW == lastDeviceCW && w == lastWindowCW) return
+        lastDeviceCW = deviceCW
+        lastWindowCW = w
+        Diag.log("shell", "orientation device=$deviceCW window=$w")
+        web?.evaluateJavascript(
+            "window.tawnyOrientation && window.tawnyOrientation($deviceCW,$w)", null
+        )
+    }
+
+    private fun startOrientationWatch() {
+        if (orientWatch != null || web == null) return
+        val w = object : OrientationEventListener(this, SensorManager.SENSOR_DELAY_NORMAL) {
+            override fun onOrientationChanged(deg: Int) {
+                // Flat on a table, or being carried: no usable reading. Keep
+                // the last one rather than snapping the picture to north.
+                if (deg == ORIENTATION_UNKNOWN) return
+                val q = ((deg + 45) / 90 * 90) % 360
+                // A phone held near a 45° boundary would otherwise flip back
+                // and forth on every degree of hand-shake. Only take a new
+                // quarter once the reading is clearly inside it.
+                if (q != lastDeviceCW) {
+                    val off = ((deg - q + 540) % 360) - 180
+                    if (abs(off) > 30) return
+                }
+                pushOrientation(q)
+            }
+        }
+        if (!w.canDetectOrientation()) {
+            // No accelerometer (a tablet in a dock, an emulator). The window is
+            // then the only witness there is, which is the old behaviour.
+            Diag.log("shell", "orientation: no sensor — following the window only")
+            pushOrientation(windowRotationCW())
+            return
+        }
+        w.enable()
+        orientWatch = w
+        pushOrientation(windowRotationCW())   // a first reading before the sensor speaks
+    }
+
+    private fun stopOrientationWatch() {
+        orientWatch?.disable()
+        orientWatch = null
+        lastDeviceCW = -1
+        lastWindowCW = -1
+    }
+
     // -------------------------------------------------------- lifecycle
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
+        // The window turned. The phone may not have (a fold, a resize), so
+        // re-read both angles rather than assuming they moved together.
+        pushOrientation()
         // System light/dark flip (uiMode is in configChanges so we aren't
         // recreated). Reload the palette and refresh what's on screen.
         Hue.load(this)
@@ -3857,6 +4380,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        // Nobody is turning a phone whose app is not on screen, and the sensor
+        // is not free.
+        stopOrientationWatch()
         web?.evaluateJavascript(
             "window.dispatchEvent(new Event('tawny:background'))", null
         )
@@ -3864,6 +4390,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        startOrientationWatch()
         if (isLive) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             // Window attributes only bind while the window is showing, so both
@@ -3880,6 +4407,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         endLive()
         releaseSessionLocks()   // belt and braces: nothing may outlive the Activity
+        stopOrientationWatch()
         stopScanner()
         stopServers()
         scene?.stop()

@@ -22,13 +22,10 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.concurrent.thread
 
-/**
- * The one rendezvous host this build was compiled against, or null for a
- * LAN-only build.
- */
-private val RENDEZVOUS_HOST: String? = BuildConfig.RENDEZVOUS_URL
-    .takeIf { it.isNotBlank() }
+/** The bare host out of a `ws(s)://` / `http(s)://` relay URL, or null. */
+fun relayHost(url: String?): String? = url
     ?.removePrefix("wss://")?.removePrefix("ws://")
+    ?.removePrefix("https://")?.removePrefix("http://")
     ?.substringBefore('/')?.substringBefore('?')
     ?.takeIf { it.isNotBlank() }
 
@@ -59,17 +56,27 @@ private const val CONNECT_SRC_TOKEN = "__TAWNY_CONNECT_SRC__"
  * not a restriction.
  *
  * The page only ever dials two things, and both are known by the time it is
- * served: the one rendezvous host compiled into the build, and the single relay
- * this session actually uses — `ws://127.0.0.1:<port>` on the Monitor (its own
- * relay, on a different port from `'self'`, so it needs naming) or
- * `ws://<monitor-lan-ip>:<port>` on a Handheld, learned from the pairing QR.
- * [AssetHttpServer.lanRelay] carries that address, so the policy names an exact
- * origin instead of a scheme.
+ * served: the single relay this session actually uses — `ws://127.0.0.1:<port>`
+ * on the Monitor (its own relay, on a different port from `'self'`, so it needs
+ * naming) or `ws://<monitor-lan-ip>:<port>` on a Handheld, learned from the
+ * pairing QR — and the rendezvous host(s) this install may reach.
+ *
+ * @param lanRelay this session's own LAN relay origin ([AssetHttpServer.lanRelay]),
+ *   or null before one is known / on a Handheld with no LAN leg.
+ * @param relayHosts the built-in rendezvous host and — when an advanced user has
+ *   pointed the app at their own from the Servers screen — theirs. A custom
+ *   relay not listed here is blocked by the page's own CSP before it ever gets
+ *   a socket, which is a silent failure and exactly what the relay fallback
+ *   would otherwise paper over, so [AssetHttpServer] is rebuilt whenever this
+ *   list changes. It stays a list, never a wildcard: the whole point of the
+ *   directive is that the channel key cannot be posted to an arbitrary host.
  */
-private fun connectSrc(lanRelay: String?): String = buildString {
+private fun connectSrc(lanRelay: String?, relayHosts: List<String>): String = buildString {
     append("'self'")
     if (lanRelay != null) { append(' '); append(lanRelay) }
-    RENDEZVOUS_HOST?.let { append(" wss://"); append(it); append(" https://"); append(it) }
+    for (h in relayHosts.distinct()) {
+        append(" wss://"); append(h); append(" https://"); append(h)
+    }
 }
 
 private fun firstFreePort(start: Int): Int {
@@ -85,7 +92,12 @@ private fun firstFreePort(start: Int): Int {
  * localhost pages may still open a plain `ws://` to the Watcher on the LAN.
  * GET only, localhost only, a handful of small files.
  */
-class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
+class AssetHttpServer(
+    private val ctx: Context,
+    preferredPort: Int,
+    /** Rendezvous hosts the page is allowed to reach; see [connectSrc]. */
+    val relayHosts: List<String> = emptyList(),
+) {
 
     val port: Int
 
@@ -177,7 +189,7 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
         // real source list keeps the two in step from one definition.
         if (rel.endsWith(".html")) {
             body = String(body, Charsets.UTF_8)
-                .replace(CONNECT_SRC_TOKEN, connectSrc(lanRelay))
+                .replace(CONNECT_SRC_TOKEN, connectSrc(lanRelay, relayHosts))
                 .toByteArray(Charsets.UTF_8)
         }
         send(out, 200, mime(path), body)
@@ -239,7 +251,7 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
             "Referrer-Policy: no-referrer\r\n" +
             "Content-Security-Policy: default-src 'none'; script-src 'self'; " +
             "style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; " +
-            "font-src 'self'; manifest-src 'self'; connect-src ${connectSrc(lanRelay)}; " +
+            "font-src 'self'; manifest-src 'self'; connect-src ${connectSrc(lanRelay, relayHosts)}; " +
             "base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n" +
             "Connection: close\r\n\r\n"
         out.write(head.toByteArray(Charsets.US_ASCII))

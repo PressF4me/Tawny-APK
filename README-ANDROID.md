@@ -49,6 +49,50 @@ tawny.turnMode=auto
 With none of these set, the app builds **LAN-only** — identical to a build
 before remote support existed. Deploy steps for the relay: `rendezvous/README.md`.
 
+These are the *build's* defaults. An installed app can be pointed elsewhere at
+runtime — see **Servers (advanced)** below — including a build with none of
+them set, which is how a LAN-only APK gains a remote path without recompiling.
+
+## Servers (advanced)
+
+**Long-press the version stamp** in the bottom-left of any native screen →
+Diagnostics → **Servers**. Deliberately behind the same hatch as the flight
+recorder: a support surface, not a feature, and a normal user has no business
+being shown a WebSocket URL field.
+
+Five fields, all optional, all `SharedPreferences` (`srvRendezvous`, `srvStun`,
+`srvTurn`, `srvTurnUser`, `srvTurnPass`): a rendezvous `wss://`/`ws://` URL,
+comma-separated `stun:`/`stuns:` URLs, comma-separated `turn:`/`turns:` URLs,
+and a TURN username and password. Empty means "use Tawny's", which is also the
+reset. Addresses are checked against their scheme before they are saved, and a
+value that fails the check later is ignored rather than dialled.
+
+**The built-in relay is preferred against, never replaced.** If the custom
+rendezvous does not answer — two failed dials, or a host that accepts the socket
+and never says `welcome` within 8 s, which is what pointing at something that
+is not a Tawny relay looks like — the page falls back to the built-in tunnel,
+says so, and moves the `/turn` fetch with it (`fallBackToDefault()` in
+`public/app.js`). Both ends apply the same rule, so a relay that is genuinely
+down sends the Monitor and every Handheld to the same place and they still
+meet. The swap is one-way for the session; a new session gives the custom relay
+a fresh try. A relay's *own* refusals (4003 full / 4004 monitor already running
+/ 4008 pairing expired) are a working relay answering, and never trigger it.
+
+A custom TURN entry goes **ahead of** whatever `/turn` issues rather than
+instead of it, so a wrong one costs nothing. Custom STUN replaces the build's
+list.
+
+Two things that follow the setting and are easy to miss:
+
+- The page's CSP names the hosts it may reach (`connectSrc` in `LocalWeb.kt`).
+  A custom host not in that list is blocked before it ever gets a socket, so
+  `ensureAssetServer()` rebuilds the loopback server whenever the host list
+  changes. It stays a list, not a wildcard — the directive exists so the channel
+  key cannot be posted to an arbitrary host.
+- The diagnostics **Send to Tawny** button still posts to the build's own
+  `/report`, not the custom relay. That endpoint is the project's support inbox
+  and a self-hosted rendezvous does not implement it.
+
 ### Release signing
 
 `signingConfigs.release` reads `android/keystore.properties` (git-ignored):
@@ -85,10 +129,47 @@ launch with `-camera-back virtualscene`.
 - On the pairing screen, **Show as link** reveals the `tawny://pair?…` text.
   Feed it to a Viewer with **Paste a link instead**, or from a shell:
   ```sh
-  adb shell "am start -a android.intent.action.VIEW -d 'tawny://pair?k=KEY&n=Pet%20camera&h=IP:PORT'"
+  adb shell "am start -a android.intent.action.VIEW -d 'tawny://pair?k=KEY&n=Pet%20camera&h=IP:PORT&c=CODE&e=UNIXSECS'"
   ```
-  (single-quote the URL so the device shell doesn't eat `&`).
+  (single-quote the URL so the device shell doesn't eat `&`). Copy the whole
+  thing from **Show as link** — `c` and `e` are the pairing code and its
+  deadline, and a link without a `c` the Monitor is currently showing is refused
+  as expired. The code rotates every ten minutes, so re-copy it if the test
+  drags on.
 - A real two-phone media test needs hardware.
+
+## Orientation
+
+The picture follows how the **Monitor** is physically held, in all four
+quarters, on the Monitor's own preview and on every Viewer at once — including
+mid-session, and including with auto-rotate switched off.
+
+That last case is the whole reason there is code for this. `getUserMedia` hands
+the WebView frames already turned to the *window*, so as long as the window
+rotates with the phone the page needs to do nothing. With a rotation lock the
+window never moves, `screen.orientation` never changes, and a Monitor lying on
+its side streams a room lying on its side with nothing at either end able to
+see past the window. So `MainActivity` watches the accelerometer and reports two
+angles to the page — how the phone is held, and how far the window believes it
+has turned, both in degrees clockwise from the phone's natural orientation. The
+difference is the correction; the Monitor applies it to its own preview and
+publishes it to every Handheld in the `meta` message it already sends.
+
+- The correction is 0 whenever the window tracks the phone, so auto-rotate on
+  behaves exactly as it did before.
+- A quarter turn also transposes the video element's box, or `object-fit:
+  contain` would fit the picture to the stage and *then* turn it past the
+  stage's edges, and `overflow: hidden` would crop it.
+- The **capture shape** deliberately still follows the window, not the phone:
+  after a quarter-turn correction the displayed picture is wide exactly when the
+  window was tall. `idealCaptureSize()` is unchanged.
+- In a plain browser there is no accelerometer reading to be had, so the
+  correction stays 0. A Viewer's own rotation lock is not corrected either —
+  that would turn the picture while leaving the rail and controls where they
+  are.
+- Checking it on device: `orientation device=… window=…` in the diagnostics log
+  (long-press the version stamp) is the pair of angles as the shell read them.
+  `windowRotationCW()` is the one table to change if a device disagrees.
 
 ## Background / screen-off
 

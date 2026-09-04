@@ -177,6 +177,86 @@ orientation swap for any requested size, the `>=` square-screen edge, and that
 no fixed `width:{ideal},height:{ideal}` rectangle is left in a getUserMedia
 call. **Green on 2026-08-31.**
 
+## `pairing-expiry.mjs` — a code that stops working after ten minutes
+
+Lifts `newPairCode` / `pairCodeLeft` / `pairingAllowed` / `rememberPeer` /
+`knownPeers` / `bondId` out of `public/app.js` and runs them against a stubbed
+`localStorage` and `crypto`.
+
+```bash
+node tools/probes/pairing-expiry.mjs
+```
+
+The rule can only live on the Monitor — the channel key rides inside the code,
+so the bearer would lie about the clock and the relay cannot tell an expired
+code from a fresh one (see `SECURITY.md`). So the assertions are about the
+Monitor's gate: the code on screen admits and remembers a new phone; a
+*previous* code is refused even inside the window; the deadline refuses the same
+code a millisecond late; a phone let in earlier still gets in afterwards
+(expiry is not a session timeout); every missing/malformed input fails closed;
+enrolment is bounded at 8 phones per channel. Plus source-text checks that the
+link carries `c` and `e` on both the web and native sides, that `adopt()`
+refuses a lapsed `e` with the expiry sentence, and that the refusal travels as
+`bye {reason:'expired'}`. **Green on 2026-09-04.**
+
+## `orientation.mjs` — the picture matches how the phone is held
+
+`video-fit.mjs` covers the *shape* of the picture; this covers which way up it
+is. Lifts `quarter` and `applyRotation` out of `public/app.js` and runs them
+against stubbed video elements, then reads `style.css` and `MainActivity.kt` for
+the parts that are not functions.
+
+```bash
+node tools/probes/orientation.mjs
+```
+
+The gap it exists for: `getUserMedia` hands the page frames turned to the
+**window**, and with auto-rotate off the window is not the phone — a Monitor
+lying on its side keeps a portrait window and streams a room lying on its side,
+and nothing at either end can tell, because nothing at either end can see past
+the window. The shell reads the accelerometer and reports two angles, both
+clockwise from the phone's natural orientation; the correction is their
+difference.
+
+Asserted: the correction is `(windowCW - deviceCW) mod 360` for all sixteen
+pairings, and is always 0 when the window tracks the phone (auto-rotate on —
+i.e. this changes nothing about the behaviour that shipped before); all four
+quarters are reachable, not just 0/180; a quarter turn swaps the element's box
+to the stage transposed, because fitting first and turning after lands a picture
+wider than the stage for `overflow: hidden` to crop — with the numbers for the
+real case (a 540×960 frame on a 400×800 stage) both ways; going back to 0 clears
+everything it set; the stylesheet carries the rules at a specificity that beats
+`#local.fill { transform: none }`; the Monitor publishes `rot` in `meta` (already
+on all four relay forward lists, so no relay changed) and a Viewer applies it
+live; and the shell's `Display.getRotation()` table inverts 90/270, does not
+chatter at a 45° boundary, keeps the last reading when the phone is flat, and
+only holds the sensor while the live screen is up. **Green on 2026-09-04.**
+
+## `relay-fallback.mjs` — your own relay cannot brick the remote path
+
+The Servers screen lets an advanced user point Tawny at their own rendezvous and
+TURN. A URL typed into a settings field is exactly the kind of thing that is
+wrong, or right and then down at 3am, so the built-in tunnel is *preferred
+against*, never replaced. Lifts `wsBase` / `rendezvousBase` / `fallbackBase` /
+`fallBackToDefault` / `iceServers` out of `public/app.js`.
+
+```bash
+node tools/probes/relay-fallback.mjs
+```
+
+Asserted: with nothing set there is no fallback and nothing changes; a custom
+relay that will not answer hands the session to the built-in one, moves the
+`/turn` fetch with it, says so, and never reverses mid-session; the swap sits
+*below* the fatal-close branch, because 4003/4004/4008 are a working relay
+answering and not a reason to change relay; a host that accepts the socket and
+then says nothing is caught by the welcome timer, since no dial ever fails
+there; a custom TURN entry sits ahead of — not instead of — what `/turn` issues.
+Plus source-text checks on the shell: the settings are runtime prefs, validated
+before saving and ignored if they fail the check later; the built-in URL is
+never dropped; and the loopback server's CSP is rebuilt to name the custom host,
+which it must be or the socket is blocked before it is made and the fallback
+hides a bug. **Green on 2026-09-04.**
+
 ## Running the worker locally
 
 ```bash

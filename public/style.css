@@ -444,6 +444,34 @@ button { font: inherit; color: inherit; cursor: pointer; }
   transform: scaleX(-1);
 }
 
+/* ---- which way up the picture is -------------------------------------------
+   The camera hands the page frames turned to the *window*, and the window is
+   not always the phone: with auto-rotate off a Monitor lying on its side keeps
+   a portrait window, so the room arrives on its side. app.js works out the
+   difference (see the orientation section) and sets --rot here; the Monitor's
+   own preview and every Viewer's stage carry the same turn.
+
+   A quarter turn also swaps the box. `object-fit: contain` fits the picture
+   into the box it is given and the rotation happens after, so a stage-shaped
+   box turned 90° lands a picture wider than the stage and `overflow: hidden`
+   crops it — the one thing this app never does. --rot-w / --rot-h are the
+   stage's dimensions transposed, so the fit is computed against the space the
+   picture will actually occupy. */
+#remote.rot,
+#local.fill.rot { transform: rotate(var(--rot, 0deg)); }
+
+#remote.rot-q,
+#local.fill.rot-q {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  width: var(--rot-w, 100%);
+  height: var(--rot-h, 100%);
+  transform: translate(-50%, -50%) rotate(var(--rot, 0deg));
+}
+
 /* The Watcher's own camera, shown full-frame so it can be aimed. */
 #local.fill {
   inset: 0;
