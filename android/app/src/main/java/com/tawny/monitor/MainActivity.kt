@@ -1768,7 +1768,7 @@ class MainActivity : AppCompatActivity() {
             primaryLabel = "Try again",
             onPrimary = { onWatcher() },
             secondaryLabel = "Back",
-            onSecondary = { showRole() }
+            onSecondary = { backToSessionsOrWelcome() }
         )
     }
 
@@ -1887,6 +1887,19 @@ class MainActivity : AppCompatActivity() {
     /** After a session ends: go to sessions home if there are any, else role select. */
     private fun afterSession() {
         if (loadRecentSessions().isNotEmpty()) showSessionsHome() else showRole()
+    }
+
+    /**
+     * Where "back" (or "give up") should land when leaving a setup/role screen
+     * with no live session of its own: sessions home if the user has other
+     * sessions to return to, welcome only for a genuinely fresh install.
+     * Centralizes the check so no screen hardcodes a session-blind jump to
+     * onboarding — see the bug this fixes: creating a session nobody joined,
+     * then backing out, used to land on Welcome even when other sessions (or
+     * the one just abandoned) still existed to return to.
+     */
+    private fun backToSessionsOrWelcome() {
+        if (loadRecentSessions().isNotEmpty()) showSessionsHome() else showWelcome()
     }
 
     /**
@@ -2512,11 +2525,18 @@ class MainActivity : AppCompatActivity() {
     private fun showRole() {
         clearScreen()
         screen = "role"
-        prefs.edit().remove("role").apply()
-        swipeNav(back = { showWelcome() }, forward = { if (!resumeSession()) onWatcher() })
+        // Only strip a stale "role" when there is nothing to resume. Wiping it
+        // unconditionally used to race the very next line's resumeSession()
+        // check: a returning user's role vanished before the forward-swipe
+        // handler could read it, so it was silently treated as a fresh setup —
+        // exactly the "creates a new session it shouldn't" bug.
+        if (prefs.getString("channelKey", null).isNullOrBlank()) {
+            prefs.edit().remove("role").apply()
+        }
+        swipeNav(back = { backToSessionsOrWelcome() }, forward = { if (!resumeSession()) onWatcher() })
         val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
         val col = column(scroll = true)
-        col.addView(backLink { showWelcome() })
+        col.addView(backLink { backToSessionsOrWelcome() })
         col.addView(heading("Set up Tawny", "How will you use this phone?"))
         col.addView(
             roleCard(
@@ -3264,9 +3284,18 @@ class MainActivity : AppCompatActivity() {
             onPrimary = { goLive(role) },
             secondaryLabel = "Start over",
             onSecondary = {
-                prefs.edit().clear().apply()
+                // Drop only this session's transient state, not the whole
+                // prefs store — a wholesale clear() used to wipe recentSessions
+                // too, so a load error on one session cost the user every
+                // other saved session as well as forcing them through
+                // onboarding again.
+                prefs.edit()
+                    .remove("channelKey").remove("channelName")
+                    .remove("role").remove("myToken").remove("pairToken")
+                    .remove("signalUrl")
+                    .apply()
                 stopServers()
-                showWelcome()
+                backToSessionsOrWelcome()
             },
             cancelable = false
         )
