@@ -967,6 +967,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* a muted mic is a warning, not a preference */
 #btn-mute[aria-pressed="true"] { --acc: var(--live); --acc-d: var(--live); }
 
+/* a clip in progress reads the same warm red as everything else that means
+   "this is live" — the halo pulses so it stays noticeable out of the corner
+   of an eye, since nothing else on this key changes size or position. */
+#btn-video[aria-pressed="true"] { --acc: var(--live); --acc-d: var(--live); }
+#btn-video[aria-pressed="true"] .ico::after {
+  background: var(--live);
+  animation: talk-halo 1.5s ease-out infinite;
+}
+
 /* The monitor's light. --alert is the one warm amber that is fixed in both
    palettes, which is what a lit LED should read as — and it stays clear of the
    berry/brass every other key borrows. The beam only exists while the light
@@ -992,25 +1001,77 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .ctl.is-unavailable:active .ico::after { animation: none; }
 
-/* held: hold-to-talk. Filled in --live, and a slow halo behind the plate says
-   the microphone is open without moving anything but a scale and an alpha. */
-.ctl.talk { --acc: var(--sky); --acc-d: var(--sky-d); }
-
-.ctl.talk.hot { color: var(--live); }
-.ctl.talk.hot .ico { color: #fff; }
-.ctl.talk.hot .ico::before {
-  background: var(--live);
-  border-color: var(--live);
-}
-.ctl.talk.hot .ico::after {
-  background: var(--live);
-  animation: talk-halo 1.5s ease-out infinite;
-}
-
 @keyframes talk-halo {
   0%   { transform: scale(.94); opacity: .55; }
   70%  { transform: scale(1.28); opacity: 0; }
   100% { transform: scale(1.28); opacity: 0; }
+}
+
+/* Hold-to-talk: a floating key of its own on the stage, not a sixth tile in
+   the control row. A hold gesture needs a target a thumb can't slide off —
+   the row's ~34px icons made this the one control people kept losing, and a
+   stray pointerleave off a target that small is what read as "buggy".
+   Deliberately minimal: one icon, translucent glass (the same ground
+   #lens-bar and #zoom-chip already sit in over an arbitrary camera frame,
+   so it reads in both themes without a colour of its own to get wrong).
+   Sits low, clear of the row underneath it — and of #lens-bar, nudged up to
+   bottom:104px so the two never collide when both are on screen (a
+   multi-camera monitor + a Viewer who wants to talk). Viewer only — see
+   #live[data-role] below. */
+.talk-fab {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  z-index: 14;
+  width: 68px;
+  height: 68px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--glass-line);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .3);
+  color: var(--glass-fg);
+  -webkit-tap-highlight-color: transparent;
+  transition: background .14s ease, border-color .14s ease, transform .1s ease;
+}
+#live[data-role="viewer"] .talk-fab { display: flex; }
+
+.talk-mic { width: 28px; height: 28px; }
+
+/* Kept for screen readers ("Hold to talk" / "Talking") — the icon plus the
+   colour change on .hot carries the state visually, so the label itself
+   stays off-screen instead of crowding a deliberately small, quiet key. */
+.talk-fab .talk-state {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.talk-fab:active { transform: translateX(-50%) scale(.94); }
+
+/* held: filled in --live, with a slow halo pulsing off the ring so the
+   microphone being open reads at a glance, not just on close inspection. */
+.talk-fab.hot {
+  background: var(--live);
+  border-color: var(--live);
+  color: #fff;
+}
+.talk-fab.hot::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--live);
+  animation: talk-halo 1.5s ease-out infinite;
 }
 
 /* Five calls, not three, so this wraps into rows instead of running off the
@@ -1119,7 +1180,9 @@ body.dimmed #theme-toggle { display: none; }
 
 #lens-bar {
   position: absolute;
-  bottom: 10px;
+  /* Raised clear of .talk-fab, which now sits low on the stage — see the
+     note above .talk-fab in the hold-to-talk section. */
+  bottom: 112px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 12;
@@ -1228,9 +1291,10 @@ body.dimmed #theme-toggle { display: none; }
      talk halo at zero alpha. Park them somewhere that still reads instead. */
   .loader i { transform: scaleY(.72); opacity: .95; }
   .loader::before { transform: scale(1); opacity: .7; }
-  .ctl.talk.hot .ico::after { opacity: .32; transform: scale(1.06); }
+  .talk-fab.hot::after { opacity: .32; transform: scale(1.06); }
   /* and no scale-dip at all, since it can no longer spring back */
   .ctl:active .ico,
+  .talk-fab:active,
   .chimes button:active,
   .lens-btn:active,
   .sas .wide:active { transform: none; }

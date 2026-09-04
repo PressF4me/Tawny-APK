@@ -3197,6 +3197,7 @@ async function keepAwake() {
 
 function hangUp() {
   S.closing = true;
+  stopVideoCapture();  // never leave a recording running past the call it's of
   closePair();     // stop the pairing sheet's countdown minting codes at nobody
   setDim(false);   // never leave the live screen with the backlight pinned down
   // ...and never walk away from a phone with its light still burning. Stopping
@@ -3347,6 +3348,122 @@ $('#btn-snap').addEventListener('click', () => {
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     toast('Snapshot saved');
   }, 'image/png');
+});
+
+// ------------------------------------------------------ video capture
+//
+// A short clip, not a recording feature: capped at 20s, one at a time, the
+// same "what you're looking at right now" scope as the snapshot above. The
+// picture is redrawn onto a canvas for the same reason the snapshot is —
+// the frame is turned to the Monitor's *window*, not the room, so the
+// rotation correction has to be baked in rather than recorded raw — and the
+// canvas's own captureStream() is what MediaRecorder actually encodes, with
+// the original track's audio grafted on since a canvas has none of its own.
+const VIDEO_MAX_MS = 20000;
+let videoRec = null;
+
+function pickVideoMime() {
+  const candidates = [
+    'video/mp4;codecs=avc1',
+    'video/mp4',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm'
+  ];
+  return candidates.find((t) => window.MediaRecorder?.isTypeSupported?.(t)) || '';
+}
+
+const fmtCountdown = (ms) => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `0:${String(s).padStart(2, '0')}`;
+};
+
+function stopVideoCapture() {
+  if (!videoRec) return;
+  clearTimeout(videoRec.timer);
+  clearInterval(videoRec.tick);
+  if (videoRec.recorder.state !== 'inactive') videoRec.recorder.stop();
+}
+
+$('#btn-video').addEventListener('click', () => {
+  if (videoRec) { stopVideoCapture(); return; }
+
+  const v = el.remote;
+  if (!v.videoWidth) return toast('Nothing to capture yet.');
+  const mime = pickVideoMime();
+  if (!window.MediaRecorder || !mime) {
+    return toast('Video recording is not supported here.');
+  }
+
+  const rot = S.role === 'viewer' ? quarter(S.remoteRot) : 0;
+  const odd = rot === 90 || rot === 270;
+  const c = document.createElement('canvas');
+  c.width = odd ? v.videoHeight : v.videoWidth;
+  c.height = odd ? v.videoWidth : v.videoHeight;
+  const ctx = c.getContext('2d');
+
+  let raf;
+  const draw = () => {
+    ctx.save();
+    ctx.translate(c.width / 2, c.height / 2);
+    if (rot) ctx.rotate(rot * Math.PI / 180);
+    ctx.drawImage(v, -v.videoWidth / 2, -v.videoHeight / 2);
+    ctx.restore();
+    raf = requestAnimationFrame(draw);
+  };
+  draw();
+
+  const stream = c.captureStream(24);
+  // The far end's voice, if any is playing — #remote is muted (audio rides
+  // #remote-audio instead, see its own note), so this is the only place a
+  // recorded clip could get sound from.
+  const audioTrack = v.srcObject?.getAudioTracks?.()[0]
+    || el.remoteAudio.srcObject?.getAudioTracks?.()[0];
+  if (audioTrack) stream.addTrack(audioTrack);
+
+  const chunks = [];
+  const recorder = new MediaRecorder(stream, { mimeType: mime });
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    cancelAnimationFrame(raf);
+    stream.getTracks().forEach((t) => t.stop());
+    press($('#btn-video'), false);
+    $('#btn-video').querySelector('span:last-child').textContent = 'Record';
+    videoRec = null;
+
+    const blob = new Blob(chunks, { type: mime });
+    const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+    const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+    const name = `tawny-${stamp}.${ext}`;
+
+    if (androidNative?.saveVideo) {
+      // Same reasoning as saveImage: <a download> on a blob: URL is a no-op
+      // in the WebView, so the clip crosses the bridge as base64 instead.
+      const reader = new FileReader();
+      reader.onload = () => androidNative.saveVideo(reader.result, name);
+      reader.readAsDataURL(blob);
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    toast('Video saved');
+  };
+
+  recorder.start();
+  press($('#btn-video'), true);
+  toast(`Recording — up to ${VIDEO_MAX_MS / 1000}s`);
+
+  const startedAt = Date.now();
+  const label = $('#btn-video').querySelector('span:last-child');
+  label.textContent = fmtCountdown(VIDEO_MAX_MS);
+  const tick = setInterval(() => {
+    label.textContent = fmtCountdown(VIDEO_MAX_MS - (Date.now() - startedAt));
+  }, 250);
+
+  videoRec = { recorder, tick, timer: setTimeout(stopVideoCapture, VIDEO_MAX_MS) };
 });
 
 $('#btn-leave').addEventListener('click', hangUp);

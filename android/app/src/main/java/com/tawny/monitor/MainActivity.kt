@@ -4060,6 +4060,45 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        /**
+         * Same reasoning as saveImage: a blob: URL's <a download> is a no-op in
+         * this WebView, so a recorded clip (capped at 20s in app.js) crosses the
+         * bridge as base64 too. Videos go to MediaStore.Video, not .Images, or
+         * they render as a broken thumbnail in the gallery despite saving fine.
+         */
+        @JavascriptInterface
+        fun saveVideo(dataUrl: String, filename: String) {
+            val safe = filename.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .replace(Regex("^\\.+"), "_")
+                .ifBlank { "video.webm" }
+            val mime = if (safe.endsWith(".mp4")) "video/mp4" else "video/webm"
+            io.execute {
+                try {
+                    val b64 = dataUrl.substringAfter("base64,")
+                    val bytes = Base64.decode(b64, Base64.DEFAULT)
+                    val values = android.content.ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, safe)
+                        put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                        put(
+                            MediaStore.MediaColumns.RELATIVE_PATH,
+                            Environment.DIRECTORY_MOVIES + "/Tawny"
+                        )
+                    }
+                    val resolver = contentResolver
+                    val uri = resolver.insert(
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values
+                    ) ?: throw java.io.IOException("no MediaStore row")
+                    resolver.openOutputStream(uri).use { out ->
+                        (out ?: throw java.io.IOException("no stream")).write(bytes)
+                    }
+                    runOnUiThread { toast("Saved to Movies/Tawny") }
+                } catch (e: Exception) {
+                    Log.w("Tawny", "video save failed", e)
+                    runOnUiThread { toast("Could not save the video") }
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------- power
