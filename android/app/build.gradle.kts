@@ -83,6 +83,20 @@ android {
                 "proguard-rules.pro"
             )
             if (hasSigning) signingConfig = signingConfigs.getByName("release")
+            // The app ships no native code of its own — CameraX (the QR
+            // scanner) is what pulls in a couple of prebuilt .so files, and
+            // Play's "upload debug symbols" warning on every release is
+            // about those. As of camerax 1.4.1 there is no
+            // native-debug-symbols artifact for AGP to fetch (checked
+            // against dl.google.com/android/maven2 directly — 404), so this
+            // setting does not actually clear the warning today. It costs
+            // nothing to leave on: it's the correct config to have the
+            // moment either this app gains real native code or a future
+            // CameraX release starts publishing symbols, with nothing
+            // further to change here.
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
         }
         debug {
             applicationIdSuffix = ".debug"
