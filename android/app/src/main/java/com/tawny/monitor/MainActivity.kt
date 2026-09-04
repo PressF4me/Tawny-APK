@@ -1475,6 +1475,22 @@ class MainActivity : AppCompatActivity() {
                 "the internet. Paste it into Rendezvous below."
         ))
 
+        // input -> the small red line under it. Populated by field(), read by
+        // markInvalid()/clearInvalid() so Save can point at exactly the field
+        // that's wrong instead of one dialog with no way to tell which line it
+        // meant.
+        val errorFor = HashMap<EditText, TextView>()
+
+        fun clearInvalid(input: EditText) {
+            input.background = roundRect(Hue.BG, Hue.LINE)
+            errorFor[input]?.visibility = View.GONE
+        }
+
+        fun markInvalid(input: EditText, message: String) {
+            input.background = roundRect(Hue.BG, Hue.LIVE)
+            errorFor[input]?.apply { text = message; visibility = View.VISIBLE }
+        }
+
         fun field(label: String, hint: String, key: String, password: Boolean = false): EditText {
             col.addView(TextView(this).apply {
                 text = label
@@ -1502,14 +1518,32 @@ class MainActivity : AppCompatActivity() {
                 setText(prefs.getString(key, ""))
             }
             col.addView(input)
+            val error = TextView(this).apply {
+                setTextColor(Hue.LIVE)
+                textSize = 12.5f
+                typeface = uiFont
+                setLineSpacing(0f, 1.3f)
+                visibility = View.GONE
+                layoutParams = lp(topMargin = 4)
+            }
+            col.addView(error)
+            errorFor[input] = error
+            // The red is a "fix this", not a permanent verdict — it goes away
+            // the moment the user acts on the field, before they even try Save
+            // again.
+            input.addTextChangedListener(object : android.text.TextWatcher {
+                override fun afterTextChanged(s: android.text.Editable?) = clearInvalid(input)
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            })
             return input
         }
 
         val rvIn = field("Rendezvous", "wss://relay.example.net", PREF_RENDEZVOUS)
         val stunIn = field("STUN (comma separated)", "stun:stun.example.net:3478", PREF_STUN)
         val turnIn = field("TURN (comma separated)", "turns:turn.example.net:5349", PREF_TURN)
-        val userIn = field("TURN username", "", PREF_TURN_USER)
-        val passIn = field("TURN password", "", PREF_TURN_PASS, password = true)
+        val userIn = field("TURN username *", "required with a TURN address", PREF_TURN_USER)
+        val passIn = field("TURN password *", "required with a TURN address", PREF_TURN_PASS, password = true)
 
         val note = TextView(this).apply {
             setTextColor(Hue.DIM)
@@ -1526,23 +1560,43 @@ class MainActivity : AppCompatActivity() {
 
         col.addView(primary("Save") {
             val rv = rvIn.text.toString().trim()
-            val bad = buildString {
-                if (rv.isNotBlank() && !RELAY_URL_RE.matches(rv))
-                    append("The rendezvous address must start with wss:// (or ws:// on your own LAN).\n\n")
-                val stunBad = stunIn.text.toString().split(',').map { it.trim() }
-                    .filter { it.isNotEmpty() && !STUN_URL_RE.matches(it) }
-                if (stunBad.isNotEmpty())
-                    append("STUN addresses must start with stun: or stuns: — check ${stunBad.first()}.\n\n")
-                val turnBad = turnIn.text.toString().split(',').map { it.trim() }
-                    .filter { it.isNotEmpty() && !TURN_URL_RE.matches(it) }
-                if (turnBad.isNotEmpty())
-                    append("TURN addresses must start with turn: or turns: — check ${turnBad.first()}.")
-            }.trim()
-            if (bad.isNotEmpty()) {
+            val turnList = turnIn.text.toString().split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            val userVal = userIn.text.toString().trim()
+            val passVal = passIn.text.toString()
+
+            listOf(rvIn, stunIn, turnIn, userIn, passIn).forEach { clearInvalid(it) }
+            var firstBad: EditText? = null
+            val issues = StringBuilder()
+            fun flag(input: EditText, message: String) {
+                markInvalid(input, message)
+                issues.append("• ").append(message).append('\n')
+                if (firstBad == null) firstBad = input
+            }
+
+            if (rv.isNotEmpty() && !RELAY_URL_RE.matches(rv))
+                flag(rvIn, "Must start with wss:// (or ws:// on your own LAN).")
+            val stunBad = stunIn.text.toString().split(',').map { it.trim() }
+                .filter { it.isNotEmpty() && !STUN_URL_RE.matches(it) }
+            if (stunBad.isNotEmpty())
+                flag(stunIn, "Must start with stun: or stuns: — check ${stunBad.first()}.")
+            val turnBad = turnList.filterNot { TURN_URL_RE.matches(it) }
+            if (turnBad.isNotEmpty())
+                flag(turnIn, "Must start with turn: or turns: — check ${turnBad.first()}.")
+            // A TURN server with no credentials will not authenticate a real
+            // caller, and half a credential pair is never valid either way — so
+            // these three fields are mandatory together, or not at all.
+            if (turnList.isNotEmpty() && userVal.isEmpty())
+                flag(userIn, "Required — this TURN server needs a username.")
+            if (turnList.isNotEmpty() && passVal.isEmpty())
+                flag(passIn, "Required — this TURN server needs a password.")
+            if (turnList.isEmpty() && (userVal.isNotEmpty() || passVal.isNotEmpty()))
+                flag(turnIn, "Add a TURN address to use these credentials, or clear them.")
+
+            if (issues.isNotEmpty()) {
                 themedDialog(
-                    title = "Check that address",
-                    body = bad,
-                    primaryLabel = "Back", onPrimary = {}
+                    title = "Check the highlighted fields",
+                    body = issues.toString().trim(),
+                    primaryLabel = "Back", onPrimary = { firstBad?.requestFocus() }
                 )
                 return@primary
             }
@@ -1550,27 +1604,28 @@ class MainActivity : AppCompatActivity() {
                 .putString(PREF_RENDEZVOUS, rv)
                 .putString(PREF_STUN, stunIn.text.toString().trim())
                 .putString(PREF_TURN, turnIn.text.toString().trim())
-                .putString(PREF_TURN_USER, userIn.text.toString().trim())
-                .putString(PREF_TURN_PASS, passIn.text.toString())
+                .putString(PREF_TURN_USER, userVal)
+                .putString(PREF_TURN_PASS, passVal)
                 .apply()
             Diag.log("shell", "servers saved rv=${rv.ifBlank { "default" }}")
             // The asset server bakes the allowed relay hosts into its CSP, and
             // the live page has already read the old settings — so both are
             // rebuilt on the next session rather than patched underneath one.
             stopServers()
-            if (rv.isNotBlank() && rv.startsWith("ws://")) {
-                themedDialog(
-                    title = "Saved — one warning",
-                    body = "ws:// is not encrypted. It is fine for a relay on your own " +
-                        "network, but over the internet anyone on the path can read the " +
-                        "signalling. (Your video and sound stay encrypted either way.)\n\n" +
-                        "Takes effect on the next session.",
-                    primaryLabel = "OK", onPrimary = { showDiagnostics() }
-                )
-            } else {
-                toast("Saved — takes effect on the next session")
-                showDiagnostics()
-            }
+            val usingOwn = rv.isNotBlank() || turnList.isNotEmpty() || stunIn.text.toString().isNotBlank()
+            themedDialog(
+                title = if (rv.isNotBlank() && rv.startsWith("ws://")) "Saved — one warning" else "Saved",
+                body = if (rv.isNotBlank() && rv.startsWith("ws://"))
+                    "ws:// is not encrypted. It is fine for a relay on your own network, " +
+                        "but over the internet anyone on the path can read the signalling. " +
+                        "(Your video and sound stay encrypted either way.)\n\n" +
+                        "Takes effect on the next session."
+                else if (usingOwn)
+                    "Using your servers now. Tawny's stay as the automatic fallback if " +
+                        "yours doesn't answer.\n\nTakes effect on the next session."
+                else "Back to Tawny's own servers.\n\nTakes effect on the next session.",
+                primaryLabel = "OK", onPrimary = { showDiagnostics() }
+            )
         })
         col.addView(link("Use Tawny's servers") {
             themedDialog(
