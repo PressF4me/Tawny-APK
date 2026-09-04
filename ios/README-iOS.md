@@ -1,6 +1,8 @@
-# FrenTalk for iOS
+# Tawny for iOS (stale)
 
-A native SwiftUI shell around the FrenTalk web app. The app is a **client for
+**This target is a stale stub.** The Tawny product has moved to Android-first with a native Kotlin shell and embedded WebRTC stack. This iOS code predates the rebrand and is not maintained.
+
+A native SwiftUI shell around the Tawny web app. The app is a **client for
 your own server** — it asks for the server address on first launch and talks to
 nothing else.
 
@@ -47,19 +49,19 @@ Requires a Mac with Xcode 15+, and [XcodeGen](https://github.com/yonaskolb/Xcode
 ```bash
 cd ios
 xcodegen generate
-open FrenTalk.xcodeproj
+open Tawny.xcodeproj
 ```
 
 Then in Xcode:
 
-1. Select the **FrenTalk** target → **Signing & Capabilities**.
+1. Select the **Tawny** target → **Signing & Capabilities**.
 2. Check **Automatically manage signing** and pick your team.
-3. Change the bundle identifier from `com.frentalk.monitor` to something in a
-   domain you control — `com.yourname.frentalk`. It must be globally unique.
+3. Change the bundle identifier from `com.tawny.monitor` to something in a
+   domain you control — `com.yourname.tawny`. It must be globally unique.
 
 Prefer not to install XcodeGen? Create a new iOS App project in Xcode (SwiftUI,
 no Core Data, no tests), delete the generated `ContentView.swift`, drag in the
-`FrenTalk/` folder with *Copy items if needed* ticked, and paste the custom keys
+`Tawny/` folder with *Copy items if needed* ticked, and paste the custom keys
 from `Info.plist` into the target's Info tab.
 
 Build to a device (not the simulator — it has no camera and WebRTC behaves
@@ -77,7 +79,7 @@ after 7 days.
 
 In [App Store Connect](https://appstoreconnect.apple.com) → **Apps** → **+** →
 **New App**. Platform iOS, pick your bundle ID, choose any SKU. The name must be
-unique across the whole App Store — "FrenTalk" may be taken; the display name on
+unique across the whole App Store — "Tawny" may be taken; the display name on
 the device comes from `CFBundleDisplayName` and can stay as it is.
 
 ### 2. Upload
@@ -110,7 +112,7 @@ app under **Guideline 2.1**, and web-view wrappers additionally draw
 Put this in the review notes, and give them something to connect to — a
 temporary Funnel URL, torn down after review:
 
-> FrenTalk is a client for a self-hosted pet monitoring server, like a Jellyfin
+> Tawny is a client for a self-hosted pet monitoring server, like a Jellyfin
 > or Home Assistant client. It requires the user's own server. For review,
 > please enter: `https://<temporary-address>` — then tap "+ New channel", name
 > it, and choose Monitor to see the camera view.
@@ -139,12 +141,12 @@ duplicate build number even if nothing else changed.
 The web app posts messages when it goes live and idle:
 
 ```js
-window.webkit.messageHandlers.frentalk.postMessage({ event: 'live', role: 'station' })
-window.webkit.messageHandlers.frentalk.postMessage({ event: 'idle' })
+window.webkit.messageHandlers.tawny.postMessage({ event: 'live', role: 'station' })
+window.webkit.messageHandlers.tawny.postMessage({ event: 'idle' })
 ```
 
 The shell responds by holding the idle timer and configuring the audio session.
-Going the other way, it dispatches `frentalk:background` and `frentalk:foreground`
+Going the other way, it dispatches `tawny:background` and `tawny:foreground`
 on `window` so the page can show honest status when iOS suspends it. All of it is
 feature-detected, so `public/app.js` behaves identically in a normal browser.
 
@@ -157,15 +159,15 @@ your server, so `docker compose up -d --build` is the whole deploy.
 
 ```
 project.yml                    XcodeGen spec
-FrenTalk/FrenTalkApp.swift     entry point
-FrenTalk/RootView.swift        routes between setup and the web view
-FrenTalk/SetupView.swift       first-run server address entry
-FrenTalk/SettingsView.swift    change server, version info
-FrenTalk/WebScreen.swift       WKWebView host — permissions, audio, idle timer
-FrenTalk/ServerStore.swift     server URL persistence and validation
-FrenTalk/Theme.swift           palette matching the web app
-FrenTalk/Info.plist            permission strings, background modes, ATS
-FrenTalk/Assets.xcassets       app icon, accent, launch colour
+Tawny/TawnyApp.swift           entry point
+Tawny/RootView.swift           routes between setup and the web view
+Tawny/SetupView.swift          first-run server address entry
+Tawny/SettingsView.swift       change server, version info
+Tawny/WebScreen.swift          WKWebView host — permissions, audio, idle timer
+Tawny/ServerStore.swift        server URL persistence and validation
+Tawny/Theme.swift              palette matching the web app
+Tawny/Info.plist               permission strings, background modes, ATS
+Tawny/Assets.xcassets          app icon, accent, launch colour
 ```
 
 ## Notes

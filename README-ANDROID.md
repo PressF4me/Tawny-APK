@@ -5,7 +5,7 @@ QR pairing / lifecycle / audio routing) wrapping a WebView that owns the WebRTC
 stack. The web client is bundled in the APK and served from a loopback server, so
 there is no address to type and `getUserMedia` gets a secure-context origin.
 
-`applicationId` `com.tawny.monitor` · `minSdk` 26 · `targetSdk` 35.
+`applicationId` `com.tawny.monitor` · `minSdk` 26 · `targetSdk` 36.
 
 ---
 

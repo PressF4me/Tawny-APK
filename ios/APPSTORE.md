@@ -1,13 +1,14 @@
-# Shipping FrenTalk to the App Store
+# Shipping Tawny to the App Store (stale)
 
-TestFlight internal testing has no review. Public release does, and this app in
-its current shape fails it. This is what changes.
+**This target is a stale stub.** The Tawny product has moved to Android-first with a native Kotlin shell. This iOS guidance predates the rebrand and is not actively maintained.
+
+TestFlight internal testing has no review. Public release does, and an iOS app of this kind would face review challenges as outlined below.
 
 ---
 
 ## The blocking problem
 
-**Guideline 4.2 — Minimum Functionality.** FrenTalk is a `WKWebView` pointed at a
+**Guideline 4.2 — Minimum Functionality.** Tawny is a `WKWebView` pointed at a
 website. Apple rejects these on sight; the phrase in the rejection is usually
 "your app is primarily a repackaged website" or "provides limited functionality
 compared to the web experience." A polished native shell around a web view does
@@ -92,7 +93,7 @@ None of this is optional, and all of it is separate from code.
   Issues enabled qualifies.
 
 **Listing:**
-- App name, globally unique across the App Store. "FrenTalk" may be taken —
+- App name, globally unique across the App Store. "Tawny" may be taken —
   check before you get attached. The on-device name comes from
   `CFBundleDisplayName` and can differ.
 - Subtitle (30 chars), description, keywords (100 chars), promotional text.

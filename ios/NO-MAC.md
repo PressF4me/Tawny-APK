@@ -1,4 +1,4 @@
-# Testing FrenTalk on iOS without a Mac
+# Testing Tawny on iOS without a Mac (stale)
 
 Two routes. Start with the free one — it may be all you need.
 
@@ -29,7 +29,7 @@ bug, not your setup. The workaround is to remove this line from
 The icon still works; the app just opens in Safari instead of standalone.
 
 One related quirk worth knowing: in standalone mode WebKit has revoked camera
-permission when the URL fragment changes. FrenTalk uses the fragment for pairing
+permission when the URL fragment changes. Tawny uses the fragment for pairing
 links, but it clears it before any camera access is requested, so the ordering
 should keep you clear of it. If you see a repeat permission prompt right after
 scanning a pairing code, that's what happened.
@@ -79,11 +79,11 @@ an afternoon convinced you mistyped a password that was always correct.
 
 At `developer.apple.com/account/resources`:
 
-1. **Identifiers → +** — register your bundle id (`com.yourname.frentalk`).
+1. **Identifiers → +** — register your bundle id (`com.yourname.tawny`).
    Enable no capabilities; this app needs none.
 2. **Profiles → +** — **App Store Connect** distribution, your identifier, the
    certificate from step 1. Name it something you'll remember; the exact name
-   goes into a secret. Download it as `FrenTalk.mobileprovision` next to the
+   goes into a secret. Download it as `Tawny.mobileprovision` next to the
    script.
 
 ### Step 3 — App Store Connect API key
@@ -111,7 +111,7 @@ That prints the base64 blobs. Add these under **Settings → Secrets and variabl
 | `PROVISIONING_PROFILE_BASE64` | printed by the script |
 | `KEYCHAIN_PASSWORD` | printed by the script |
 | `APPLE_TEAM_ID` | top right of the developer portal |
-| `BUNDLE_ID` | e.g. `com.yourname.frentalk` |
+| `BUNDLE_ID` | e.g. `com.yourname.tawny` |
 | `PROFILE_NAME` | the profile's name, exactly |
 | `ASC_KEY_ID` | step 3 |
 | `ASC_ISSUER_ID` | step 3 |
