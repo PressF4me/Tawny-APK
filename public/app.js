@@ -1033,6 +1033,10 @@ async function showSas(peer, attempt = 0) {
   }
   if (!code) diag(`sas unavailable after ${attempt} tries (pc=${pcState})`);
 
+  // Settled. A null here is now a *result*, not "not asked yet", and both roles
+  // must treat it as an alarm rather than as nothing to say.
+  peer.sasFailed = !code;
+
   // The code belongs to *this* connection and to nothing else, so it is parked
   // on the peer. That is the whole fix for the multi-viewer bug: the Monitor
   // used to write every Handheld's code straight into one shared chip, so with
@@ -1058,6 +1062,24 @@ function sasPendingViewers() {
 }
 
 /**
+ * Monitor: cloud Handhelds whose safety code could not be computed at all.
+ *
+ * This is the alarm, and it is deliberately NOT gated on sasReviewed(). Vouching
+ * for a channel once means "I have compared the codes and this monitor is mine";
+ * it does not mean "never tell me again that a code could not be derived". A
+ * failure here is the one signal that survives the once-per-channel review, and
+ * SECURITY.md promises it fires on every affected call *on both ends* — which
+ * was true of the Handheld and, until now, false of the Monitor: this list used
+ * to be folded into sasPendingViewers(), which filters on `p.sas` being truthy,
+ * so the failed peers were silently discarded and the Monitor rendered nothing.
+ */
+function sasFailedViewers() {
+  return viewerPeers().filter(
+    (p) => p.transport?.tag === 'cloud' && p.sasFailed && !p.sasOk
+  );
+}
+
+/**
  * Monitor: put the right code in front of the right phone.
  *
  * The code no longer lives in the top rail at all - it was there on every
@@ -1073,16 +1095,19 @@ function syncStationSas() {
   if (S.role !== 'station') return;
   el.saschip.hidden = true;              // the code never sits in the rail now
 
-  if (sasReviewed()) {                   // vouched for once — never ask again
-    S.sasAsk = null;
-    el.sas.hidden = true;
-    el.sas.classList.remove('sas--warn');
-    return;
-  }
+  // The alarm outranks the review. A peer whose code could not be worked out is
+  // shown even on a channel that has already been vouched for, and even ahead of
+  // peers that are merely waiting to be compared.
+  const failed = sasFailedViewers();
+  const pending = sasPendingViewers();
 
+  // Keep asking about the peer already on screen, so the digits do not swap out
+  // from under someone halfway through reading them - but only while that peer
+  // is still a live cloud peer that wants an answer.
   let ask = S.sasAsk ? S.peers.get(S.sasAsk) : null;
-  if (!ask || ask.sasOk || !ask.sas || ask.transport?.tag !== 'cloud') ask = null;
-  if (!ask) ask = sasPendingViewers()[0] || null;
+  const wanted = (p) =>
+    p && !p.sasOk && p.transport?.tag === 'cloud' && (p.sasFailed || (p.sas && !sasReviewed()));
+  if (!wanted(ask)) ask = failed[0] || pending[0] || null;
   S.sasAsk = ask ? ask.id : null;
 
   if (!ask) {
@@ -1090,7 +1115,22 @@ function syncStationSas() {
     el.sas.classList.remove('sas--warn');
     return;
   }
-  const behind = sasPendingViewers().length - 1;
+
+  if (ask.sasFailed) {
+    const behind = failed.length - 1;
+    el.sascode.textContent = 'unavailable — connection may be tampered with';
+    el.sasnote.textContent =
+      'The safety code for a phone connecting from outside your Wi-Fi could not '
+      + 'be worked out. If you did not expect that, disconnect it'
+      + (behind > 0 ? ` (${behind} more phone${behind > 1 ? 's' : ''} after it).` : '.');
+    if (el.sasok) el.sasok.textContent = 'Keep it connected';
+    if (el.sasno) el.sasno.textContent = 'Disconnect it';
+    el.sas.classList.add('sas--warn');
+    el.sas.hidden = false;
+    return;
+  }
+
+  const behind = pending.length - 1;
   el.sascode.textContent = ask.sas;
   el.sasnote.textContent =
     'A phone is connecting from outside your Wi-Fi. It should be showing this code'
@@ -1443,7 +1483,15 @@ function ensurePeer(id, role, transport) {
           // This connection's safety code, and whether the Monitor's user has
           // said it matches. Both live and die with the peer: a reconnect is a
           // fresh DTLS handshake with a fresh code, so it is asked about again.
-          sas: null, sasOk: false };
+          //
+          // `sasFailed` is NOT the same as `sas === null`. A peer starts with a
+          // null code because nothing has been computed yet; it ends with a null
+          // code *and* sasFailed set when showSas() gave up. Only the second is
+          // an alarm, and telling them apart is what lets the Monitor raise it —
+          // it used to filter on `p.sas` being truthy, so a code that could not
+          // be computed silently dropped out of the review queue and the Monitor
+          // showed nothing at all while the Handheld showed a tamper warning.
+          sas: null, sasFailed: false, sasOk: false };
     S.peers.set(id, p);
   } else if (transport) {
     p.transport = transport;   // Watcher may re-learn a peer on the other relay

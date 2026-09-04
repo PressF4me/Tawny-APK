@@ -3032,6 +3032,12 @@ class MainActivity : AppCompatActivity() {
         val key = prefs.getString("channelKey", null) ?: return showWelcome()
         val name = prefs.getString("channelName", "your pet") ?: "your pet"
         val httpPort = ensureAssetServer()
+        // Name this session's relay in the page's connect-src instead of opening
+        // the whole `ws:` scheme. Set before the WebView is pointed at the asset
+        // server, because the policy is baked into the response that carries the
+        // page. A malformed value is dropped by the setter, which costs the LAN
+        // leg rather than widening the policy.
+        assetServer?.lanRelay = signal
         // Mint the Monitor's admission ticket BEFORE reading it. The rendezvous
         // admits a Monitor only if its first frame carries sha256(ticket), and
         // the QR has to advertise that very same ticket. Reading `myToken`

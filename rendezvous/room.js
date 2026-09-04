@@ -34,6 +34,26 @@ const RELAY = new Set([
   'cameras', 'meta', 'camera-control', 'torch', 'battery'
 ]);
 const TICKET_TTL_MS = 24 * 60 * 60 * 1000;
+// The idle TTL above is rolled forward while a Monitor is sitting in the room
+// (see alarm()), because a Monitor plugged in and left alone is the product's
+// whole premise and expiring the ticket out from under it locked every new
+// Handheld out with 4008. That roll-forward had no ceiling, so for the normal
+// case — a Monitor that stays up — the ticket never expired at all, and a
+// pairing link photographed off someone's screen stayed valid indefinitely.
+//
+// So the roll-forward is now bounded: a ticket lives at most this long from the
+// moment it was first registered, however long the Monitor stays up. Reaching
+// it means new Handhelds must be re-paired; sessions already connected are not
+// touched, because the ticket is only consulted at admission. A Monitor that
+// reconnects re-registers the *same* stored ticket, which deliberately does not
+// restart this clock — only a genuinely new ticket (a different hashT, i.e. a
+// re-paired channel) does. This is the bound SECURITY.md quotes.
+const TICKET_MAX_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** When this ticket was first registered, reconstructed for pre-`iss` records. */
+const issuedAt = (rec) => rec.iss ?? (rec.exp - TICKET_TTL_MS);
+/** Past the absolute ceiling, regardless of how often it has been rolled on. */
+const beyondLifetime = (rec) => Date.now() - issuedAt(rec) >= TICKET_MAX_LIFETIME_MS;
 const HEX64 = /^[a-f0-9]{64}$/;
 // A socket that connects and never says hello held a slot forever: pending
 // sockets are excluded from members(), so MAX_PER_ROOM never stopped them.
@@ -61,7 +81,11 @@ export class Room {
 
   async ticket() {
     const rec = await this.state.storage.get('ticket');
-    return rec && Date.now() <= rec.exp ? rec : null;
+    if (!rec) return null;
+    // Two independent clocks: the idle TTL, and the absolute ceiling that the
+    // roll-forward in alarm() may not cross.
+    if (Date.now() > rec.exp || beyondLifetime(rec)) return null;
+    return rec;
   }
 
   /**
@@ -221,8 +245,14 @@ export class Room {
 
       // 3. Admitted. Only now may stored state change.
       if (rekey && (!rec || rec.hashT !== rekey.hashT || rec.auth !== rekey.auth)) {
+        // Re-registering the same ticket (a Monitor reconnecting) keeps the
+        // original issue time, so reconnects cannot be used — deliberately or
+        // by accident — to walk the absolute ceiling forward forever. Only a
+        // different hashT, which means the channel was genuinely re-paired,
+        // starts a new lifetime.
+        const iss = rec && rec.hashT === rekey.hashT ? issuedAt(rec) : Date.now();
         await this.state.storage.put('ticket', {
-          hashT: rekey.hashT, auth: rekey.auth, exp: Date.now() + TICKET_TTL_MS,
+          hashT: rekey.hashT, auth: rekey.auth, iss, exp: Date.now() + TICKET_TTL_MS,
         });
         await this.state.storage.setAlarm(Date.now() + TICKET_TTL_MS + 60_000);
       }
@@ -296,12 +326,21 @@ export class Room {
     // is by definition still current, so roll it forward instead.
     const stationHere = this.members()
       .some((w) => w.deserializeAttachment()?.role === 'station');
-    if (stationHere) {
+    if (stationHere && !beyondLifetime(rec)) {
+      rec.iss = issuedAt(rec);        // pin it, so pre-`iss` records get a clock
       rec.exp = Date.now() + TICKET_TTL_MS;
       await this.state.storage.put('ticket', rec);
-      await this.state.storage.setAlarm(Date.now() + TICKET_TTL_MS + 60_000);
+      // Wake again either at the next idle expiry or at the ceiling, whichever
+      // comes first, so the ticket is actually dropped when its life is up
+      // rather than lingering until something else happens to touch the room.
+      const ceiling = issuedAt(rec) + TICKET_MAX_LIFETIME_MS;
+      await this.state.storage.setAlarm(
+        Math.min(Date.now() + TICKET_TTL_MS, ceiling) + 60_000
+      );
       return;
     }
-    if (Date.now() > rec.exp) await this.state.storage.delete('ticket');
+    if (Date.now() > rec.exp || beyondLifetime(rec)) {
+      await this.state.storage.delete('ticket');
+    }
   }
 }

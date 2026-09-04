@@ -30,9 +30,21 @@ const MAX_PER_ROOM = 4;      // one Watcher + up to three Handhelds
 const MAX_STATIONS = 1;
 const MAX_PER_IP = 6;
 const MAX_TOTAL = 64;
-const MAX_MSG = 64 * 1024;
+const MAX_MSG = 64 * 1024;   // enforced by the ws maxPayload below, too
 const AUTH_FAILS = 8;        // per IP before lockout
 const AUTH_WINDOW = 10 * 60_000;
+// Distinct room ids this process will track at once. LocalWeb.kt has always had
+// this cap; here the room map could grow without bound (see the empty-room leak
+// fixed in admit()), so an unauthenticated caller could walk it up until the
+// process died.
+const MAX_ROOMS = 256;
+// A socket that opens and never sends {type:'hello'} used to sit there forever.
+// The 30 s heartbeat only reaps sockets that stop answering pings, so a client
+// that pongs politely and never speaks held a slot indefinitely — eleven hosts
+// at MAX_PER_IP would wedge MAX_TOTAL and take the whole relay down. The LAN
+// relay sweeps these after 5 s and the Durable Object after 10 s; this had no
+// sweep at all.
+const ADMIT_TIMEOUT_MS = 10_000;
 
 const ROOM_RE = /^[a-f0-9]{32}$/;
 const PUBLIC = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
@@ -56,13 +68,40 @@ const MIME = {
   '.webmanifest': 'application/manifest+json; charset=utf-8'
 };
 
+/**
+ * `connect-src` for the page this server hands out.
+ *
+ * It used to be `'self' https: wss: ws:`, which is three scheme-wide sources —
+ * i.e. no restriction at all. Any script that got into the page could POST the
+ * channel key out of localStorage to any host on the internet, which is the one
+ * thing a CSP on this page exists to prevent.
+ *
+ * Same-origin covers the signaling socket, because `'self'` matches ws/wss on
+ * the document's own host and port. Beyond that the page dials exactly one
+ * other host: the rendezvous named in RENDEZVOUS_URL, over wss for signaling
+ * and https for /turn and /config.json. If none is configured, it dials nothing
+ * else and the policy says so.
+ */
+const CONNECT_SRC_TOKEN = '__TAWNY_CONNECT_SRC__';
+const CONNECT_SRC = (() => {
+  const out = ["'self'"];
+  const host = RENDEZVOUS_URL
+    ? RENDEZVOUS_URL.replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '')
+        .split('/')[0].split('?')[0]
+    : '';
+  // A host with whitespace or a semicolon would truncate the policy. If it does
+  // not look like a hostname[:port], it does not go in.
+  if (/^[A-Za-z0-9.-]+(:\d{1,5})?$/.test(host)) out.push(`wss://${host}`, `https://${host}`);
+  return out.join(' ');
+})();
+
 const CSP = [
   "default-src 'none'",
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' data: blob:",
   "media-src 'self' blob:",
-  "connect-src 'self' https: wss: ws:",
+  `connect-src ${CONNECT_SRC}`,
   "manifest-src 'self'",
   "base-uri 'none'",
   "form-action 'none'",
@@ -168,7 +207,7 @@ const server = http.createServer(async (req, res) => {
     if (!TURN_URLS.length || !TURN_SECRET) return json(res, 404, { error: 'no turn configured' });
     // Must present a ticket valid for this room — no free credential farming.
     const rec = tickets.get(room);
-    if (!rec || Date.now() > rec.exp ||
+    if (!ticketLive(rec) ||
         sha256hex(url.searchParams.get('t') || '') !== rec.hashT) {
       return json(res, 403, { error: 'not paired' });
     }
@@ -191,7 +230,17 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
-    const body = await readFile(file);
+    let body = await readFile(file);
+    // The page carries a <meta> CSP too, as defence in depth for anyone serving
+    // these files from something other than this process. A static file cannot
+    // know the rendezvous host, so that copy used to fall back to the blanket
+    // `ws: wss: https:` this header just stopped emitting. Substitute the real
+    // source list so there is one definition rather than two that drift.
+    if (extname(file) === '.html') {
+      body = Buffer.from(
+        body.toString('utf8').split(CONNECT_SRC_TOKEN).join(CONNECT_SRC), 'utf8'
+      );
+    }
     res.writeHead(200, secureHeaders({
       'content-type': MIME[extname(file)] || 'application/octet-stream',
       'content-length': body.length,
@@ -228,6 +277,15 @@ const tickets = new Map();
 const sha256hex = (s) => createHash('sha256').update(String(s)).digest('hex');
 const HEX64 = /^[a-f0-9]{64}$/;
 const TICKET_TTL = 24 * 60 * 60_000;
+// Absolute ceiling on a ticket's life, mirroring rendezvous/room.js. A Monitor
+// re-registers the same stored ticket every time it reconnects, which would
+// otherwise push the idle TTL out indefinitely and leave a leaked pairing link
+// valid forever. Re-registering the same hashT keeps the original issue time;
+// only a re-paired channel (a different hashT) starts a new lifetime.
+const TICKET_MAX_LIFETIME = 30 * 24 * 60 * 60_000;
+const issuedAt = (rec) => rec.iss ?? (rec.exp - TICKET_TTL);
+const ticketLive = (rec) =>
+  !!rec && Date.now() <= rec.exp && Date.now() - issuedAt(rec) < TICKET_MAX_LIFETIME;
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MSG });
 
 // Every relayed type is addressed. Peer ids come from the server, so a client
@@ -277,15 +335,28 @@ wss.on('connection', (ws, req, ctx) => {
 
   ws.meta = { id, room, role, ip, pending: true };
   ws.isAlive = true;
+  // Counted from the moment the socket exists, not from admission, so an
+  // unadmitted socket cannot be used to sidestep the per-IP cap.
   perIP.set(ip, (perIP.get(ip) || 0) + 1);
   ws.on('pong', () => { ws.isAlive = true; });
 
+  // Say hello or go away. Cleared on admission and on close.
+  ws.admitTimer = setTimeout(() => {
+    if (ws.meta.pending) { noteFail(ip); try { ws.close(4008, 'no hello'); } catch {} }
+  }, ADMIT_TIMEOUT_MS);
+  ws.admitTimer.unref?.();
+
   const admit = (msg) => {
     let rec = tickets.get(room);
-    if (rec && Date.now() > rec.exp) { tickets.delete(room); rec = null; }
+    if (rec && !ticketLive(rec)) { tickets.delete(room); rec = null; }
 
-    if (!rooms.has(room)) rooms.set(room, new Map());
-    const peers = rooms.get(room);
+    // Deliberately do NOT create the room entry here. It used to be an
+    // unconditional `rooms.set(room, new Map())` above every rejection path,
+    // and `ws.on('close')` bails out early for a socket that never joined — so
+    // each refused admission left a permanent empty Map behind and the map grew
+    // without bound. Same bug LocalWeb.kt calls out; it was only ever fixed
+    // there. The entry is created on success, in the one place below.
+    const peers = rooms.get(room) || new Map();
     const proof = typeof msg.a === 'string' && HEX64.test(msg.a) ? msg.a : null;
 
     // Capacity first: nothing that gets rejected may change stored state. See
@@ -293,6 +364,7 @@ wss.on('connection', (ws, req, ctx) => {
     // turned away let a caller who knew only the room id re-key the channel on
     // its way out, locking every paired Handheld to 4008 until the TTL expired.
     if (peers.size >= MAX_PER_ROOM) return ws.close(4003, 'channel full');
+    if (!rooms.has(room) && rooms.size >= MAX_ROOMS) return ws.close(4005, 'busy');
     let evict = [];
     if (role === 'station') {
       const stations = [...peers.values()].filter((p) => p.meta.role === 'station');
@@ -313,7 +385,11 @@ wss.on('connection', (ws, req, ctx) => {
       const mayRekey = proof !== null || !rec?.auth;
       const hashT = typeof msg.hashT === 'string' && HEX64.test(msg.hashT) ? msg.hashT : null;
       if (hashT && mayRekey) {
-        register = { hashT, auth: proof || rec?.auth || null, exp: Date.now() + TICKET_TTL };
+        register = {
+          hashT, auth: proof || rec?.auth || null,
+          iss: rec && rec.hashT === hashT ? issuedAt(rec) : Date.now(),
+          exp: Date.now() + TICKET_TTL
+        };
       } else if (rec) {
         if (sha256hex(msg.t) !== rec.hashT) return ws.close(4008, 'pairing expired');
       } else if (REQUIRE_TICKET) {
@@ -325,6 +401,8 @@ wss.on('connection', (ws, req, ctx) => {
     // on — and the evicted peer leaves the map here rather than whenever its
     // close event lands, so it is not in the welcome we are about to send.
     if (register) tickets.set(room, register);
+    // First admission into this room is what creates it.
+    if (!rooms.has(room)) rooms.set(room, peers);
     for (const p of evict) {
       peers.delete(p.meta.id);
       for (const peer of peers.values()) send(peer, { type: 'peer-left', id: p.meta.id });
@@ -332,6 +410,7 @@ wss.on('connection', (ws, req, ctx) => {
     }
 
     ws.meta.pending = false;
+    clearTimeout(ws.admitTimer);
     peers.set(id, ws);
     send(ws, {
       type: 'welcome', id, role,
@@ -362,10 +441,17 @@ wss.on('connection', (ws, req, ctx) => {
   });
 
   ws.on('close', () => {
+    clearTimeout(ws.admitTimer);
     const n = (perIP.get(ip) || 1) - 1;
     if (n <= 0) perIP.delete(ip); else perIP.set(ip, n);
     const peers = rooms.get(room);
-    if (!peers || !peers.has(id)) return;   // pending socket never joined
+    if (!peers || !peers.has(id)) {
+      // A socket that never joined. It owns nothing, but it may have been the
+      // reason an empty room is sitting there if anything ever creates one
+      // early again — so sweep the room if it is empty rather than trusting it.
+      if (peers && peers.size === 0) rooms.delete(room);
+      return;
+    }
     peers.delete(id);
     log(`- ${role} ${id} <- ${room.slice(0, 8)} (${peers.size})`);
     if (peers.size === 0) rooms.delete(room);
@@ -387,7 +473,7 @@ const heartbeat = setInterval(() => {
   }
   const now = Date.now();
   for (const [ip, rec] of fails) if (now > rec.until) fails.delete(ip);
-  for (const [room, rec] of tickets) if (now > rec.exp) tickets.delete(room);
+  for (const [room, rec] of tickets) if (!ticketLive(rec)) tickets.delete(room);
 }, 30_000);
 heartbeat.unref?.();
 

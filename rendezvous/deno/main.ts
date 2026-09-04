@@ -35,6 +35,22 @@ const RELAY = new Set([
 const MAX_PER_ROOM = 4;      // 1 Monitor + up to 3 Viewers. Mirrors ../room.js.
 const MAX_STATIONS = 1;
 const TICKET_TTL = 24 * 60 * 60_000;
+// Absolute ceiling on a ticket's life, mirroring ../room.js. A Monitor
+// re-registers the same stored ticket on every reconnect, which would otherwise
+// push the idle TTL out forever and leave a leaked pairing link valid for good.
+// Re-registering the same hashT keeps the original issue time; only a re-paired
+// channel (a different hashT) starts a new lifetime.
+const TICKET_MAX_LIFETIME = 30 * 24 * 60 * 60_000;
+// Signalling frames are a few KB. ../room.js and ../../server.js have always
+// capped these; this port did not, so a single socket could hand it an
+// arbitrarily large "ICE candidate" and take the isolate down.
+const MAX_MSG = 64 * 1024;
+// A socket that opens and never says hello held a slot forever here — there was
+// no sweep at all. Matches ../room.js.
+const ADMIT_TIMEOUT_MS = 10_000;
+// Bounds on a map that could previously grow without limit from unauthenticated
+// connections. Mirrors LocalWeb.kt / ../../server.js.
+const MAX_ROOMS = 256;
 
 const env = (k: string) => Deno.env.get(k) ?? "";
 const list = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
@@ -43,7 +59,7 @@ type Peer = { id: string; role: string; ws: WebSocket };
 const rooms = new Map<string, Map<string, Peer>>();
 // `auth` is sha256("tawny-auth-v1|" + channel key): proof the sender holds the
 // key, which this relay stores but can never derive. Older rooms have none.
-const tickets = new Map<string, { hashT: string; auth: string | null; exp: number }>();
+const tickets = new Map<string, { hashT: string; auth: string | null; iss: number; exp: number }>();
 
 const bus = new BroadcastChannel("tawny");
 bus.onmessage = (e) => fanout(e.data, true);
@@ -71,9 +87,14 @@ async function sha256hex(s: string) {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(s ?? "")));
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+const issuedAt = (rec: { iss?: number; exp: number }) => rec.iss ?? (rec.exp - TICKET_TTL);
 function ticketFor(room: string) {
   const rec = tickets.get(room);
-  return rec && Date.now() <= rec.exp ? rec : null;
+  if (!rec) return null;
+  // Two clocks: the idle TTL, and the absolute ceiling a re-registration may
+  // not push past.
+  if (Date.now() > rec.exp || Date.now() - issuedAt(rec) >= TICKET_MAX_LIFETIME) return null;
+  return rec;
 }
 
 function cors(extra: Record<string, string> = {}) {
@@ -157,17 +178,26 @@ Deno.serve(async (req) => {
   const { socket, response } = Deno.upgradeWebSocket(req);
   const id = crypto.randomUUID().slice(0, 12);
   let joined = false;
+  // Say hello or go away. Without this a socket that opened and never spoke sat
+  // here for as long as it liked.
+  const admitTimer = setTimeout(() => {
+    if (!joined) { try { socket.close(4008, "no hello"); } catch { /* gone */ } }
+  }, ADMIT_TIMEOUT_MS);
 
   const admit = async (msg: any) => {
     const rec = ticketFor(room);
+    // Deliberately NOT inserted into `rooms` yet. This used to be an
+    // unconditional rooms.set() above every rejection path, so each refused
+    // admission left a permanent empty Map behind and the map grew without
+    // bound. The entry is created on success, below.
     const peers = rooms.get(room) ?? new Map<string, Peer>();
-    rooms.set(room, peers);
     const proof = typeof msg.a === "string" && HEX64.test(msg.a) ? msg.a : null;
 
     // Capacity first: nothing that gets rejected may change stored state. See
     // ../room.js — registering a ticket for a socket that is then turned away
     // let a caller who knew only the room id re-key the channel on its way out.
     if (peers.size >= MAX_PER_ROOM) { socket.close(4003, "channel full"); return; }
+    if (!rooms.has(room) && rooms.size >= MAX_ROOMS) { socket.close(4005, "busy"); return; }
     let evict: Peer[] = [];
     if (role === "station") {
       const stations = [...peers.values()].filter((p) => p.role === "station");
@@ -182,7 +212,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    let register: { hashT: string; auth: string | null } | null = null;
+    let register: { hashT: string; auth: string | null; iss: number } | null = null;
     if (role === "viewer") {
       if (!rec || (await sha256hex(msg.t)) !== rec.hashT) { socket.close(4008, "pairing expired"); return; }
     } else {
@@ -190,7 +220,13 @@ Deno.serve(async (req) => {
       const mayRekey = proof !== null || !rec?.auth;
       const hashT = typeof msg.hashT === "string" && HEX64.test(msg.hashT) ? msg.hashT : null;
       if (hashT && mayRekey) {
-        register = { hashT, auth: proof || rec?.auth || null };
+        // Same hashT means the Monitor is re-registering the ticket it already
+        // had, so the original issue time carries over and the absolute ceiling
+        // cannot be walked forward by reconnecting.
+        register = {
+          hashT, auth: proof || rec?.auth || null,
+          iss: rec && rec.hashT === hashT ? issuedAt(rec) : Date.now(),
+        };
       } else if (rec) {
         if ((await sha256hex(msg.t)) !== rec.hashT) { socket.close(4008, "pairing expired"); return; }
       } else {
@@ -207,6 +243,8 @@ Deno.serve(async (req) => {
     }
 
     joined = true;
+    clearTimeout(admitTimer);
+    if (!rooms.has(room)) rooms.set(room, peers);   // first admission creates it
     peers.set(id, { id, role, ws: socket });
     socket.send(JSON.stringify({
       type: "welcome", id, role,
@@ -216,6 +254,9 @@ Deno.serve(async (req) => {
   };
 
   socket.onmessage = async (e) => {
+    // Signalling frames are a few KB; anything larger is someone filling memory.
+    const size = typeof e.data === "string" ? e.data.length : (e.data?.byteLength ?? 0);
+    if (size > MAX_MSG) { socket.close(4009, "message too large"); return; }
     let msg: any;
     try { msg = JSON.parse(e.data); } catch { return; }
     if (!msg || typeof msg !== "object") return;
@@ -229,6 +270,7 @@ Deno.serve(async (req) => {
     fanout({ room, kind: "relay", to: msg.to, msg });
   };
   const gone = () => {
+    clearTimeout(admitTimer);
     if (!joined) return;
     rooms.get(room)?.delete(id);
     fanout({ room, kind: "announce", except: id, msg: { type: "peer-left", id } });
@@ -242,5 +284,7 @@ Deno.serve(async (req) => {
 
 setInterval(() => {
   const now = Date.now();
-  for (const [room, rec] of tickets) if (now > rec.exp) tickets.delete(room);
+  for (const [room, rec] of tickets) {
+    if (now > rec.exp || now - issuedAt(rec) >= TICKET_MAX_LIFETIME) tickets.delete(room);
+  }
 }, 60_000);

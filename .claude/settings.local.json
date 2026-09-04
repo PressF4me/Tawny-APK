@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(tar xzf *)"
+      "Bash(tar xzf *)",
+      "Bash(python3 *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }
