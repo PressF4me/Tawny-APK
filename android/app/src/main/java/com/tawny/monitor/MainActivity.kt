@@ -1443,6 +1443,37 @@ class MainActivity : AppCompatActivity() {
                 "reached, the app falls back to Tawny's rather than failing — a " +
                 "wrong address here costs a few seconds, not a working app."
         ))
+        fun tipCard(title: String, body: String) = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundRect(Hue.BG, Hue.LINE, Radius.CARD)
+            val p = dp(14); setPadding(p, p, p, p)
+            layoutParams = lp(topMargin = 18)
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                setTextColor(Hue.TEXT)
+                textSize = Type.LABEL
+                letterSpacing = 0.04f
+                typeface = uiFontSemi
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = body
+                setTextColor(Hue.DIM)
+                textSize = 13f
+                typeface = uiFont
+                setLineSpacing(0f, 1.4f)
+                layoutParams = LinearLayout.LayoutParams(WC, WC).also { it.topMargin = dp(6) }
+            })
+        }
+        col.addView(tipCard(
+            "The easiest way to run your own",
+            "Install Tailscale on an always-on machine you own — a home server, a " +
+                "Pi, an old laptop — and on it:\n\n" +
+                "npm install && node server.js\ntailscale serve --bg 8099\n\n" +
+                "That gives you a private wss:// address " +
+                "(yourmachine.your-tailnet.ts.net) that only your own devices can " +
+                "reach — a real certificate, no port-forwarding, nothing exposed to " +
+                "the internet. Paste it into Rendezvous below."
+        ))
 
         fun field(label: String, hint: String, key: String, password: Boolean = false): EditText {
             col.addView(TextView(this).apply {
