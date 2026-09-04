@@ -22,6 +22,13 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.concurrent.thread
 
+/** The bare host out of a `ws(s)://` / `http(s)://` relay URL, or null. */
+fun relayHost(url: String?): String? = url
+    ?.removePrefix("wss://")?.removePrefix("ws://")
+    ?.removePrefix("https://")?.removePrefix("http://")
+    ?.substringBefore('/')?.substringBefore('?')
+    ?.takeIf { it.isNotBlank() }
+
 /**
  * `connect-src` for the pages this server hands out.
  *
@@ -29,16 +36,20 @@ import kotlin.concurrent.thread
  * ever landed in the page, the channel key sitting in localStorage could be
  * posted to any host on the internet. The page only ever needs three things:
  * its own origin, the Monitor's relay on the LAN (a plain `ws:` on a private
- * address that changes with the network), and the one rendezvous host this
- * build was compiled against.
+ * address that changes with the network), and the rendezvous hosts this
+ * install may actually dial.
+ *
+ * @param relayHosts the built-in rendezvous host and — when an advanced user
+ *   has pointed the app at their own — theirs. A custom relay that is not
+ *   listed here is blocked by the page's own CSP before it ever gets a socket,
+ *   which is a silent failure and exactly the kind of thing the fallback would
+ *   then paper over. It stays a *list*, not a wildcard: the whole point of the
+ *   directive is that the channel key cannot be posted to an arbitrary host.
  */
-private val CONNECT_SRC: String = buildString {
+private fun connectSrc(relayHosts: List<String>): String = buildString {
     append("'self' ws:")
-    val rv = BuildConfig.RENDEZVOUS_URL
-    if (rv.isNotBlank()) {
-        val host = rv.removePrefix("wss://").removePrefix("ws://")
-            .substringBefore('/').substringBefore('?')
-        if (host.isNotBlank()) { append(" wss://"); append(host); append(" https://"); append(host) }
+    for (h in relayHosts.distinct()) {
+        append(" wss://"); append(h); append(" https://"); append(h)
     }
 }
 
@@ -55,8 +66,14 @@ private fun firstFreePort(start: Int): Int {
  * localhost pages may still open a plain `ws://` to the Watcher on the LAN.
  * GET only, localhost only, a handful of small files.
  */
-class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
+class AssetHttpServer(
+    private val ctx: Context,
+    preferredPort: Int,
+    /** Rendezvous hosts the page is allowed to reach; see [connectSrc]. */
+    val relayHosts: List<String> = emptyList(),
+) {
 
+    private val csp = connectSrc(relayHosts)
     val port: Int
     private val server: ServerSocket
     // Bounded, not newCachedThreadPool(): any other app on the device holding
@@ -185,7 +202,7 @@ class AssetHttpServer(private val ctx: Context, preferredPort: Int) {
             "Referrer-Policy: no-referrer\r\n" +
             "Content-Security-Policy: default-src 'none'; script-src 'self'; " +
             "style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; " +
-            "font-src 'self'; manifest-src 'self'; connect-src $CONNECT_SRC; " +
+            "font-src 'self'; manifest-src 'self'; connect-src $csp; " +
             "base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n" +
             "Connection: close\r\n\r\n"
         out.write(head.toByteArray(Charsets.US_ASCII))

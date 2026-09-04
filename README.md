@@ -38,6 +38,12 @@ different one anywhere claiming to be us, it isn't.
 
 No inbound ports are opened on either phone in any configuration.
 
+The rendezvous and TURN can be **your own**, set in the installed app rather
+than at build time: long-press the version stamp on any screen → Diagnostics →
+Servers. If your relay does not answer, the app falls back to the built-in one
+instead of losing the remote path. See `README-ANDROID.md`, "Servers
+(advanced)".
+
 A **channel** is a name plus a 128-bit key generated on the device. Servers are
 told only `sha256(key)`, so channels can't be guessed or enumerated, and the key
 never reaches a server. The key rides in the pairing QR / link.

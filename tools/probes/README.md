@@ -232,6 +232,31 @@ live; and the shell's `Display.getRotation()` table inverts 90/270, does not
 chatter at a 45° boundary, keeps the last reading when the phone is flat, and
 only holds the sensor while the live screen is up. **Green on 2026-09-04.**
 
+## `relay-fallback.mjs` — your own relay cannot brick the remote path
+
+The Servers screen lets an advanced user point Tawny at their own rendezvous and
+TURN. A URL typed into a settings field is exactly the kind of thing that is
+wrong, or right and then down at 3am, so the built-in tunnel is *preferred
+against*, never replaced. Lifts `wsBase` / `rendezvousBase` / `fallbackBase` /
+`fallBackToDefault` / `iceServers` out of `public/app.js`.
+
+```bash
+node tools/probes/relay-fallback.mjs
+```
+
+Asserted: with nothing set there is no fallback and nothing changes; a custom
+relay that will not answer hands the session to the built-in one, moves the
+`/turn` fetch with it, says so, and never reverses mid-session; the swap sits
+*below* the fatal-close branch, because 4003/4004/4008 are a working relay
+answering and not a reason to change relay; a host that accepts the socket and
+then says nothing is caught by the welcome timer, since no dial ever fails
+there; a custom TURN entry sits ahead of — not instead of — what `/turn` issues.
+Plus source-text checks on the shell: the settings are runtime prefs, validated
+before saving and ignored if they fail the check later; the built-in URL is
+never dropped; and the loopback server's CSP is rebuilt to name the custom host,
+which it must be or the socket is blocked before it is made and the fallback
+hides a bug. **Green on 2026-09-04.**
+
 ## Running the worker locally
 
 ```bash

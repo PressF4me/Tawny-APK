@@ -154,7 +154,12 @@ UID boundary, so any other app on the device with `INTERNET` can reach it.
 - loads only bundled assets from `http://127.0.0.1:<port>` — no remote web
   content, and `index.html` carries a strict `<meta http-equiv>` CSP
   (`default-src 'none'; script-src 'self'; …; connect-src 'self' ws: wss:
-  https:`);
+  https:`). The loopback server sends a tighter one still: `connect-src` names
+  the rendezvous hosts this install may reach — the build's, plus the one an
+  advanced user has set on the Servers screen — rather than a blanket `https:`,
+  so an injected script could not post the channel key to an arbitrary host.
+  It is a list, never a wildcard, and the server is rebuilt when the list
+  changes;
 - `onPermissionRequest` grants camera/mic capture only for that host **and**
   only what the OS has already granted the app; `shouldOverrideUrlLoading` /
   `setDownloadListener` pass only `http(s)` to `ACTION_VIEW` (`intent://`,
@@ -236,6 +241,17 @@ after-the-fact alarm, not a gate.
 - **Rendezvous rate-limit / ticket state is in memory** (Node reference) or per
   Durable Object (Cloudflare) / per isolate (Deno — pin one region). A restart
   clears the Node one.
+- **A custom relay is another operator in the threat model.** The Servers screen
+  (behind the diagnostics hatch) lets an advanced user point the app at their
+  own rendezvous and TURN. Whoever runs that service gets exactly what the
+  operator of the built-in one gets, and no more: the opaque room id, the
+  admission ticket, and the ability to attempt a certificate swap that the SAS
+  is there to catch. It never sees the channel key or a video frame. Two
+  practical notes: `ws://` is accepted for a relay on your own network and the
+  save warns that the signalling is then readable on the path (the media stays
+  DTLS-SRTP either way), and the relay is *preferred*, not substituted — if it
+  will not answer, the session falls back to the built-in tunnel rather than
+  losing the remote path — an availability choice, not a security one.
 - **Node/Deno `server.js` can be run without tickets** (`REQUIRE_TICKET=off`) for
   a LAN-style self-host; in that mode any viewer with the room id is admitted.
 - **No audit log** of who joined when, and no alert on a new device pairing.

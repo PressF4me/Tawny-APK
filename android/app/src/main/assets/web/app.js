@@ -65,6 +65,10 @@ const S = {
   // so a second phone connecting mid-read cannot swap the code out.
   sasAsk: null,
   ice: [], iceTimer: null, relayOnly: false,  // filled by fetchIce() when a rendezvous is configured
+  // The relay actually in use. Starts as S.cfg.rendezvous — which is the user's
+  // own when they set one on the Servers screen — and moves to the built-in
+  // tunnel if that one will not answer. See fallBackToDefault().
+  relayBase: null,
   facing: 'environment', micOn: true, camSending: false,
   wake: null, meterStop: null, ac: null, closing: false, dimmed: false,
   editing: null, scanStop: null, pending: null,
@@ -1116,10 +1120,58 @@ function synthChime(ac, kind) {
 // Watcher's LAN IP) — nothing listens for an inbound connection. Media stays
 // peer-to-peer; the rendezvous never sees a frame or the channel key.
 
+const wsBase = (u) => (u ? String(u).replace(/^http/i, 'ws').replace(/\/+$/, '') : null);
+
+/**
+ * The relay to dial. This is the user's own when they have set one (the Servers
+ * screen behind the diagnostics hatch), otherwise the one this build ships
+ * with — and after a fallback it is whichever one is actually working.
+ */
 function rendezvousBase() {
-  const rv = S.cfg.rendezvous;
-  if (!rv) return null;
-  return rv.replace(/^http/i, 'ws').replace(/\/+$/, '');
+  return S.relayBase || wsBase(S.cfg.rendezvous);
+}
+
+/**
+ * The built-in tunnel, kept in reserve behind a custom relay.
+ *
+ * This is the whole safety net on the custom-server feature: a rendezvous URL
+ * typed into a settings field is exactly the kind of thing that is wrong, or
+ * right and then goes down at 3am, and a pet monitor that answers "watch from
+ * anywhere" with silence because of it is worse than one that quietly uses the
+ * default. Null when there is nothing to fall back to (no custom relay set, or
+ * a LAN-only build).
+ */
+const fallbackBase = () => wsBase(S.cfg.rendezvousFallback);
+
+// How long a custom relay gets to say `welcome` before it is treated as the
+// wrong address. It has already accepted the socket by then, so a dial counter
+// will never notice: pointing at a host that speaks WebSocket but not Tawny is
+// the failure that would otherwise hang forever.
+const RELAY_HELLO_MS = 8000;
+
+/**
+ * Give up on the user's relay and use the built-in one.
+ *
+ * Both ends apply the same rule, so a relay that is genuinely down sends the
+ * Monitor and every Handheld to the same place and they still meet. Only ever
+ * one way: the fallback is never traded back for the custom relay mid-session,
+ * because a flapping server would then cost a reconnection every time.
+ */
+function fallBackToDefault(entry, why) {
+  const fb = fallbackBase();
+  if (!fb || entry.usingFallback || entry.base === fb) return false;
+  diag(`custom relay unusable (${why}) — falling back to the built-in tunnel`);
+  toast('Your own server did not answer. Using Tawny’s relay instead.');
+  entry.usingFallback = true;
+  entry.base = fb;
+  entry.retry = 0;
+  entry.refused = 0;
+  entry.swapping = true;
+  S.relayBase = fb;
+  clearTimeout(S.iceTimer);
+  fetchIce();                       // TURN credentials come from the relay too
+  try { entry.ws?.close(); } catch {}
+  return true;
 }
 
 async function sha256hex(s) {
@@ -1333,16 +1385,27 @@ function openSignal(base, tag) {
   // socket opens. `refused` counts admissions the relay turned down, which
   // happen after the socket is open — so it needs its own counter, cleared only
   // by an actual welcome, or a Monitor bounced by a ghost would re-dial forever.
-  const entry = { tag, ws: null, retry: 0, refused: 0, dead: false };
+  // `base` lives on the entry rather than in the closure: a cloud transport
+  // pointed at a custom relay may swap it for the built-in tunnel mid-flight.
+  const entry = { tag, base, ws: null, retry: 0, refused: 0, dead: false };
   S.signals.push(entry);
+  // Only a custom cloud relay has anywhere to fall back to.
+  const canFallBack = () => tag === 'cloud' && !entry.usingFallback && !!fallbackBase();
   const dial = () => {
     if (entry.dead || S.closing) return;
-    diag(`dial ${tag} ${String(base || 'same-origin').replace(/^wss?:\/\//, '')} room=${S.roomId}`);
-    const ws = new WebSocket(wsURLFor(base));
+    diag(`dial ${tag} ${String(entry.base || 'same-origin').replace(/^wss?:\/\//, '')} room=${S.roomId}`);
+    const ws = new WebSocket(wsURLFor(entry.base));
     entry.ws = ws;
     ws.onopen = async () => {
       entry.retry = 0;
       diag(`${tag} open; hello role=${S.role} ticket=${S.token ? 'yes' : 'MISSING'}`);
+      // A host that accepts the socket and then says nothing is the classic
+      // "that is not a Tawny relay" — no dial ever fails, so nothing else here
+      // would ever notice.
+      clearTimeout(entry.helloTimer);
+      if (canFallBack()) {
+        entry.helloTimer = setTimeout(() => fallBackToDefault(entry, 'no welcome'), RELAY_HELLO_MS);
+      }
 
       // The LAN leg is plain ws:// on a shared Wi-Fi, so the raw ticket must
       // never go out on it — anyone sniffing the network would get the room id
@@ -1385,6 +1448,8 @@ function openSignal(base, tag) {
       // Membership traffic only — offer/answer/ice would drown the log.
       if (m.type === 'welcome') {
         entry.refused = 0;
+        clearTimeout(entry.helloTimer);   // this relay works; stop watching it
+        entry.helloTimer = null;
         diag(`${tag} welcome id=${m.id} peers=${(m.peers || []).length}`);
       }
       else if (m.type === 'peer-joined') diag(`${tag} peer-joined ${m.role || '?'} ${m.id}`);
@@ -1393,7 +1458,12 @@ function openSignal(base, tag) {
     };
     ws.onclose = (ev) => {
       diag(`${tag} close ${ev.code}${ev.reason ? ' "' + ev.reason + '"' : ''} retry=${entry.retry}`);
+      clearTimeout(entry.helloTimer);
+      entry.helloTimer = null;
       if (entry.dead || S.closing) return;
+
+      // We hung this socket up on purpose to move to the built-in tunnel.
+      if (entry.swapping) { entry.swapping = false; setTimeout(dial, 250); return; }
 
       // The relay handed this room to a device that proved the channel key —
       // the same pairing, on another phone. Terminal, but not a fault, and not
@@ -1453,6 +1523,13 @@ function openSignal(base, tag) {
       for (const p of [...S.peers.values()]) if (p.transport === entry) removePeer(p.id);
       updateStatus();
 
+      // Below the fatal codes on purpose: 4003/4004/4008 are a relay that is
+      // working and answering, and swapping it out for another would be the
+      // wrong response to a real refusal. What lands here is the relay not
+      // answering at all — a wrong address, a host that is down, a TLS
+      // failure. Two of those in a row is enough to tell it from a blip.
+      if (canFallBack() && entry.retry >= 1 && fallBackToDefault(entry, `close ${ev.code}`)) return;
+
       const wait = Math.min(1000 * 2 ** entry.retry++, 15000);
 
       // Handheld: fall to the rendezvous when the LAN attempt keeps failing —
@@ -1481,6 +1558,8 @@ function openSignal(base, tag) {
 
 function closeSignal(entry) {
   entry.dead = true;
+  clearTimeout(entry.helloTimer);
+  entry.helloTimer = null;
   // ws.onclose bails on `entry.dead` before it reaches its own cleanup loop, so
   // closing a transport on purpose used to strand every peer that was riding
   // it: dead RTCPeerConnections stayed in S.peers, viewerCount() over-reported
@@ -1502,6 +1581,10 @@ function connectAll() {
   S.signals = [];
   S.committedTag = null;
   clearTimeout(S.raceTimer);
+  // Sticky for the session: once a custom relay has been given up on, a
+  // background/foreground cycle must not spend another eight seconds
+  // rediscovering that. start() clears it.
+  S.relayBase = S.relayBase || wsBase(S.cfg.rendezvous);
   const rv = rendezvousBase();
   if (S.role === 'station') {
     if (S.signalUrl) openSignal(S.signalUrl, 'lan');
@@ -1559,7 +1642,11 @@ function broadcast(obj) {
 // Short-lived TURN credentials, issued by the rendezvous per room. No secret
 // ships in the app; nothing is fetched at all on a LAN-only build.
 async function fetchIce() {
-  const rv = S.cfg.rendezvous;
+  // Whichever relay is actually in use — a custom one until it stops
+  // answering, the built-in tunnel after that. Asking a relay we have already
+  // abandoned for TURN credentials would leave the one call that genuinely
+  // needs a relay (both peers behind carrier NAT) with nowhere to go.
+  const rv = rendezvousBase() || S.cfg.rendezvous;
   if (!rv) { S.ice = []; return; }
   const httpBase = rv.replace(/^ws/i, 'http').replace(/\/+$/, '');
   try {
@@ -2026,8 +2113,13 @@ async function handle(m, entry) {
 // --------------------------------------------------------------- webrtc
 
 function iceServers() {
-  if (S.ice && S.ice.length) return S.ice;
-  return (S.cfg.stun || []).map((urls) => ({ urls }));
+  // A TURN server named on the Servers screen goes first and is never dropped:
+  // it is the one the user actually asked for. Whatever the rendezvous issues
+  // stays underneath it, so a custom entry that turns out to be wrong costs
+  // nothing — the built-in relay is still in the list.
+  const mine = Array.isArray(S.cfg.turn) ? S.cfg.turn : [];
+  if (S.ice && S.ice.length) return [...mine, ...S.ice];
+  return [...mine, ...(S.cfg.stun || []).map((urls) => ({ urls }))];
 }
 
 /** Push a newly-fetched ICE server list into connections that already exist. */
@@ -2827,6 +2919,7 @@ async function start(role) {
   // closed on a missing one, so a station that reached here without a code
   // from the shell would refuse every phone rather than let one in.
   if (role === 'station' && pairCodeLeft() <= 0) newPairCode();
+  S.relayBase = null;   // a new session gives the user's own relay a fresh try
   S.roomId = await roomIdFor(S.channel.key);
   diag(`start role=${role} room=${S.roomId} lan=${S.signalUrl || '-'} ` +
     `rv=${rendezvousBase() || 'NONE'} ticket=${S.token ? 'yes' : 'MISSING'}`);
@@ -3366,6 +3459,21 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
   }
   S.signalUrl = signalUrl || null;              // may be null on a cloud-only pairing
   if (rendezvousUrl) S.cfg.rendezvous = rendezvousUrl;
+  // The Servers screen (behind the diagnostics hatch). `fallback` is the
+  // built-in tunnel, sent only when the user has named a relay of their own —
+  // it is what fallBackToDefault() drops back to.
+  const srv = opts && opts.servers;
+  if (srv && typeof srv === 'object') {
+    if (typeof srv.fallback === 'string' && srv.fallback) S.cfg.rendezvousFallback = srv.fallback;
+    if (Array.isArray(srv.stun) && srv.stun.length) {
+      // Kept under its own name as well: init()'s config.json read runs *after*
+      // this (it is behind an await) and rebuilds S.cfg, so a plain `stun`
+      // would be quietly replaced by the build's list a moment later.
+      S.cfg.stunCustom = srv.stun.filter((u) => typeof u === 'string');
+      S.cfg.stun = S.cfg.stunCustom;
+    }
+    if (Array.isArray(srv.turn) && srv.turn.length) S.cfg.turn = srv.turn;
+  }
   // The shell draws the QR, so the shell owns the pairing code. On a Monitor
   // that is the code on screen plus the deadline it is counting down; on a
   // Handheld it is the code the user scanned, presented once to get in.
@@ -3426,10 +3534,17 @@ window.tawnyPairCode = function (code, expMs) {
     if (r.ok) {
       const j = await r.json();
       S.cfg = {
-        stun: Array.isArray(j.stun) ? j.stun : [],
+        // A shell value wins over the build's, here as for the rendezvous:
+        // this rebuild runs *after* tawnyStart() and would otherwise put the
+        // build's STUN list back over the user's.
+        stunCustom: S.cfg.stunCustom,
+        stun: S.cfg.stunCustom?.length ? S.cfg.stunCustom
+          : (Array.isArray(j.stun) ? j.stun : []),
         turnMode: j.turnMode || S.cfg.turnMode || 'auto',
         rendezvous: S.cfg.rendezvous || j.rendezvous || '',   // shell value wins
-        authRequired: !!j.authRequired
+        authRequired: !!j.authRequired,
+        rendezvousFallback: S.cfg.rendezvousFallback,
+        turn: S.cfg.turn
       };
     }
   } catch {}

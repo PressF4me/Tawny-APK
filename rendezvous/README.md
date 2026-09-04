@@ -76,7 +76,16 @@ You get `https://tawny-rendezvous.<subdomain>.workers.dev`.
 
 ### 5. Point the app at it
 
-In `android/local.properties` (never committed):
+**In an installed app**, with no rebuild: long-press the version stamp in the
+bottom-left of any screen → Diagnostics → **Servers**, and put the `wss://` URL
+in. Optional STUN and TURN fields sit under it. This is the only route open to
+someone who installed from Play; details and the fallback behaviour are in
+`README-ANDROID.md`, "Servers (advanced)". If your relay stops answering the app
+drops back to Tawny's rather than losing the remote path, so a typo costs a few
+seconds.
+
+**At build time**, to make it this build's default, in `android/local.properties`
+(never committed):
 
 ```properties
 tawny.rendezvousUrl=wss://tawny-rendezvous.<subdomain>.workers.dev
@@ -85,8 +94,9 @@ tawny.turnMode=auto
 ```
 
 Rebuild — `syncWebAssets` bakes these into `assets/web/config.json` and
-`BuildConfig.RENDEZVOUS_URL`. With the properties unset the app builds LAN-only,
-exactly as before.
+`BuildConfig.RENDEZVOUS_URL`. With the properties unset the app builds LAN-only;
+the runtime setting above still works, so a LAN-only APK can be given a remote
+path without recompiling.
 
 ### Free-tier notes
 

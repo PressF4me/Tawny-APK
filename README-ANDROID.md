@@ -49,6 +49,50 @@ tawny.turnMode=auto
 With none of these set, the app builds **LAN-only** — identical to a build
 before remote support existed. Deploy steps for the relay: `rendezvous/README.md`.
 
+These are the *build's* defaults. An installed app can be pointed elsewhere at
+runtime — see **Servers (advanced)** below — including a build with none of
+them set, which is how a LAN-only APK gains a remote path without recompiling.
+
+## Servers (advanced)
+
+**Long-press the version stamp** in the bottom-left of any native screen →
+Diagnostics → **Servers**. Deliberately behind the same hatch as the flight
+recorder: a support surface, not a feature, and a normal user has no business
+being shown a WebSocket URL field.
+
+Five fields, all optional, all `SharedPreferences` (`srvRendezvous`, `srvStun`,
+`srvTurn`, `srvTurnUser`, `srvTurnPass`): a rendezvous `wss://`/`ws://` URL,
+comma-separated `stun:`/`stuns:` URLs, comma-separated `turn:`/`turns:` URLs,
+and a TURN username and password. Empty means "use Tawny's", which is also the
+reset. Addresses are checked against their scheme before they are saved, and a
+value that fails the check later is ignored rather than dialled.
+
+**The built-in relay is preferred against, never replaced.** If the custom
+rendezvous does not answer — two failed dials, or a host that accepts the socket
+and never says `welcome` within 8 s, which is what pointing at something that
+is not a Tawny relay looks like — the page falls back to the built-in tunnel,
+says so, and moves the `/turn` fetch with it (`fallBackToDefault()` in
+`public/app.js`). Both ends apply the same rule, so a relay that is genuinely
+down sends the Monitor and every Handheld to the same place and they still
+meet. The swap is one-way for the session; a new session gives the custom relay
+a fresh try. A relay's *own* refusals (4003 full / 4004 monitor already running
+/ 4008 pairing expired) are a working relay answering, and never trigger it.
+
+A custom TURN entry goes **ahead of** whatever `/turn` issues rather than
+instead of it, so a wrong one costs nothing. Custom STUN replaces the build's
+list.
+
+Two things that follow the setting and are easy to miss:
+
+- The page's CSP names the hosts it may reach (`connectSrc` in `LocalWeb.kt`).
+  A custom host not in that list is blocked before it ever gets a socket, so
+  `ensureAssetServer()` rebuilds the loopback server whenever the host list
+  changes. It stays a list, not a wildcard — the directive exists so the channel
+  key cannot be posted to an arbitrary host.
+- The diagnostics **Send to Tawny** button still posts to the build's own
+  `/report`, not the custom relay. That endpoint is the project's support inbox
+  and a self-hosted rendezvous does not implement it.
+
 ### Release signing
 
 `signingConfigs.release` reads `android/keystore.properties` (git-ignored):

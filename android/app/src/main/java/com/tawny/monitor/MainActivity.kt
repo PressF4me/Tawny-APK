@@ -513,6 +513,7 @@ class MainActivity : AppCompatActivity() {
             "handheld" -> showHandheldHome()
             "offline" -> showMonitorOffline()
             "diag" -> showDiagnostics()
+            "servers" -> showServers()
             "about" -> showAbout()
             "lntip" -> showLightningTip()
             // Only if there is still something to list, else fall through to the
@@ -1399,7 +1400,167 @@ class MainActivity : AppCompatActivity() {
                 secondaryLabel = "Keep it"
             )
         })
+        // The other thing behind this hatch. Same reasoning as the hatch
+        // itself: a support surface, not a feature.
+        outer.addView(link(
+            if (customRendezvous().isNotBlank()) "Servers — using your own"
+            else "Servers (advanced)"
+        ) { showServers() })
         root.addView(outer)
+    }
+
+    /**
+     * Point Tawny at your own rendezvous / TURN, at runtime.
+     *
+     * `tawny.rendezvousUrl` in `local.properties` has always existed, but it is
+     * a build-time property — so the only person who could use their own relay
+     * was whoever compiled the APK. Everyone who installs the app had no way at
+     * all, which for a project whose whole pitch is "your video does not go
+     * through anybody's cloud" is the wrong way round.
+     *
+     * Nothing here can take the remote path down. A custom relay is *preferred*,
+     * never substituted: if it does not answer, the page falls back to the
+     * built-in tunnel and says so (see openSignal/fetchIce in public/app.js).
+     * Blank fields mean "use the defaults", which is also the reset.
+     */
+    private fun showServers() {
+        clearScreen()
+        screen = "servers"
+        swipeNav(back = { showDiagnostics() }, forward = null)
+
+        val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+        val col = column(scroll = true)
+        col.addView(backLink { showDiagnostics() })
+        col.addView(heading("Servers", "For running Tawny on your own infrastructure."))
+        col.addView(aboutBody(
+            "On your own Wi-Fi none of this is used: the monitor phone carries " +
+                "the session itself and nothing leaves the house. These apply to " +
+                "watching from somewhere else, which needs a small always-on " +
+                "service to introduce the two phones — and, when neither can be " +
+                "reached directly, a TURN relay to forward the (still encrypted) " +
+                "media. Deploy steps are in rendezvous/README.md.\n\n" +
+                "Leave a field empty to use Tawny's own. If your relay cannot be " +
+                "reached, the app falls back to Tawny's rather than failing — a " +
+                "wrong address here costs a few seconds, not a working app."
+        ))
+
+        fun field(label: String, hint: String, key: String, password: Boolean = false): EditText {
+            col.addView(TextView(this).apply {
+                text = label
+                setTextColor(Hue.DIM)
+                textSize = Type.LABEL
+                letterSpacing = 0.1f
+                typeface = uiFontSemi
+                layoutParams = lp(topMargin = 20)
+            })
+            val input = EditText(this).apply {
+                this.hint = hint
+                inputType = if (password)
+                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                else
+                    InputType.TYPE_TEXT_VARIATION_URI
+                setSingleLine()
+                setTextColor(Hue.TEXT)
+                setHintTextColor(Hue.DIM)
+                typeface = uiFont
+                textSize = Type.BODY
+                background = roundRect(Hue.BG, Hue.LINE)
+                setPadding(dp(14), dp(13), dp(14), dp(13))
+                minHeight = dp(48)
+                layoutParams = lp(topMargin = 6)
+                setText(prefs.getString(key, ""))
+            }
+            col.addView(input)
+            return input
+        }
+
+        val rvIn = field("Rendezvous", "wss://relay.example.net", PREF_RENDEZVOUS)
+        val stunIn = field("STUN (comma separated)", "stun:stun.example.net:3478", PREF_STUN)
+        val turnIn = field("TURN (comma separated)", "turns:turn.example.net:5349", PREF_TURN)
+        val userIn = field("TURN username", "", PREF_TURN_USER)
+        val passIn = field("TURN password", "", PREF_TURN_PASS, password = true)
+
+        val note = TextView(this).apply {
+            setTextColor(Hue.DIM)
+            textSize = 12.5f
+            typeface = uiFont
+            setLineSpacing(0f, 1.35f)
+            layoutParams = lp(topMargin = 14)
+            text = if (customRendezvous().isNotBlank())
+                "Now using your rendezvous. Tawny's stays as the fallback."
+            else "Using Tawny's rendezvous" +
+                (if (BuildConfig.RENDEZVOUS_URL.isBlank()) " — none in this build (LAN only)." else ".")
+        }
+        col.addView(note)
+
+        col.addView(primary("Save") {
+            val rv = rvIn.text.toString().trim()
+            val bad = buildString {
+                if (rv.isNotBlank() && !RELAY_URL_RE.matches(rv))
+                    append("The rendezvous address must start with wss:// (or ws:// on your own LAN).\n\n")
+                val stunBad = stunIn.text.toString().split(',').map { it.trim() }
+                    .filter { it.isNotEmpty() && !STUN_URL_RE.matches(it) }
+                if (stunBad.isNotEmpty())
+                    append("STUN addresses must start with stun: or stuns: — check ${stunBad.first()}.\n\n")
+                val turnBad = turnIn.text.toString().split(',').map { it.trim() }
+                    .filter { it.isNotEmpty() && !TURN_URL_RE.matches(it) }
+                if (turnBad.isNotEmpty())
+                    append("TURN addresses must start with turn: or turns: — check ${turnBad.first()}.")
+            }.trim()
+            if (bad.isNotEmpty()) {
+                themedDialog(
+                    title = "Check that address",
+                    body = bad,
+                    primaryLabel = "Back", onPrimary = {}
+                )
+                return@primary
+            }
+            prefs.edit()
+                .putString(PREF_RENDEZVOUS, rv)
+                .putString(PREF_STUN, stunIn.text.toString().trim())
+                .putString(PREF_TURN, turnIn.text.toString().trim())
+                .putString(PREF_TURN_USER, userIn.text.toString().trim())
+                .putString(PREF_TURN_PASS, passIn.text.toString())
+                .apply()
+            Diag.log("shell", "servers saved rv=${rv.ifBlank { "default" }}")
+            // The asset server bakes the allowed relay hosts into its CSP, and
+            // the live page has already read the old settings — so both are
+            // rebuilt on the next session rather than patched underneath one.
+            stopServers()
+            if (rv.isNotBlank() && rv.startsWith("ws://")) {
+                themedDialog(
+                    title = "Saved — one warning",
+                    body = "ws:// is not encrypted. It is fine for a relay on your own " +
+                        "network, but over the internet anyone on the path can read the " +
+                        "signalling. (Your video and sound stay encrypted either way.)\n\n" +
+                        "Takes effect on the next session.",
+                    primaryLabel = "OK", onPrimary = { showDiagnostics() }
+                )
+            } else {
+                toast("Saved — takes effect on the next session")
+                showDiagnostics()
+            }
+        })
+        col.addView(link("Use Tawny's servers") {
+            themedDialog(
+                title = "Back to Tawny's servers?",
+                body = "Your addresses are cleared from this phone.",
+                primaryLabel = "Clear",
+                onPrimary = {
+                    prefs.edit()
+                        .remove(PREF_RENDEZVOUS).remove(PREF_STUN).remove(PREF_TURN)
+                        .remove(PREF_TURN_USER).remove(PREF_TURN_PASS)
+                        .apply()
+                    stopServers()
+                    toast("Back to Tawny's servers")
+                    showServers()
+                },
+                secondaryLabel = "Keep them"
+            )
+        })
+        col.addView(gap(16))
+        scroll.addView(col)
+        root.addView(scroll)
     }
 
     /**
@@ -2930,8 +3091,84 @@ class MainActivity : AppCompatActivity() {
 
     private fun newKey() = randToken(16)
 
-    /** Whether this build can reach a Handheld off the LAN. */
-    private val hasRendezvous get() = BuildConfig.RENDEZVOUS_URL.isNotBlank()
+    // ------------------------------------------------- servers (advanced)
+    //
+    // `tawny.rendezvousUrl` in local.properties is a *build-time* setting, so
+    // the only person who could ever point Tawny at their own relay was
+    // whoever compiled the APK. Someone who installs from Play — which is
+    // everyone — had no way at all. These five prefs are the runtime version.
+    //
+    // Deliberately behind the diagnostics hatch rather than in About: it is a
+    // support surface, not a feature, and a normal user has no business being
+    // shown a WebSocket URL field.
+    //
+    // The built-in relay is never *replaced*, only preferred against: a custom
+    // rendezvous that cannot be reached hands the session back to the default
+    // tunnel rather than taking the remote path down with it (the fallback
+    // lives in openSignal()/fetchIce() in public/app.js, because that is where
+    // the failure is visible). A bad URL typed in here costs a few seconds, not
+    // a working app.
+
+    private val PREF_RENDEZVOUS = "srvRendezvous"
+    private val PREF_STUN = "srvStun"
+    private val PREF_TURN = "srvTurn"
+    private val PREF_TURN_USER = "srvTurnUser"
+    private val PREF_TURN_PASS = "srvTurnPass"
+
+    /** `wss://host[:port][/path]` — or `ws://` for a relay on your own LAN. */
+    private val RELAY_URL_RE = Regex("^wss?://[A-Za-z0-9._~%\\-]+(:\\d{1,5})?(/[^\\s?#]*)?$")
+    private val STUN_URL_RE = Regex("^stuns?:[^\\s,]+$")
+    private val TURN_URL_RE = Regex("^turns?:[^\\s,]+$")
+
+    private fun customRendezvous(): String =
+        prefs.getString(PREF_RENDEZVOUS, "")?.trim().orEmpty()
+            .takeIf { RELAY_URL_RE.matches(it) }.orEmpty()
+
+    /** What the page should dial first: the user's relay if they set one. */
+    private fun preferredRendezvous(): String =
+        customRendezvous().ifBlank { BuildConfig.RENDEZVOUS_URL }
+
+    /** Whether this install can reach a Handheld off the LAN, by any route. */
+    private val hasRendezvous get() = preferredRendezvous().isNotBlank()
+
+    private fun csvPref(key: String, scheme: Regex): List<String> =
+        prefs.getString(key, "").orEmpty().split(',')
+            .map { it.trim() }.filter { it.isNotEmpty() && scheme.matches(it) }
+
+    /**
+     * The server settings, as the page reads them (`opts.servers`).
+     *
+     * `fallback` is the built-in tunnel, and it is only sent when a custom
+     * rendezvous is in play — it is what the page drops back to when the user's
+     * relay does not answer. Both ends of a call apply the same rule, so a
+     * relay that is genuinely down sends the Monitor and the Handheld to the
+     * same place and they still meet.
+     *
+     * Custom STUN *replaces* the built-in list (a self-hoster who names their
+     * own STUN usually means "only mine"); custom TURN is added *ahead of*
+     * whatever `/turn` issues, so a working built-in relay is still there
+     * underneath a TURN server that turns out to be wrong.
+     */
+    private fun serversJson(): String {
+        val custom = customRendezvous()
+        val turn = csvPref(PREF_TURN, TURN_URL_RE)
+        val o = org.json.JSONObject()
+        if (custom.isNotBlank() && BuildConfig.RENDEZVOUS_URL.isNotBlank()) {
+            o.put("fallback", BuildConfig.RENDEZVOUS_URL)
+        }
+        csvPref(PREF_STUN, STUN_URL_RE).takeIf { it.isNotEmpty() }
+            ?.let { o.put("stun", org.json.JSONArray(it)) }
+        if (turn.isNotEmpty()) {
+            o.put("turn", org.json.JSONArray().put(org.json.JSONObject().apply {
+                put("urls", org.json.JSONArray(turn))
+                prefs.getString(PREF_TURN_USER, "")?.takeIf { it.isNotBlank() }
+                    ?.let { put("username", it) }
+                prefs.getString(PREF_TURN_PASS, "")?.takeIf { it.isNotBlank() }
+                    ?.let { put("credential", it) }
+            }))
+        }
+        return o.toString()
+    }
 
     // ---- pairing codes expire after ten minutes ----------------------------
     //
@@ -3051,8 +3288,15 @@ class MainActivity : AppCompatActivity() {
 
     /** Serves the bundled web app on 127.0.0.1. Both roles need it. */
     private fun ensureAssetServer(): Int {
-        val s = assetServer ?: AssetHttpServer(applicationContext, 8809).also { assetServer = it }
-        return s.port
+        // The page's CSP names the relay hosts it may reach, and an advanced
+        // user can change theirs between sessions — so a cached server whose
+        // header no longer lists the right host has to go, or the new relay is
+        // blocked before it gets a socket and the failure is invisible.
+        val hosts = listOfNotNull(
+            relayHost(BuildConfig.RENDEZVOUS_URL), relayHost(customRendezvous())
+        )
+        assetServer?.let { if (it.relayHosts == hosts) return it.port else { it.stop(); assetServer = null } }
+        return AssetHttpServer(applicationContext, 8809, hosts).also { assetServer = it }.port
     }
 
     /**
@@ -3143,12 +3387,13 @@ class MainActivity : AppCompatActivity() {
         val pairPayload = rebuildPairPayload?.invoke()
         val code = if (role == "station") pairCode else prefs.getString("pairCode", null)
         val codeExp = if (role == "station") pairCodeExp else 0L
+        val rv = preferredRendezvous()
         Diag.log("shell", "goLive role=$role lan=${ip ?: "-"} signal=${signal ?: "-"} " +
-            "rv=${BuildConfig.RENDEZVOUS_URL.ifBlank { "NONE" }} " +
+            "rv=${rv.ifBlank { "NONE" }}${if (customRendezvous().isNotBlank()) " (custom)" else ""} " +
             "ticket=${if (token.isNullOrBlank()) "MISSING" else "yes"} " +
             "paircode=${if (code.isNullOrBlank()) "none" else "yes"}")
         showWeb("http://127.0.0.1:$httpPort/#native", role, key, name, signal,
-            BuildConfig.RENDEZVOUS_URL, token, pairPayload, code, codeExp)
+            rv, token, pairPayload, code, codeExp)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -3242,7 +3487,7 @@ class MainActivity : AppCompatActivity() {
                         "${signal?.let { jsStr(it) } ?: "null"},${jsStr(rendezvous)}," +
                         "${token?.let { jsStr(it) } ?: "null"},{theme:${jsStr(currentTheme())}," +
                         "pairCode:${pairCodeArg?.let { jsStr(it) } ?: "null"}," +
-                        "pairExp:$pairCodeExpArg})",
+                        "pairExp:$pairCodeExpArg,servers:${serversJson()}})",
                     null
                 )
                 // Only the live screen has a WebView to tell, so this is where
