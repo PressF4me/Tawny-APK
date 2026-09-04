@@ -193,6 +193,43 @@ the Worker (`GET /privacy`) so there's no GitHub Pages dependency; commit a
 sanitized copy of the submission runbook into the repo (it currently lives only
 in `~/Documents/Tawny ship/`, outside git — a single point of failure).
 
+#### Decisions (2026-09-04): pairing expiry, orientation, custom servers
+
+Three features landed together; two of them turned on a decision worth keeping.
+
+**Pairing codes expire in ten minutes, and the Monitor is the only place that
+can enforce it.** The obvious designs both fail. The scanning phone cannot check
+its own deadline — it can lie about the clock, or simply be an older build. Nor
+can the relay: the channel key rides *inside* the code, so an expired code hands
+a relay the same room id and the same admission ticket as a fresh one, and there
+is nothing there to tell them apart. (The rendezvous ticket stays what
+`SECURITY.md` says it is — 24h admission and abuse control — and is untouched;
+it is a different concept and conflating the two would break every reconnect.)
+The Monitor knows when it put a code on screen, owns the camera, and answers
+every offer on both transports, so the gate lives there: a rotating `c` in the
+link, checked above `answerPeer`, plus a per-device bond so an established
+Handheld never re-pairs. Deliberately **not** mirrored into the four relays —
+that forward-list drift has bitten twice already (`5e9b231`, `99012be`), and
+relay-side enforcement would be redundant on top of a Monitor that already
+refuses. Full reasoning, including what this does *not* buy, in `SECURITY.md`.
+
+**Orientation needed the accelerometer, not more window-reading.** `3fb646c` and
+`0ea7d87` read `screen.orientation` / `innerWidth`, which is exactly what cannot
+see the failure: with auto-rotate off the window never moves, so a Monitor lying
+on its side streams a sideways room and both ends agree it is upright. The shell
+now reports the physical and window angles and the page turns the picture by the
+difference. The capture *shape* still follows the window, and that is correct,
+not an oversight — see the commit and `README-ANDROID.md`.
+
+**A custom relay is preferred against, never substituted.** The runtime Servers
+screen is the answer to 3.x's "you can only self-host if you compile it
+yourself", but a URL in a settings field is a new way to break the remote path,
+so it cannot be one. Falls back to the built-in tunnel on two failed dials or a
+host that will not say `welcome`; the swap sits below the relay's own refusal
+codes; both ends apply the same rule so they still meet. This also means §1F's
+"`server.js` is knowingly stale" now has a user who can actually point at it —
+worth bringing to parity or marking loudly, as that item already says.
+
 ### H. Smaller items to sweep (low priority)
 
 - `app.js` `adopt()` takes `t` into `S.token` with no charset/length guard.
