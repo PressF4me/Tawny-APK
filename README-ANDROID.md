@@ -85,9 +85,13 @@ launch with `-camera-back virtualscene`.
 - On the pairing screen, **Show as link** reveals the `tawny://pair?…` text.
   Feed it to a Viewer with **Paste a link instead**, or from a shell:
   ```sh
-  adb shell "am start -a android.intent.action.VIEW -d 'tawny://pair?k=KEY&n=Pet%20camera&h=IP:PORT'"
+  adb shell "am start -a android.intent.action.VIEW -d 'tawny://pair?k=KEY&n=Pet%20camera&h=IP:PORT&c=CODE&e=UNIXSECS'"
   ```
-  (single-quote the URL so the device shell doesn't eat `&`).
+  (single-quote the URL so the device shell doesn't eat `&`). Copy the whole
+  thing from **Show as link** — `c` and `e` are the pairing code and its
+  deadline, and a link without a `c` the Monitor is currently showing is refused
+  as expired. The code rotates every ten minutes, so re-copy it if the test
+  drags on.
 - A real two-phone media test needs hardware.
 
 ## Background / screen-off

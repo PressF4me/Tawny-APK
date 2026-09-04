@@ -42,6 +42,12 @@ A **channel** is a name plus a 128-bit key generated on the device. Servers are
 told only `sha256(key)`, so channels can't be guessed or enumerated, and the key
 never reaches a server. The key rides in the pairing QR / link.
 
+A pairing code is good for **ten minutes**, counted down on the Monitor's own
+screen and re-minted in place when it runs out — an old photograph of a QR does
+not pair a phone later. Phones that paired inside the window keep working; the
+rule is about who can newly join, not how long a session lasts. See
+[`SECURITY.md`](SECURITY.md), "Pairing codes expire after ten minutes".
+
 ## Repository layout
 
 ```

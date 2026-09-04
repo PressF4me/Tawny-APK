@@ -177,6 +177,28 @@ orientation swap for any requested size, the `>=` square-screen edge, and that
 no fixed `width:{ideal},height:{ideal}` rectangle is left in a getUserMedia
 call. **Green on 2026-08-31.**
 
+## `pairing-expiry.mjs` — a code that stops working after ten minutes
+
+Lifts `newPairCode` / `pairCodeLeft` / `pairingAllowed` / `rememberPeer` /
+`knownPeers` / `bondId` out of `public/app.js` and runs them against a stubbed
+`localStorage` and `crypto`.
+
+```bash
+node tools/probes/pairing-expiry.mjs
+```
+
+The rule can only live on the Monitor — the channel key rides inside the code,
+so the bearer would lie about the clock and the relay cannot tell an expired
+code from a fresh one (see `SECURITY.md`). So the assertions are about the
+Monitor's gate: the code on screen admits and remembers a new phone; a
+*previous* code is refused even inside the window; the deadline refuses the same
+code a millisecond late; a phone let in earlier still gets in afterwards
+(expiry is not a session timeout); every missing/malformed input fails closed;
+enrolment is bounded at 8 phones per channel. Plus source-text checks that the
+link carries `c` and `e` on both the web and native sides, that `adopt()`
+refuses a lapsed `e` with the expiry sentence, and that the refusal travels as
+`bye {reason:'expired'}`. **Green on 2026-09-04.**
+
 ## Running the worker locally
 
 ```bash

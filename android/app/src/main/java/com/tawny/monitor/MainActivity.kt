@@ -633,6 +633,9 @@ class MainActivity : AppCompatActivity() {
 
     /** "Connect to this monitor?" — the gate on every externally supplied link. */
     private fun confirmPairing(p: Pairing) {
+        // Say "expired" before "connect to this?" — asking someone to approve a
+        // link that cannot work is a worse dialog than the one that explains.
+        if (p.expired) { pairingExpired(); return }
         val paired = prefs.getString("channelKey", null)
         val replacing = !paired.isNullOrBlank() && paired != p.key
         // Deliberately not the host:port. The address is meaningless to the
@@ -654,18 +657,47 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * The single funnel every pairing goes through — the in-app scanner, a
+     * pasted link and an external `tawny://pair` intent alike. The expiry check
+     * lives here rather than in each caller so a new way in cannot skip it.
+     */
     private fun joinAsHandheld(p: Pairing) {
         stopScanner()
+        if (p.expired) { pairingExpired(); return }
         Diag.log("shell", "pair accepted name=\"${p.name}\" lan=${p.signal ?: "-"} " +
-            "ticket=${if (p.token.isNullOrBlank()) "MISSING" else "yes"}")
+            "ticket=${if (p.token.isNullOrBlank()) "MISSING" else "yes"} " +
+            "code=${if (p.code == null) "none" else "yes"}")
         prefs.edit()
             .apply { if (p.signal != null) putString("signalUrl", p.signal) else remove("signalUrl") }
             .apply { if (p.token != null) putString("pairToken", p.token) else remove("pairToken") }
+            .apply { if (p.code != null) putString("pairCode", p.code) else remove("pairCode") }
             .putString("channelKey", p.key)
             .putString("channelName", p.name)
             .putString("role", "viewer")
             .apply()
         goLive("viewer")
+    }
+
+    /**
+     * A code that ran out, said the same way wherever it was noticed — this
+     * phone's own check on the scanned link, or the Monitor turning the offer
+     * away over LAN or the relay (Bridge "error", reason `expired`).
+     */
+    private fun pairingExpired() {
+        Diag.log("shell", "pairing refused — code expired")
+        stopScanner()
+        themedDialog(
+            title = "That code has expired",
+            body = "Pairing codes stop working ten minutes after the monitor phone " +
+                "shows them, so an old photo of one cannot be used later.\n\n" +
+                "On the monitor phone, go back to its pairing screen — it shows a " +
+                "fresh code — and scan that one.",
+            primaryLabel = "Scan again",
+            onPrimary = { onHandheld() },
+            secondaryLabel = "Not now",
+            onSecondary = { showRole() }
+        )
     }
 
     /** Manual fallback when the camera can't get a clean read. */
@@ -781,9 +813,12 @@ class MainActivity : AppCompatActivity() {
         playScene?.stop(); playScene = null
         scannerStop?.invoke(); scannerStop = null
         swipeNav(null, null)
+        stopPairCountdown()
         (pairOverlay?.parent as? ViewGroup)?.removeView(pairOverlay)
         pairOverlay = null
         pairStatus = null
+        pairCountdown = null
+        pairQrView = null
         removePairChip()
         pairOverlayHidden = false
         viewersNow = 0                 // a new screen knows about nobody
@@ -1555,6 +1590,7 @@ class MainActivity : AppCompatActivity() {
     private fun hidePairOverlay() {
         pairOverlayHidden = true
         pairOverlay?.visibility = View.GONE
+        stopPairCountdown()
         syncPairChip()
         refreshSystemBars()
     }
@@ -1564,6 +1600,10 @@ class MainActivity : AppCompatActivity() {
         removePairChip()
         pairStatus?.text = pairSheetStatus().uppercase()
         pairOverlay?.visibility = View.VISIBLE
+        // Coming back to the sheet after a while: whatever is drawn on it may
+        // have lapsed while nobody was looking. The tick below notices on its
+        // first run and mints a fresh one.
+        startPairCountdown()
         refreshSystemBars()
     }
 
@@ -2560,6 +2600,7 @@ class MainActivity : AppCompatActivity() {
                             .putString("channelName", name)
                             .remove("myToken")        // fresh channel → fresh admission ticket
                             .apply()
+                        pairCode = null               // …and a fresh pairing code with it
                         startWatcher(ip)
                     }
                 } else {
@@ -2888,24 +2929,67 @@ class MainActivity : AppCompatActivity() {
     /** Whether this build can reach a Handheld off the LAN. */
     private val hasRendezvous get() = BuildConfig.RENDEZVOUS_URL.isNotBlank()
 
+    // ---- pairing codes expire after ten minutes ----------------------------
+    //
+    // See the long note above `pairLink()` in public/app.js for why the deadline
+    // has to be the *Monitor's*: the channel key rides inside the code, so no
+    // check the bearer performs on itself, and none the relay performs, can
+    // hold. What this side owns is the code on screen — `pairCode`, rotated
+    // every [PAIR_TTL_MS] while the pairing sheet is up — and handing it to the
+    // page, which is the thing that actually answers a Handheld's offer.
+
+    private val PAIR_TTL_MS = 10 * 60 * 1000L
+
+    /** The code on screen right now, and the moment it stops admitting phones. */
+    private var pairCode: String? = null
+    private var pairCodeExp = 0L
+    private var pairTick: Runnable? = null
+    private var pairCountdown: TextView? = null
+    /** Rebuilds the `tawny://pair` payload around whatever code is current. */
+    private var rebuildPairPayload: (() -> String)? = null
+
+    private fun pairCodeLeftMs() = if (pairCode == null) 0L else pairCodeExp - System.currentTimeMillis()
+
+    /** Mint the next pairing code. 8 bytes: short enough to keep the QR light. */
+    private fun rotatePairCode(): String {
+        val c = randToken(8)
+        pairCode = c
+        pairCodeExp = System.currentTimeMillis() + PAIR_TTL_MS
+        return c
+    }
+
+    private fun currentPairCode(): String = pairCode?.takeIf { pairCodeLeftMs() > 0 } ?: rotatePairCode()
+
     /**
-     * `tawny://pair?k=&n=&h=<lan ip:port>&t=<token>`. `h` is dropped when Wi-Fi
-     * is down or the Watcher is relay-only; `t` (a short per-pairing admission
-     * ticket for the rendezvous) is added only when this build has one.
+     * `tawny://pair?k=&n=&h=<lan ip:port>&t=<token>&c=<code>&e=<unix seconds>`.
+     *
+     * `h` is dropped when Wi-Fi is down or the Watcher is relay-only; `t` (the
+     * long-lived rendezvous admission ticket) is added only when this build can
+     * reach a relay. `c` is the pairing code and `e` is when it lapses — `e` is
+     * a courtesy so a scanning phone can say "expired" without dialling, and `c`
+     * is what the Monitor actually checks.
      */
     private fun pairingPayload(ip: String?, sigPort: Int, key: String, name: String, token: String?) =
         buildString {
             append("tawny://pair?k=${Uri.encode(key)}&n=${Uri.encode(name)}")
             if (ip != null) append("&h=$ip:$sigPort")
             if (token != null) append("&t=${Uri.encode(token)}")
+            append("&c=${Uri.encode(currentPairCode())}")
+            append("&e=${pairCodeExp / 1000}")
         }
 
     private data class Pairing(
         val signal: String?,   // ws://<lan-ip>:<port>, or null for relay-only
         val key: String,
         val name: String,
-        val token: String?
-    )
+        val token: String?,
+        /** The pairing code from `c`, presented to the Monitor to be let in. */
+        val code: String?,
+        /** `e` in epoch millis, or 0 when the code carried no deadline. */
+        val expiresAt: Long
+    ) {
+        val expired get() = expiresAt > 0 && System.currentTimeMillis() > expiresAt
+    }
 
     /** RFC1918 / link-local only — `h` in a pairing link is always a home-LAN address. */
     private fun isPrivateHost(hostPort: String): Boolean {
@@ -2932,7 +3016,10 @@ class MainActivity : AppCompatActivity() {
         // Nothing to dial: no usable LAN address and this build has no internet relay.
         if (h == null && !hasRendezvous) return null
         val name = (uri.getQueryParameter("n") ?: "Pet camera").take(40)
-        return Pairing(h?.let { "ws://$it" }, key, name, token)
+        val code = uri.getQueryParameter("c")
+            ?.takeIf { Regex("^[A-Za-z0-9_-]{8,32}$").matches(it) }
+        val exp = uri.getQueryParameter("e")?.toLongOrNull()?.takeIf { it > 0 }?.times(1000) ?: 0L
+        return Pairing(h?.let { "ws://$it" }, key, name, token, code, exp)
     }
 
     private fun qrBitmap(text: String, sizePx: Int): Bitmap {
@@ -3044,20 +3131,27 @@ class MainActivity : AppCompatActivity() {
                     else prefs.getString("pairToken", null)
         prefs.edit().putString("role", role).apply()
         val ip = lanIp()      // was enumerated three times in a row, on the UI thread
-        val pairPayload = if (role == "station")
-            pairingPayload(ip, signalServer?.boundPort ?: 0, key, name, token)
-        else null
+        // A Monitor going live mints (or keeps) the code its QR advertises; a
+        // Handheld carries the code it scanned, which the Monitor checks once.
+        val sigPort = signalServer?.boundPort ?: 0
+        rebuildPairPayload =
+            if (role == "station") ({ pairingPayload(ip, sigPort, key, name, token) }) else null
+        val pairPayload = rebuildPairPayload?.invoke()
+        val code = if (role == "station") pairCode else prefs.getString("pairCode", null)
+        val codeExp = if (role == "station") pairCodeExp else 0L
         Diag.log("shell", "goLive role=$role lan=${ip ?: "-"} signal=${signal ?: "-"} " +
             "rv=${BuildConfig.RENDEZVOUS_URL.ifBlank { "NONE" }} " +
-            "ticket=${if (token.isNullOrBlank()) "MISSING" else "yes"}")
+            "ticket=${if (token.isNullOrBlank()) "MISSING" else "yes"} " +
+            "paircode=${if (code.isNullOrBlank()) "none" else "yes"}")
         showWeb("http://127.0.0.1:$httpPort/#native", role, key, name, signal,
-            BuildConfig.RENDEZVOUS_URL, token, pairPayload)
+            BuildConfig.RENDEZVOUS_URL, token, pairPayload, code, codeExp)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun showWeb(
         url: String, role: String, key: String, name: String,
-        signal: String?, rendezvous: String, token: String?, pairPayload: String? = null
+        signal: String?, rendezvous: String, token: String?, pairPayload: String? = null,
+        pairCodeArg: String? = null, pairCodeExpArg: Long = 0L
     ) {
         clearScreen()
         val serverHost = Uri.parse(url).host
@@ -3142,7 +3236,9 @@ class MainActivity : AppCompatActivity() {
                     "window.tawnyStart && window.tawnyStart(" +
                         "${jsStr(role)},${jsStr(key)},${jsStr(name)}," +
                         "${signal?.let { jsStr(it) } ?: "null"},${jsStr(rendezvous)}," +
-                        "${token?.let { jsStr(it) } ?: "null"},{theme:${jsStr(currentTheme())}})",
+                        "${token?.let { jsStr(it) } ?: "null"},{theme:${jsStr(currentTheme())}," +
+                        "pairCode:${pairCodeArg?.let { jsStr(it) } ?: "null"}," +
+                        "pairExp:$pairCodeExpArg})",
                     null
                 )
             }
@@ -3203,10 +3299,24 @@ class MainActivity : AppCompatActivity() {
         col.addView(qr)
         // A 640x640 ZXing encode is not free, and this runs on the way into a
         // live session where the UI thread is already busy.
-        io.execute {
-            val bmp = try { qrBitmap(payload, 640) } catch (e: Exception) { null }
-            runOnUiThread { if (bmp != null && qr.isAttachedToWindow) qr.setImageBitmap(bmp) }
+        pairQrView = qr
+        pairPayloadNow = payload
+        drawPairQr(payload)
+
+        // The code has ten minutes in it, and a Monitor is a phone left sitting
+        // on this screen \u2014 so a silent deadline would mean a dead code on
+        // display with nothing to say why the far phone was refused. Count it
+        // down in words, and mint the next one in place when it runs out.
+        pairCountdown = TextView(this).apply {
+            setTextColor(Hue.DIM)
+            textSize = 12.5f
+            typeface = uiFont
+            gravity = Gravity.CENTER
+            setLineSpacing(0f, 1.35f)
+            layoutParams = lp(topMargin = 10, centerH = true)
         }
+        col.addView(pairCountdown)
+
         col.addView(
             body(
                 "On the other phone, open Tawny and tap \u201cI already have a " +
@@ -3223,7 +3333,10 @@ class MainActivity : AppCompatActivity() {
         // person setting the Monitor up check the framing without giving up the
         // pairing screen.
         col.addView(link("See what the camera sees") { hidePairOverlay() })
-        col.addView(link("Show as link") { showPairText(payload) })
+        // Deliberately the *current* payload, not the one this sheet was built
+        // with: the code behind it rotates, and handing out a stale link would
+        // be the exact failure the countdown exists to prevent.
+        col.addView(link("Show as link") { showPairText(pairPayloadNow ?: payload) })
         col.addView(link("Rename this monitor") {
             promptRoomName { newName ->
                 prefs.edit().putString("channelName", newName).apply()
@@ -3231,7 +3344,66 @@ class MainActivity : AppCompatActivity() {
             }
         })
         scroll.addView(col)
+        startPairCountdown()
         return scroll
+    }
+
+    // ---- the pairing code's ten minutes, on screen -------------------------
+
+    /** The QR image on the pairing sheet, and the payload currently drawn in it. */
+    private var pairQrView: ImageView? = null
+    private var pairPayloadNow: String? = null
+
+    /** Encode off the UI thread — a 640x640 ZXing encode is not free. */
+    private fun drawPairQr(payload: String) {
+        val target = pairQrView ?: return
+        io.execute {
+            val bmp = try { qrBitmap(payload, 640) } catch (e: Exception) { null }
+            runOnUiThread { if (bmp != null && target.isAttachedToWindow) target.setImageBitmap(bmp) }
+        }
+    }
+
+    /**
+     * Rebuild the pairing payload around a freshly minted code, redraw the QR,
+     * and tell the page — which is the side that actually refuses a Handheld —
+     * which code now counts. Without that last step the sheet would show a new
+     * code the Monitor did not accept.
+     */
+    private fun refreshPairCode() {
+        val build = rebuildPairPayload ?: return
+        rotatePairCode()
+        val payload = build()
+        pairPayloadNow = payload
+        drawPairQr(payload)
+        web?.evaluateJavascript(
+            "window.tawnyPairCode && window.tawnyPairCode(" +
+                "${jsStr(pairCode ?: "")},$pairCodeExp)", null
+        )
+        Diag.log("shell", "pairing code rotated — ${PAIR_TTL_MS / 1000}s")
+    }
+
+    private fun startPairCountdown() {
+        stopPairCountdown()
+        if (pairCountdown == null) return
+        val tick = object : Runnable {
+            override fun run() {
+                val left = pairCodeLeftMs()
+                if (left <= 0) refreshPairCode()
+                val secs = ((if (left <= 0) PAIR_TTL_MS else left) / 1000).toInt()
+                pairCountdown?.text =
+                    "This code works for another %d:%02d. A fresh one appears here when it runs out."
+                        .format(secs / 60, secs % 60)
+                pairTick = this
+                root.postDelayed(this, 1000)
+            }
+        }
+        pairTick = tick
+        root.post(tick)
+    }
+
+    private fun stopPairCountdown() {
+        pairTick?.let { root.removeCallbacks(it) }
+        pairTick = null
     }
 
     /** The palette the WebView should use right now — "light" or "dark". Honours
@@ -3428,6 +3600,11 @@ class MainActivity : AppCompatActivity() {
                                 showMonitorFull(
                                     message ?: "This monitor already has $MAX_VIEWERS phones watching."
                                 )
+                            // The Monitor (or the relay) refused the code this
+                            // phone arrived with. Same screen as the scanner's
+                            // own pre-flight refusal, so the ten minutes reads
+                            // as one rule wherever it is noticed.
+                            obj.optString("reason") == "expired" -> pairingExpired()
                             prefs.getString("role", null) == "viewer" -> showMonitorOffline()
                             else -> showError(message ?: "Could not start the session")
                         }

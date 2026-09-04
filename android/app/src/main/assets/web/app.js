@@ -33,6 +33,7 @@ const el = {
   pair: $('#pair'), pairName: $('#pair-name'), qr: $('#qr'),
   pairProfile: $('#pair-profile'), pairCustomWrap: $('#pair-custom-wrap'),
   pairCustom: $('#pair-custom'), pairUrl: $('#pair-url'), pairWarn: $('#pair-warn'),
+  pairExpiry: $('#pair-expiry'),
   editor: $('#editor'), editorTitle: $('#editor-title'), editorName: $('#editor-name'),
   editorHint: $('#editor-hint'),
   scanner: $('#scanner'), scanVideo: $('#scan-video'), scanHint: $('#scan-hint'),
@@ -44,6 +45,10 @@ const el = {
 const S = {
   role: null, channel: null, roomId: null, signalUrl: null, nativeShell: false,
   cfg: { stun: [], authRequired: false }, token: '',
+  // Pairing codes. On the Monitor: the code currently on screen and the moment
+  // it stops admitting new phones. On a Viewer: the code it scanned, presented
+  // once to the Monitor to be let in. See PAIR_TTL_MS.
+  pairCode: null, pairSeen: null,
   // Signaling transports (0-2). A Handheld commits to one; the Watcher may hold
   // its LAN relay and the rendezvous at once.
   signals: [], committedTag: null, raceTimer: null, myId: null,
@@ -84,6 +89,22 @@ const MAX_VIEWERS = 3;
 const FULL_MESSAGE =
   `This monitor is full (${MAX_VIEWERS} phones). Close Tawny on one of the `
   + 'other phones, then try this code again.';
+
+// How long a pairing code is good for.
+//
+// A photograph of a QR, or a `tawny://pair` link forwarded through a chat app,
+// is a bearer credential: it carries the channel key. Ten minutes is how long
+// that credential can be *used to pair a new phone*. It is not a session
+// timeout — a phone that finished pairing inside the window keeps working
+// afterwards, for as long as the channel exists.
+const PAIR_TTL_MS = 10 * 60 * 1000;
+
+// The one sentence a phone sees when it arrives with a code that has run out,
+// wherever the refusal came from — its own pre-flight check on the scanned
+// link, or the Monitor turning it away over LAN or the internet relay.
+const EXPIRED_MESSAGE =
+  'That pairing code has expired. Show a new code on the monitor phone and '
+  + 'scan it again.';
 
 // Candidates buffered before setRemoteDescription. A real negotiation sends a
 // couple of dozen; anything past this is a peer filling memory.
@@ -351,10 +372,15 @@ function renderChannels() {
     del.addEventListener('click', () => {
       if (!confirm(`Delete "${ch.name}"? Devices paired to it will stop connecting.`)) return;
       setChannels(getChannels().filter((c) => c.id !== ch.id));
-      // Drop the once-reviewed safety-code flag so a re-pair starts clean.
+      // Drop the once-reviewed safety-code flag, this phone's pairing bond and
+      // (on a Monitor) the list of phones it had let in, so a re-pair starts
+      // clean — and so a deleted channel really does stop admitting its old
+      // Handhelds rather than remembering them past the delete.
       try {
         localStorage.removeItem(`tawny.sasok.${ch.id}`);
         localStorage.removeItem(`tawny.sas.${ch.id}`);
+        localStorage.removeItem(`tawny.bond.${ch.id}`);
+        localStorage.removeItem(`tawny.paired.${ch.id}`);
       } catch {}
       renderChannels();
       toast('Monitor removed');
@@ -462,7 +488,8 @@ $('#setup-handheld').addEventListener('click', () => {
   const link = prompt('Paste the pairing link shown on the Watcher:');
   if (link == null) return;
   if (!adopt(link.trim())) {
-    note(el.setupNote, 'That was not a Tawny pairing link. Try scanning it with your phone camera instead.');
+    note(el.setupNote, lastPairError
+      || 'That was not a Tawny pairing link. Try scanning it with your phone camera instead.');
   }
 });
 
@@ -510,11 +537,105 @@ function chosenBase() {
 }
 
 // ------------------------------------------------------------- pairing
+//
+// ---- a pairing code stops working after ten minutes -------------------------
+//
+// The awkward truth first: the 128-bit channel key travels *inside* the pairing
+// code, and the key is what every relay admits a device on. So an expiry cannot
+// be a check the bearer of the code performs on itself — a client that lies
+// about the clock, or simply an older build, would walk straight through it —
+// and it cannot be a check the relay performs either, because the relay is
+// handed the same long-lived room id and admission ticket by an expired code as
+// by a fresh one. (The rendezvous ticket is a *different* thing with a
+// different life; see SECURITY.md, "Signaling admission".)
+//
+// What actually holds is the Monitor. It is the only party that knows when it
+// put a code on screen, it is the party that owns the camera, and every
+// transport funnels through it: on the LAN it *is* the relay, and over the
+// internet it still answers every offer itself. So:
+//
+//   * every code carries a random `c` and its deadline `e`;
+//   * the Monitor keeps `c` and rotates it every ten minutes, by its own clock;
+//   * a phone that has never been let in must present the `c` the Monitor is
+//     showing *now*, or it is refused before a single track is attached;
+//   * a phone that HAS been let in is remembered by a `pid` it minted itself,
+//     so an established Handheld never has to re-pair.
+//
+// `e` in the link is a courtesy, not the enforcement: it lets the scanning
+// phone say "this code expired" immediately instead of dialling into a refusal.
+// Lying about it buys nothing — the Monitor refuses either way.
+
+const PAIRED_KEY = () => `tawny.paired.${S.channel?.id}`;
+const BOND_KEY = () => `tawny.bond.${S.channel?.id}`;
+// One Monitor holds three phones; twice that is room for a household that has
+// re-installed a couple of times, and small enough that a stolen code cannot
+// quietly enrol an army.
+const MAX_REMEMBERED_PEERS = 8;
+const HEX32 = /^[a-f0-9]{32}$/;
+
+/** Monitor: mint the code that goes on screen, and start its ten minutes. */
+function newPairCode(ttl = PAIR_TTL_MS) {
+  const b = new Uint8Array(8);
+  crypto.getRandomValues(b);
+  S.pairCode = { c: b64url(b), exp: Date.now() + ttl };
+  return S.pairCode;
+}
+
+/** Milliseconds left on the code currently on screen; 0 when there isn't one. */
+function pairCodeLeft() {
+  return S.pairCode ? Math.max(0, S.pairCode.exp - Date.now()) : 0;
+}
+
+/**
+ * Viewer: the id this phone is known to the Monitor by once it has been let in.
+ * Per channel, minted here, never derived from anything identifying, and never
+ * sent anywhere but the paired Monitor.
+ */
+function bondId() {
+  if (!S.channel) return null;
+  let v = null;
+  try { v = localStorage.getItem(BOND_KEY()); } catch {}
+  if (!HEX32.test(v || '')) {
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    v = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+    try { localStorage.setItem(BOND_KEY(), v); } catch {}
+  }
+  return v;
+}
+
+const knownPeers = () => readJSON(PAIRED_KEY(), []);
+function rememberPeer(pid) {
+  const list = knownPeers().filter((x) => x !== pid);
+  list.push(pid);
+  writeJSON(PAIRED_KEY(), list.slice(-MAX_REMEMBERED_PEERS));
+}
+
+/**
+ * Monitor: is this offer allowed to have the camera?
+ *
+ * Fails closed on every path — no code on screen, no `pc` in the offer, a `pc`
+ * that is not the current one, or a deadline that has passed. Enrolling a new
+ * phone is the only branch that writes anything.
+ */
+function pairingAllowed(m) {
+  const pid = typeof m.pid === 'string' && HEX32.test(m.pid) ? m.pid : null;
+  if (pid && knownPeers().includes(pid)) return true;
+  const code = S.pairCode;
+  if (!code || !code.c) return false;
+  if (typeof m.pc !== 'string' || m.pc !== code.c) return false;
+  if (Date.now() > code.exp) return false;
+  if (pid) rememberPeer(pid);
+  return true;
+}
 
 function pairLink() {
   const base = chosenBase();
+  const code = S.pairCode || newPairCode();
   const frag = new URLSearchParams({ k: S.channel.key, n: S.channel.name, r: 'viewer' });
   if (S.token) frag.set('t', S.token);
+  frag.set('c', code.c);
+  frag.set('e', String(Math.floor(code.exp / 1000)));
   return `${base}#${frag}`;
 }
 
@@ -560,12 +681,39 @@ function refreshPair() {
   }
 }
 
+// A Monitor left sitting on its pairing screen must never be showing a code
+// that stopped working while nobody was looking. The sheet counts the code
+// down out loud and mints a fresh one the moment it lapses.
+let pairTicker = null;
+function tickPairSheet() {
+  if (!el.pairExpiry || el.pair.hidden) return;
+  if (pairCodeLeft() <= 0) {
+    newPairCode();
+    refreshPair();
+    return;
+  }
+  const s = Math.ceil(pairCodeLeft() / 1000);
+  el.pairExpiry.textContent =
+    `This code works for another ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}. `
+    + 'A fresh one appears here when it runs out.';
+}
+
 function openPair() {
   // The native shell runs its own pairing screen.
   if (S.nativeShell) return;
   renderProfiles();
+  if (pairCodeLeft() <= 0) newPairCode();
   refreshPair();
   el.pair.hidden = false;
+  tickPairSheet();
+  clearInterval(pairTicker);
+  pairTicker = setInterval(tickPairSheet, 1000);
+}
+
+function closePair() {
+  el.pair.hidden = true;
+  clearInterval(pairTicker);
+  pairTicker = null;
 }
 
 el.pairProfile.addEventListener('change', () => {
@@ -583,7 +731,7 @@ el.pairCustom.addEventListener('input', () => {
   refreshPair();
 });
 
-$('#pair-close').addEventListener('click', () => { el.pair.hidden = true; });
+$('#pair-close').addEventListener('click', closePair);
 $('#pair-copy').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(pairLink());
@@ -626,7 +774,7 @@ async function openScanner() {
       if (found.length) {
         const ok = adopt(found[0].rawValue);
         if (ok) { S.scanStop(); return; }
-        el.scanHint.textContent = 'That code is not a Tawny pairing code.';
+        el.scanHint.textContent = lastPairError || 'That code is not a Tawny pairing code.';
       }
     } catch {}
     setTimeout(loop, 250);
@@ -646,9 +794,15 @@ $('#scan-close').addEventListener('click', () => S.scanStop?.());
 // this set can only ever be refused, so refuse the whole link now instead of
 // half-adopting a channel that will fail admission later.
 const TICKET_RE = /^[A-Za-z0-9_-]{8,64}$/;
+const PAIRCODE_RE = /^[A-Za-z0-9_-]{8,32}$/;
+
+// Why the last adopt() failed, when "that isn't a Tawny link" would be a lie.
+// Cleared on every attempt; read by the three callers for their own note.
+let lastPairError = null;
 
 // Import a pairing link. Returns true when it was a valid one.
 function adopt(raw) {
+  lastPairError = null;
   let hash;
   try { hash = new URL(raw, location.href).hash.slice(1); }
   catch { return false; }
@@ -662,6 +816,18 @@ function adopt(raw) {
     if (!TICKET_RE.test(token)) return false;
     S.token = token;
   }
+
+  // The code's own deadline. Checked here so a code that ran out is refused
+  // where the user is looking, in a sentence that tells them what to do —
+  // rather than dialling out and failing at the far end. The Monitor checks it
+  // again for real; this is only the fast, kind path.
+  const exp = Number(p.get('e'));
+  if (Number.isFinite(exp) && exp > 0 && Date.now() > exp * 1000) {
+    lastPairError = EXPIRED_MESSAGE;
+    return false;
+  }
+  const code = p.get('c');
+  S.pairSeen = code && PAIRCODE_RE.test(code) ? code : null;
 
   const list = getChannels();
   let ch = list.find((c) => c.key === key);
@@ -1271,8 +1437,12 @@ function openSignal(base, tag) {
         return bail(
           ev.code === 4003 ? FULL_MESSAGE
           : ev.code === 4004 ? 'This monitor is already running on another phone.'
-          : 'That code has expired. Show a fresh one on the other phone and scan it again.',
-          ev.code === 4003 ? 'full' : undefined
+          // 4008 is the relay's own refusal — a ticket that no longer matches
+          // the room. Different cause from the Monitor's pairing gate, same
+          // thing to do about it, so it gets the same sentence and the same
+          // screen in the native shell.
+          : EXPIRED_MESSAGE,
+          ev.code === 4003 ? 'full' : ev.code === 4008 ? 'expired' : undefined
         );
       }
 
@@ -1648,7 +1818,7 @@ async function handle(m, entry) {
         // Browser Monitor: the pairing sheet closes only once the third phone
         // is on. Closing it at the first one is what made "add another phone"
         // feel like it had been taken away.
-        if (viewerCount() >= MAX_VIEWERS) el.pair.hidden = true;
+        if (viewerCount() >= MAX_VIEWERS) closePair();
         updatePeerChip();
         updateStatus();
       }
@@ -1664,6 +1834,16 @@ async function handle(m, entry) {
       if (S.role === 'station' && !S.peers.has(m.from) && viewerCount() >= MAX_VIEWERS) {
         diag(`offer refused: ${MAX_VIEWERS} viewers already`);
         refuseAsFull(m.from, entry);
+        return;
+      }
+      // The pairing gate. This is the only place a phone the Monitor has never
+      // seen becomes one it has, and it sits above ensurePeer/answerPeer —
+      // answerPeer attaches the live camera and microphone, so nothing may
+      // reach it on a code that has run out. Already-known phones (a `pid` the
+      // Monitor recorded when it first let them in) sail past.
+      if (S.role === 'station' && !S.peers.has(m.from) && !pairingAllowed(m)) {
+        diag(`offer refused: pairing code expired or never seen (${m.from})`);
+        sig({ type: 'bye', to: m.from, reason: 'expired' }, { transport: entry });
         return;
       }
       const p = ensurePeer(m.from, S.role === 'station' ? 'viewer' : 'station', entry);
@@ -1819,6 +1999,9 @@ async function handle(m, entry) {
       // ordinary hang-up and must stay one — a plain `bye` ends the call, it
       // does not accuse the Monitor of being full.
       if (m.reason === 'full' && S.role === 'viewer') return bail(FULL_MESSAGE, 'full');
+      // Refused at the pairing gate: the code this phone arrived with is no
+      // longer the one the Monitor is showing. Say that, not "call ended".
+      if (m.reason === 'expired' && S.role === 'viewer') return bail(EXPIRED_MESSAGE, 'expired');
       removePeer(m.from);
       if (!S.peers.size) status(S.role === 'viewer' ? 'Call ended' : 'Waiting', null);
       break;
@@ -1990,7 +2173,15 @@ async function makeOffer(peer, opts) {
   await peer.pc.setLocalDescription(offer);
   const msg = { type: 'offer', to: peer.id, sdp: peer.pc.localDescription.toJSON() };
   // The Handheld tags its offer with a short device name for the Monitor's rail.
-  if (S.role === 'viewer') msg.label = S.deviceLabel || shortDeviceLabel('');
+  if (S.role === 'viewer') {
+    msg.label = S.deviceLabel || shortDeviceLabel('');
+    // …and with what gets it past the pairing gate: the id this phone is known
+    // by once the Monitor has let it in, plus — the first time, or after the
+    // Monitor forgot it — the code the user actually scanned.
+    const pid = bondId();
+    if (pid) msg.pid = pid;
+    if (S.pairSeen) msg.pc = S.pairSeen;
+  }
   sig(msg, peer);
 }
 
@@ -2610,6 +2801,10 @@ async function start(role) {
   if (!S.channel) return;
   S.role = role;
   S.pending = null;
+  // A Monitor is never without a live pairing code: pairingAllowed() fails
+  // closed on a missing one, so a station that reached here without a code
+  // from the shell would refuse every phone rather than let one in.
+  if (role === 'station' && pairCodeLeft() <= 0) newPairCode();
   S.roomId = await roomIdFor(S.channel.key);
   diag(`start role=${role} room=${S.roomId} lan=${S.signalUrl || '-'} ` +
     `rv=${rendezvousBase() || 'NONE'} ticket=${S.token ? 'yes' : 'MISSING'}`);
@@ -3134,6 +3329,14 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
   }
   S.signalUrl = signalUrl || null;              // may be null on a cloud-only pairing
   if (rendezvousUrl) S.cfg.rendezvous = rendezvousUrl;
+  // The shell draws the QR, so the shell owns the pairing code. On a Monitor
+  // that is the code on screen plus the deadline it is counting down; on a
+  // Handheld it is the code the user scanned, presented once to get in.
+  const pc = opts && typeof opts.pairCode === 'string' ? opts.pairCode : null;
+  if (pc && PAIRCODE_RE.test(pc)) {
+    if (role === 'station') S.pairCode = { c: pc, exp: Number(opts.pairExp) || (Date.now() + PAIR_TTL_MS) };
+    else S.pairSeen = pc;
+  }
   if (token) {
     if (!TICKET_RE.test(token)) return false;   // same guard as adopt()
     S.token = token;
@@ -3155,6 +3358,18 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
   try { localStorage.setItem(ONBOARDED, '1'); } catch {}
   S.channel = ch;
   start(role === 'station' ? 'station' : 'viewer');
+  return true;
+};
+
+/**
+ * The shell rotated the pairing code on its overlay — take the new one as the
+ * only code that now admits a phone. Called from the countdown in
+ * MainActivity's pairing sheet; a no-op anywhere else.
+ */
+window.tawnyPairCode = function (code, expMs) {
+  if (S.role !== 'station' || typeof code !== 'string' || !PAIRCODE_RE.test(code)) return false;
+  S.pairCode = { c: code, exp: Number(expMs) || (Date.now() + PAIR_TTL_MS) };
+  diag(`pairing code rotated — ${Math.round(pairCodeLeft() / 1000)}s left`);
   return true;
 };
 
@@ -3192,7 +3407,7 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
     // Clear the key out of the address bar before anything else can see it.
     history.replaceState(null, '', location.pathname + location.search);
     if (adopt(raw)) landed = true;            // adopt() shows the join screen
-    else note(el.chNote, 'That pairing link was not valid.');
+    else note(el.chNote, lastPairError || 'That pairing link was not valid.');
   }
 
   if (!landed) {
