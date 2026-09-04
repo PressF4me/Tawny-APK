@@ -2867,6 +2867,7 @@ function initPinch() {
 function bail(msg, reason) {
   diag(`bail: ${msg}`);
   S.closing = true;
+  closePair();
   closeAllSignals();
   S.local?.getTracks().forEach((t) => t.stop());
   teardownAll();
@@ -3115,6 +3116,7 @@ async function keepAwake() {
 
 function hangUp() {
   S.closing = true;
+  closePair();     // stop the pairing sheet's countdown minting codes at nobody
   setDim(false);   // never leave the live screen with the backlight pinned down
   // ...and never walk away from a phone with its light still burning. Stopping
   // the tracks below releases the camera and drops the torch with it; this is
