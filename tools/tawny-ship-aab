@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Build a signed release AAB and file it in the Play Store submission pack,
+# one dated folder per day, named so a PR reviewer can tell at a glance which
+# build it is and pull it up in Play Console without guessing.
+#
+# Usage:
+#   tawny-ship-aab       build the release AAB, copy it into
+#                         "Tawny ship/Google Ready/<YYYYMMDD>/" as
+#                         app-release-<version>-<YYYYMMDD>-b<build>.aab,
+#                         and log the git commit it was built from in
+#                         Google Ready/MANIFEST.md
+#
+set -euo pipefail
+
+export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/sdk}"
+export JAVA_HOME="${JAVA_HOME:-$HOME/Android/jdk17}"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
+
+PROJECT="$HOME/Downloads/frentalk"
+ROOT="$HOME/Documents/Tawny ship/Google Ready"
+AAB_SRC="$PROJECT/android/app/build/outputs/bundle/release/app-release.aab"
+VPROPS="$PROJECT/android/version.properties"
+MANIFEST="$ROOT/MANIFEST.md"
+
+CODE=$(grep "^VERSION_CODE=" "$VPROPS" | cut -d= -f2 | tr -d '[:space:]')
+NAME=$(grep "^VERSION_NAME=" "$VPROPS" | cut -d= -f2 | tr -d '[:space:]')
+DATE=$(date +%Y%m%d)
+COMMIT=$(git -C "$PROJECT" rev-parse --short HEAD)
+BRANCH=$(git -C "$PROJECT" rev-parse --abbrev-ref HEAD)
+DIRTY=""
+git -C "$PROJECT" diff --quiet && git -C "$PROJECT" diff --cached --quiet \
+  || DIRTY=" **(built from uncommitted changes)**"
+
+OUT="app-release-${NAME}-${DATE}-b${CODE}.aab"
+DEST="$ROOT/$DATE"
+
+mkdir -p "$DEST"
+
+echo "Building release AAB for v$NAME (build $CODE)…"
+( cd "$PROJECT/android" && ./gradlew -q :app:bundleRelease )
+
+if [ ! -f "$AAB_SRC" ]; then
+  echo "No AAB found at $AAB_SRC" >&2
+  exit 1
+fi
+
+cp "$AAB_SRC" "$DEST/$OUT"
+
+if command -v jarsigner >/dev/null 2>&1; then
+  if ! jarsigner -verify "$DEST/$OUT" >/dev/null 2>&1; then
+    echo "WARNING: $OUT does not verify as signed — check keystore.properties" >&2
+  fi
+fi
+
+if [ ! -f "$MANIFEST" ]; then
+  {
+    echo "# Google Ready — AAB build log"
+    echo ""
+    echo "One row per AAB filed here (each under its own <YYYYMMDD>/ folder),"
+    echo "with the exact commit it was built from — match an AAB to a"
+    echo "PR/commit before pushing it to Play Console."
+    echo ""
+    echo "| AAB | Version | Build | Date | Commit | Branch |"
+    echo "|---|---|---|---|---|---|"
+  } > "$MANIFEST"
+fi
+printf '| `%s/%s` | %s | %s | %s | `%s`%s | %s |\n' \
+  "$DATE" "$OUT" "$NAME" "$CODE" "$DATE" "$COMMIT" "$DIRTY" "$BRANCH" >> "$MANIFEST"
+
+echo "  ✓ $DEST/$OUT"
+echo "  ✓ logged in $MANIFEST"
