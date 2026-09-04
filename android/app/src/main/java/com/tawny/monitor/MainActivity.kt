@@ -1472,7 +1472,11 @@ class MainActivity : AppCompatActivity() {
                 "That gives you a private wss:// address " +
                 "(yourmachine.your-tailnet.ts.net) that only your own devices can " +
                 "reach — a real certificate, no port-forwarding, nothing exposed to " +
-                "the internet. Paste it into Rendezvous below."
+                "the internet. Paste it into Rendezvous below.\n\n" +
+                "Both phones need to be on that same tailnet to reach it — which " +
+                "usually means they can already reach each other directly too, the " +
+                "same way two phones on one Wi-Fi can. So leave STUN and TURN " +
+                "further down empty; add them only if a call still won't connect."
         ))
 
         // input -> the small red line under it. Populated by field(), read by
@@ -1540,10 +1544,30 @@ class MainActivity : AppCompatActivity() {
         }
 
         val rvIn = field("Rendezvous", "wss://relay.example.net", PREF_RENDEZVOUS)
+
+        col.addView(TextView(this).apply {
+            text = "STUN / TURN — usually not needed"
+            setTextColor(Hue.TEXT)
+            textSize = Type.SUB
+            typeface = uiFontSemi
+            layoutParams = lp(topMargin = 28)
+        })
+        col.addView(aboutBody(
+            "A separate concern from Rendezvous above: these only matter if the two " +
+                "phones can't already reach each other directly once introduced. If " +
+                "they share a private network — the same Wi-Fi, or the same Tailscale " +
+                "tailnet — that's already true, and both fields below can stay empty."
+        ).apply { layoutParams = lp(topMargin = 6) })
+
         val stunIn = field("STUN (comma separated)", "stun:stun.example.net:3478", PREF_STUN)
         val turnIn = field("TURN (comma separated)", "turns:turn.example.net:5349", PREF_TURN)
-        val userIn = field("TURN username *", "required with a TURN address", PREF_TURN_USER)
-        val passIn = field("TURN password *", "required with a TURN address", PREF_TURN_PASS, password = true)
+        // No asterisk: these are not unconditionally required, only alongside a
+        // TURN address (enforced below) — a static "*" next to both would have
+        // read as "fill this in regardless," which is exactly the ambiguity
+        // that sent Tailscale users looking for TURN credentials they never
+        // needed.
+        val userIn = field("TURN username", "blank unless TURN is set above", PREF_TURN_USER)
+        val passIn = field("TURN password", "blank unless TURN is set above", PREF_TURN_PASS, password = true)
 
         val note = TextView(this).apply {
             setTextColor(Hue.DIM)
