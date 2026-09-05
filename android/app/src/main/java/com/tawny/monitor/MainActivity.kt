@@ -824,6 +824,7 @@ class MainActivity : AppCompatActivity() {
         pairCountdown = null
         pairQrView = null
         pairLinkView = null
+        pairSheetReset = null          // a closure over a sheet that is now gone
         removePairChip()
         viewersNow = 0                 // a new screen knows about nobody
         viewersMax = MAX_VIEWERS
@@ -1875,6 +1876,7 @@ class MainActivity : AppCompatActivity() {
     private fun showPairOverlay() {
         removePairChip()
         pairStatus?.text = pairSheetStatus().uppercase()
+        pairSheetReset?.invoke()
         pairOverlay?.visibility = View.VISIBLE
         // Coming back to the sheet after a while: whatever is drawn on it may
         // have lapsed while nobody was looking. The tick below notices on its
@@ -3697,6 +3699,14 @@ class MainActivity : AppCompatActivity() {
      * row), and the link copies on a single tap (no separate "show as link"
      * screen) \u2014 three formerly-separate actions folded into the controls
      * that were already on screen for a different reason.
+     *
+     * That gap is negotiable too: the sheet has a handle and drags between
+     * three stops — a bare sliver with the camera filling the screen, the
+     * resting height built here, and full screen with the camera hidden
+     * altogether — because "how much camera versus how much code" has a
+     * different answer while you are aiming the phone at a cat bed than it
+     * does while you are reading the link out to someone. The mechanism is at
+     * the bottom of this function, next to the panel it moves.
      */
     private fun buildPairOverlay(name: String, payload: String): View {
         val root = FrameLayout(this).apply {
@@ -3728,19 +3738,38 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
+        // The sheet's own two insets, kept where the drag code below can read
+        // them: the bottom one because the resting sheet has to clear the nav
+        // bar, the top one because a sheet dragged all the way up ends level
+        // with the status bar and would otherwise run its pet name under the
+        // clock.
+        var barTop = 0
+        var barBottom = 0
+
+        // The sheet's drag, reachable from the rows built below it.
+        //
+        // The gesture itself is defined at the bottom of this function, where
+        // the views it moves exist; the two tappable rows in the middle of the
+        // sheet — the pet's name and the link — are built long before that and
+        // still have to offer it, because they sit exactly where a hand reaches
+        // to pull the sheet and a sheet that refuses to move under half of
+        // itself feels broken rather than careful. Hence a hook rather than a
+        // local function: assigned once, at the end, and null only in the
+        // window before then, when nothing is on screen to touch.
+        var dragTouch: ((View, MotionEvent) -> Boolean)? = null
+
+        // The content of the sheet, no longer the sheet itself: the cream, the
+        // rounded top corners and the lift now belong to the full-height panel
+        // built at the bottom of this function, and this is the column of stuff
+        // that rides inside it. Nothing here knows how tall the panel is.
         val sheet = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            background = GradientDrawable().apply {
-                setColor(Hue.PANEL)
-                val r = dp(Radius.CARD).toFloat()
-                cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
-            }
-            elevation = dp(8).toFloat()
-            setPadding(dp(24), dp(22), dp(24), dp(20))
-            layoutParams = LinearLayout.LayoutParams(MP, WC)
+            setPadding(dp(24), dp(28), dp(24), dp(20))
+            layoutParams = FrameLayout.LayoutParams(MP, WC)
             ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
                 val b = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                barTop = b.top; barBottom = b.bottom
                 v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, dp(20) + b.bottom)
                 insets
             }
@@ -3781,18 +3810,31 @@ class MainActivity : AppCompatActivity() {
             visibility = View.GONE
         }
         nameRow.addView(renameHint)
-        nameRow.setOnTouchListener { _, ev ->
-            when (ev.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
+        nameRow.setOnTouchListener { v, ev ->
+            // The name is the first thing under the drag handle, so it is also
+            // where a hand lands to pull the sheet about. The drag hook sees the
+            // event first and only claims it once the finger is past the touch
+            // slop, which leaves a tap a tap; when it does claim one, the
+            // touch-reveal is wound straight back, because a row still
+            // advertising "Rename" under a finger that is now dragging the sheet
+            // is promising something that is no longer going to happen.
+            val grabbed = dragTouch?.invoke(v, ev) ?: false
+            when {
+                grabbed -> {
+                    renameHint.visibility = View.GONE
+                    pencil.tint = Hue.DIM
+                }
+                ev.actionMasked == MotionEvent.ACTION_DOWN -> {
                     renameHint.visibility = View.VISIBLE
                     pencil.tint = Hue.BERRY
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                ev.actionMasked == MotionEvent.ACTION_UP ||
+                ev.actionMasked == MotionEvent.ACTION_CANCEL -> {
                     renameHint.visibility = View.GONE
                     pencil.tint = Hue.DIM
                 }
             }
-            false
+            grabbed
         }
         nameRow.tapFeedback {
             promptRoomName { newName ->
@@ -3862,6 +3904,11 @@ class MainActivity : AppCompatActivity() {
                 toast("Link copied")
             }
         }
+        // Draggable for the same reason the name is: it is a wide row across the
+        // sheet, and the only thing that tells a finger it is a button rather
+        // than somewhere to grab is that it copies when tapped — which it still
+        // does, because the hook declines everything short of a real drag.
+        linkRow.setOnTouchListener { v, ev -> dragTouch?.invoke(v, ev) ?: false }
         pairLinkView = linkRow
         showPairLink(payload)
         sheet.addView(linkRow)
@@ -3897,23 +3944,252 @@ class MainActivity : AppCompatActivity() {
         // \u2014 and on the light palette Hue.PANEL is pure white \u2014 that edge simply
         // vanished, so the sheet had no bottom to it. This seats it: a short
         // fade into the footage, the same device as the scrim behind the back
-        // arrow, sized and stacked so it always sits directly on the seam
-        // whatever the sheet's height turns out to be.
-        root.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = FrameLayout.LayoutParams(MP, WC).also { it.gravity = Gravity.BOTTOM }
+        // arrow. It used to be stacked directly above the sheet in a column; now
+        // that the sheet's top edge moves under a finger, it is a free-floating
+        // strip that the drag code below keeps parked on the seam by translating
+        // it along with the panel.
+        val seam = View(this).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0x00000000, 0x4D000000)
+            )
+            layoutParams = FrameLayout.LayoutParams(MP, dp(46)).also { it.gravity = Gravity.BOTTOM }
+        }
+        root.addView(seam)
+
+        /*
+         * The sheet is a full-screen panel that mostly hangs off the bottom of
+         * the screen.
+         *
+         * The obvious way to build a draggable sheet is to set its height as the
+         * finger moves. That means a measure-and-layout pass of the whole window
+         * on every touch frame, and the thing directly underneath this overlay is
+         * a WebView rendering a live camera at 30fps \u2014 the one place in this app
+         * where stealing the UI thread is most visible. So the panel is instead
+         * MATCH_PARENT tall for its whole life and never re-measured: what moves
+         * is translationY, which the render thread can apply without a layout at
+         * all. "Height" everywhere below means "how much of the panel is on
+         * screen", i.e. root.height - translationY, and the content column is
+         * laid out against the panel's *top* edge — the edge the user is
+         * actually holding — with its own translation for the rest.
+         *
+         * A consequence worth knowing: the panel's touch bounds are its
+         * translated bounds, so at rest it claims only the strip it visibly
+         * covers and the back arrow above it still gets its taps. Dragged to full
+         * screen it does swallow that arrow \u2014 correctly, because at that point
+         * the arrow is behind an opaque panel and nobody can see what they would
+         * be aiming at.
+         */
+        val panel = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                setColor(Hue.PANEL)
+                val r = dp(Radius.CARD).toFloat()
+                cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            }
+            elevation = dp(8).toFloat()
+            // Nothing is bound to this click; it exists so View.onTouchEvent
+            // keeps returning true after the listener below declines ACTION_DOWN,
+            // which is the only way a gesture that starts as a possible tap can
+            // still turn into a drag (the same reason the sessions-list card is
+            // clickable). It also stops taps on the sheet's blank areas falling
+            // through to the page underneath, which they quietly used to.
+            isClickable = true
+            // Positioned by the first applyHeight() below, once there is a
+            // measured column to position it against. Until then it would
+            // otherwise flash across the whole screen for a frame.
+            visibility = View.INVISIBLE
+            layoutParams = FrameLayout.LayoutParams(MP, MP)
+        }
+        panel.addView(sheet)
+
+        // The grab handle: a 36x4dp pill, but a full-width 30dp strip of touch
+        // target around it, because the pill is also the only thing left on
+        // screen when the sheet is collapsed and a 4dp target is not a target.
+        // It is added after the content column so it wins the hit test in the
+        // band they share, and it carries Hue.LINE \u2014 the hairline colour \u2014 so it
+        // reads as an edge treatment rather than as a control with a job.
+        val handle = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(MP, dp(30))
             addView(View(this@MainActivity).apply {
-                background = GradientDrawable(
-                    GradientDrawable.Orientation.TOP_BOTTOM,
-                    intArrayOf(0x00000000, 0x4D000000)
-                )
-                layoutParams = LinearLayout.LayoutParams(MP, dp(46))
+                background = GradientDrawable().apply {
+                    setColor(Hue.LINE)
+                    cornerRadius = dp(2).toFloat()
+                }
+                layoutParams = FrameLayout.LayoutParams(dp(36), dp(4)).also {
+                    it.gravity = Gravity.CENTER_HORIZONTAL
+                    it.topMargin = dp(11)
+                }
             })
-            addView(sheet)
-        })
+        }
+        panel.addView(handle)
+        root.addView(panel)
+
+        // Three stops, and the sheet is always resting on one of them.
+        val PEEK = 0; val NATURAL = 1; val FULL = 2
+        var stop = NATURAL
+        var dragging = false
+
+        // Just the handle plus a sliver of the rounded corner, clear of the
+        // bottom inset so the collapsed grip never lands on the gesture bar and
+        // gets read as a swipe-up-to-home instead.
+        fun peekHeight() = dp(32) + barBottom
+        // The resting height is whatever the content measures to \u2014 asked of the
+        // laid-out column rather than cached, so a longer pet name, a rotation or
+        // a late inset all move the resting stop without anyone recalculating it.
+        fun naturalHeight() = sheet.height
+        fun heightOf(s: Int) = when (s) {
+            PEEK -> peekHeight()
+            FULL -> root.height
+            else -> naturalHeight()
+        }
+
+        /**
+         * Put the panel at [h] pixels of on-screen height. Everything the drag
+         * does goes through here, dragging and snapping alike, so there is one
+         * description of what any given height looks like.
+         *
+         * Three things move with the height rather than being switched at a
+         * threshold. Below the resting stop the content column dips towards
+         * invisible, so collapsing does not end with the top of the pet's name
+         * poking out of a sliver that is meant to read as a bare edge (and it
+         * goes properly INVISIBLE at the bottom, or the name would still be
+         * catching taps it no longer looks like it deserves). Above the resting
+         * stop the column slides down half of the extra height, which keeps it
+         * optically centred in the panel all the way to full screen — a QR left
+         * clinging to the top edge with a third of a phone of empty cream under
+         * it looks like a layout that ran out, not like a sheet that opened.
+         * And the handle — which does stay welded to the top edge, because that
+         * is the edge you are holding — carries the status-bar inset in the same
+         * proportion, so at full screen it sits below the clock rather than
+         * behind it, while the resting stop is untouched because there the
+         * proportion is zero.
+         */
+        fun applyHeight(h: Int, animated: Boolean) {
+            val screen = root.height
+            val nat = naturalHeight()
+            if (screen == 0 || nat == 0) return          // not laid out yet
+            val peek = peekHeight()
+            val ty = (screen - h).toFloat()
+            val fade = ((h - peek).toFloat() / (nat - peek).coerceAtLeast(1)).coerceIn(0f, 1f)
+            val open = ((h - nat).toFloat() / (screen - nat).coerceAtLeast(1)).coerceIn(0f, 1f)
+            val lift = barTop * open
+            val centre = maxOf(lift, (h - nat).coerceAtLeast(0) / 2f)
+            panel.visibility = View.VISIBLE
+            if (fade > 0.02f) sheet.visibility = View.VISIBLE
+            if (animated) {
+                panel.animate().translationY(ty).setDuration(150).start()
+                seam.animate().translationY(-h.toFloat()).setDuration(150).start()
+                sheet.animate().alpha(fade).translationY(centre).setDuration(150)
+                    .withEndAction { if (fade <= 0.02f) sheet.visibility = View.INVISIBLE }
+                    .start()
+                handle.animate().translationY(lift).setDuration(150).start()
+            } else {
+                panel.animate().cancel(); seam.animate().cancel()
+                sheet.animate().cancel(); handle.animate().cancel()
+                panel.translationY = ty
+                seam.translationY = -h.toFloat()
+                sheet.alpha = fade
+                sheet.translationY = centre
+                handle.translationY = lift
+                sheet.visibility = if (fade <= 0.02f) View.INVISIBLE else View.VISIBLE
+            }
+        }
+
+        // The panel is never re-measured, so the only news about how tall the
+        // resting stop should be arrives here: first layout, the window insets
+        // landing, a rename making the title wrap, a rotation. Re-seating the
+        // current stop on each of those is also what puts the panel on screen in
+        // the first place.
+        sheet.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (!dragging) applyHeight(heightOf(stop), false)
+        }
+
+        /*
+         * Drag the sheet up over the camera, or down to a sliver of itself.
+         *
+         * Same shape as the swipe-to-delete card on the sessions list: decline
+         * ACTION_DOWN so the view underneath keeps its press state and its
+         * click, and only take the gesture over once the finger has travelled
+         * past the touch slop. That deferral is the whole safety property here,
+         * because this sheet is made of tap targets \u2014 the name opens the rename
+         * dialog, the link copies itself \u2014 and a listener that grabbed the
+         * gesture on contact would eat both. It is also what lets those two rows
+         * hand their own events to this same code (see the hook at the top of
+         * the function) instead of being dead zones in the middle of a sheet
+         * that otherwise drags: a touch that turns into a drag is one they never
+         * finish, and a touch that stays put is one this never wanted.
+         *
+         * On release it snaps to whichever of the three stops is nearest, with
+         * the same 150ms and the same haptic-on-arrival as the card \u2014 but only
+         * when the stop actually changed, so a nudge that settles back where it
+         * started stays silent.
+         */
+        val slop = android.view.ViewConfiguration.get(this).scaledTouchSlop
+        var downY = 0f
+        var startHeight = 0
+        var startStop = NATURAL
+        dragTouch = fun(v: View, event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downY = event.rawY
+                    dragging = false
+                    startStop = stop
+                    startHeight = heightOf(stop)
+                    return false     // let the press state and any click still happen
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = event.rawY - downY
+                    if (!dragging && abs(dy) > slop) {
+                        dragging = true
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                        v.isPressed = false
+                        v.cancelLongPress()
+                    }
+                    if (!dragging) return false
+                    applyHeight((startHeight - dy).toInt().coerceIn(peekHeight(), root.height), false)
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (!dragging) return false
+                    dragging = false
+                    val h = (startHeight - (event.rawY - downY)).toInt()
+                        .coerceIn(peekHeight(), root.height)
+                    val peek = peekHeight(); val nat = naturalHeight(); val full = root.height
+                    stop = when {
+                        h <= (peek + nat) / 2 -> PEEK
+                        h <= (nat + full) / 2 -> NATURAL
+                        else -> FULL
+                    }
+                    applyHeight(heightOf(stop), true)
+                    if (stop != startStop) haptic()
+                    return true
+                }
+                else -> return false
+            }
+        }
+        // Everywhere on the sheet that is not one of those two rows: the QR, the
+        // countdown, the status line, the handle, and all the space between them.
+        panel.setOnTouchListener { v, event -> dragTouch?.invoke(v, event) ?: false }
+
+        // Where the sheet was left is a property of one look at it, not of the
+        // monitor: the next time this overlay is put back up \u2014 a Handheld
+        // dropping off, the [+] chip \u2014 it is being shown *because* someone needs
+        // the code, and handing them the sliver they collapsed it to an hour ago
+        // would be handing them nothing.
+        pairSheetReset = {
+            stop = NATURAL
+            dragging = false
+            applyHeight(heightOf(NATURAL), false)
+        }
+
         startPairCountdown()
         return root
     }
+
+    /** Puts the pairing sheet back on its resting stop \u2014 see the drag code at
+     *  the end of [buildPairOverlay] for why it does not remember the last one.
+     *  Null until a sheet has been built, i.e. on any screen but a Monitor's. */
+    private var pairSheetReset: (() -> Unit)? = null
 
     /** The truncated link on the pairing sheet. It has to be re-rendered when
      *  the code rotates, or the string on screen quietly stops matching both
@@ -4196,6 +4472,7 @@ class MainActivity : AppCompatActivity() {
                         viewersMax = obj.optInt("max", MAX_VIEWERS).coerceIn(1, MAX_VIEWERS)
                         removePairChip()
                         pairStatus?.text = pairSheetStatus().uppercase()
+                        pairSheetReset?.invoke()
                         pairOverlay?.visibility = View.VISIBLE
                         refreshSystemBars()
                     }
