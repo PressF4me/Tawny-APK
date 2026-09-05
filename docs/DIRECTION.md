@@ -242,7 +242,7 @@ worth bringing to parity or marking loudly, as that item already says.
 - Plan a `targetSdk` 36 bump before Play's next deadline.
 - `androidx` deps are current enough for now; no action.
 
-### I. Chime sounds — done, one carries a credit
+### I. Chime sounds — done, no credit needed
 
 The Viewer's chime is now five pet-calling sounds instead of three UI beeps —
 **Dog toy, Psp psp psp, Meow, Good boy, Bell** (`public/sounds/`, played by
@@ -255,10 +255,12 @@ by `tools/gen-chimes.sh`; `bell` stays FM-synthesised. Licences — full table i
 
 - **Dog toy**, **Good boy** — Pixabay Content License, no attribution.
 - **Meow** — freesound.org 582745, CC0.
-- **Psp psp psp** — freesound.org 654284 by Jolindi, **CC BY 4.0**: credited in
-  the About screen (`showAbout()` in `MainActivity.kt`). Swap for a CC0 clip to
-  carry no attribution at all.
+- **Psp psp psp** — an internal recording supplied for this app (2026-09-04,
+  replacing an earlier CC BY 4.0 freesound clip that needed an in-app credit).
 - **Bell** — synthesised, the project's own.
+
+No sound in the app needs an in-app credit any more; the About screen's old
+"Sound credits" section was removed with the swap.
 
 Not a launch blocker. Nobody has heard the clips on a device yet — check them in
 the on-device test pass.

@@ -43,10 +43,10 @@ if [ -d "$src" ]; then
   proc bark    "dog toy - dog.mp3"   anull                -ss 0    -to 1.75
   proc meow    "meow - cat.wav"      anull                -ss 5.35 -to 6.40
   proc goodboy "goodboy - dog.mp3"   anull
-  # pspsps source is recorded very quietly and is pure sibilance, so roll off
-  # everything below 1.5 kHz before the +40 dB of make-up gain lifts the hum
-  # with it.
-  proc pspsps  "pspspsp - cat.wav"   "highpass=f=1500"    -ss 0.80 -to 2.05
+  # Internal recording (not the old freesound CC BY clip — see sounds/README.md),
+  # recorded at a normal level, so no special pre-filter is needed before
+  # loudnorm; -ss/-to picks out the first of the two "psp psp psp" repeats.
+  proc pspsps  "pspsps - internal.m4a" anull              -ss 1.0  -to 2.20
 else
   echo "  (public/sounds/_src/ missing — skipping the recorded clips)" >&2
 fi
