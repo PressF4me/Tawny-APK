@@ -2815,16 +2815,19 @@ async function switchLens(index) {
       audio: false
     });
     const nt = ns.getVideoTracks()[0];
-    await shapeCapture(nt, screenIsWide(), null, 1280, 720);
     try { nt.contentHint = 'motion'; } catch {}
-    for (const [, p] of S.peers) {
-      const sender = p.pc?.getSenders().find((s) => s.track?.kind === 'video');
-      if (sender) { try { await sender.replaceTrack(nt); } catch {} }
-    }
+    // Adopt and show the new lens *before* shaping it: the shape check reads
+    // the delivered frame off the preview, so it has to be the preview first.
     S.local.getVideoTracks().forEach((t) => { S.local.removeTrack(t); t.stop(); });
     S.local.addTrack(nt);
     const lv = document.getElementById('local');
     if (lv) { lv.srcObject = S.local; lv.style.transform = ''; }
+    await shapeCapture(nt, screenIsWide(), null, 1280, 720);
+    lastCaptureWide = screenIsWide();
+    for (const [, p] of S.peers) {
+      const sender = p.pc?.getSenders().find((s) => s.track?.kind === 'video');
+      if (sender) { try { await sender.replaceTrack(nt); } catch {} }
+    }
     S.cameraIndex = index;
     S.zoomLevel = 1.0;
     updateLensUI();
@@ -2974,22 +2977,56 @@ function idealCaptureSize(wide = screenIsWide(), long = 960, short = 540) {
     : { width: { ideal: short }, height: { ideal: long } };
 }
 
-/** Which way round the frames actually are: true wide, false tall, null if
- *  the track will not say (no settings yet, or a perfect square). */
+/** What the *constraint* settled on: true wide, false tall, null if the track
+ *  will not say (no settings yet, or a perfect square). */
 function trackIsWide(track) {
   const s = track?.getSettings?.() || {};
   if (s.width == null || s.height == null || s.width === s.height) return null;
   return s.width > s.height;
 }
 
-/** getSettings() can lag the constraint that changed it by a frame or two, so
- *  give the pipeline a moment to land before judging it. */
-async function settledShape(track, want, ms = 600) {
+/** What a <video> is actually painting: the decoded frame, not a request. */
+function elementIsWide(v) {
+  if (!v?.videoWidth || !v.videoHeight || v.videoWidth === v.videoHeight) return null;
+  return v.videoWidth > v.videoHeight;
+}
+
+/**
+ * The oracle: which way round the frames *arrive*.
+ *
+ * This is the whole bug. `track.getSettings()` on this WebView reports the
+ * negotiated constraint — the numbers that were asked for, echoed back — while
+ * the camera hands the page the transpose of them. Ask for 540x960 in a
+ * portrait window and getSettings() says 540x960 while every delivered frame
+ * is 960x540. So a self-checking loop that judges the shape by getSettings()
+ * is blind in exactly the case it exists to catch: it agrees with itself,
+ * never corrects, and the picture stays a quarter turn out — wide in portrait,
+ * tall in landscape, consistently inverted in both directions.
+ *
+ * `videoWidth`/`videoHeight` on the element showing the track cannot lie about
+ * this: it is the decoded frame, the picture the user is looking at, and the
+ * picture the encoder sends. Measure that. getSettings() is kept only as the
+ * fallback for a track that is not on screen yet.
+ */
+function deliveredIsWide(track) {
+  const v = el.local;
+  // When the preview *is* this track, its frames are the only answer worth
+  // having — and "no frames yet" is `null`, meaning keep waiting, never
+  // "ask the track". Falling back to getSettings() here is what made the last
+  // attempt useless: it answered instantly, with the shape that was asked for,
+  // so the check passed before a single frame had been delivered.
+  if (v?.srcObject?.getVideoTracks?.().includes(track)) return elementIsWide(v);
+  return trackIsWide(track);
+}
+
+/** A reshaped pipeline takes a beat to deliver its first frame at the new size,
+ *  so give it one before judging what came out. */
+async function settledShape(track, want, ms = 1500) {
   const until = Date.now() + ms;
-  let got = trackIsWide(track);
+  let got = deliveredIsWide(track);
   while (got !== want && Date.now() < until) {
     await new Promise((r) => setTimeout(r, 100));
-    got = trackIsWide(track);
+    got = deliveredIsWide(track);
   }
   return got;
 }
@@ -3019,21 +3056,43 @@ async function shapeCapture(track, wide = screenIsWide(), extra = null, long = 9
   };
 
   let got = await ask();
-  if (got === null || got === wide) return true;
+  if (got === wide) return true;
+  if (got === null) {
+    // No frame to judge by. Say so rather than reporting a silent success —
+    // an unmeasured shape reading as "fine" is how the last attempt hid.
+    diag(`shape: no frame to measure for a ${key} window — left as asked`);
+    return true;
+  }
 
   // The camera handed back the perpendicular shape. Ask for the transpose —
   // for this orientation only, so turning the phone re-opens the question
   // instead of carrying a portrait answer into a landscape window.
   captureSwap[key] = !captureSwap[key];
-  diag(`capture came back ${got ? 'wide' : 'tall'} for a ${key} window — asking for the transpose`);
+  diag(`shape: asked ${key}, camera delivered ${got ? 'wide' : 'tall'} ` +
+    `(${shapeOf(track)}) — asking for the transpose`);
   got = await ask();
-  if (got === null || got === wide) return true;
+  if (got === null || got === wide) {
+    diag(`shape: transpose took — ${key} window now ${shapeOf(track)}`);
+    return true;
+  }
 
-  // Neither way round works — this camera has one shape and that is that.
-  // Put the request back to the honest one so the next turn starts clean.
+  // Neither way round works — this camera has one shape and that is that. Put
+  // both the bookkeeping *and* the constraint back to the honest ask, or the
+  // track is left sitting on the transpose that just failed.
   captureSwap[key] = !captureSwap[key];
-  diag(`camera will not give a ${key} frame — it stays ${got ? 'wide' : 'tall'}`);
+  await ask();
+  diag(`shape: camera will not give a ${key} frame — it stays ${shapeOf(track)}`);
   return false;
+}
+
+/** Both readings side by side: what the picture is, and what the track claims
+ *  it is. They disagree on this WebView, which is the point. */
+function shapeOf(track) {
+  const v = el.local;
+  const s = track?.getSettings?.() || {};
+  const shown = v?.srcObject?.getVideoTracks?.().includes(track);
+  const px = shown && v.videoWidth ? `${v.videoWidth}x${v.videoHeight}` : 'not-shown';
+  return `frame ${px} settings ${s.width || '?'}x${s.height || '?'}`;
 }
 
 function cameraConstraints(wide = screenIsWide()) {
@@ -3086,7 +3145,11 @@ async function start(role) {
       ? 'Camera and microphone access was blocked. Allow it for this site, then try again.'
       : `Could not open the camera or microphone (${err.name}).`);
   }
-  if (role === 'station') await shapeCapture(S.local.getVideoTracks()[0]);
+  // Attach the preview now, so frames start flowing at once — the shaping
+  // itself waits until the station UI below has the preview on screen, because
+  // the delivered frame *is* the measurement (see deliveredIsWide) and there is
+  // nothing to measure until one arrives.
+  if (role === 'station') el.local.srcObject = S.local;
 
   S.captureLost = false;
   // A fresh session starts dark on both sides. The Monitor works out whether
@@ -3138,7 +3201,10 @@ async function start(role) {
     updatePeerChip();
     keepAwake();
     watchBrowserBattery();            // native shell drives window.tawnyBattery instead
-    lastCaptureWide = screenIsWide(); // shapeCapture above already settled this
+    // Now the preview is live, so the shape it is actually delivering can be
+    // read off it and corrected if the camera handed back the transpose.
+    await shapeCapture(S.local.getVideoTracks()[0]);
+    lastCaptureWide = screenIsWide();
     applyOwnRotation();               // the shell may already have reported a turn
   } else {
     for (const t of S.local.getAudioTracks()) t.enabled = false; // push-to-talk
@@ -3212,10 +3278,6 @@ async function reacquireLocal() {
     const fresh = await navigator.mediaDevices.getUserMedia({
       audio, video: cameraConstraints(),
     });
-    // A fresh camera is a fresh answer to "which way round does it hand frames
-    // back", and the phone may well have been turned while the app was away.
-    await shapeCapture(fresh.getVideoTracks()[0]);
-    lastCaptureWide = screenIsWide();
     // Retire the dead tracks, then adopt the new ones into the same stream so
     // everything already pointed at S.local keeps working.
     for (const t of S.local ? S.local.getTracks() : []) {
@@ -3224,6 +3286,13 @@ async function reacquireLocal() {
     }
     if (!S.local) S.local = new MediaStream();
     for (const t of fresh.getTracks()) S.local.addTrack(t);
+
+    // A fresh camera is a fresh answer to "which way round does it hand frames
+    // back", and the phone may well have been turned while the app was away.
+    // Shaped once it is on screen, because that is where the shape is read.
+    el.local.srcObject = S.local;
+    await shapeCapture(S.local.getVideoTracks()[0]);
+    lastCaptureWide = screenIsWide();
 
     // A sender whose track has ended may report `sender.track === null`, so the
     // kind comes from the transceiver, which keeps it for the life of the m-line.
@@ -3576,11 +3645,12 @@ $('#btn-flip').addEventListener('click', async () => {
   }
 
   const track = stream.getVideoTracks()[0];
-  await shapeCapture(track);
-  lastCaptureWide = screenIsWide();
   try { track.contentHint = 'motion'; } catch {}
+  // Show it before shaping it — the shape check measures the delivered frame.
   S.local.addTrack(track);
   el.local.srcObject = S.local;
+  await shapeCapture(track);
+  lastCaptureWide = screenIsWide();
   // The Watcher feeds every connected Handheld from this one capture.
   for (const p of viewerPeers()) {
     const sender = p.pc?.getSenders().find((s) => s.track?.kind === 'video');
@@ -4045,6 +4115,9 @@ async function runReshape() {
     // turning the phone must not put the camera light out.
     await reassertTorch();
     for (const peer of S.peers.values()) tuneVideoSender(peer);
+    // One line per turn even when nothing moved — a shape that failed to
+    // follow the window is exactly the case with no `resize` to report it.
+    logShape('cam', el.local);
   } finally {
     reshaping = false;
   }
@@ -4060,5 +4133,28 @@ for (const ev of ['resize', 'orientationchange']) {
 // A `resize` on the <video> is the far phone turning, or the bitrate ladder
 // stepping resolution. Either way the box the picture is fitted into may need
 // re-measuring.
-el.remote.addEventListener('resize', applyRemoteRotation);
-el.local.addEventListener('resize', applyOwnRotation);
+/**
+ * The flight recorder's view of the thing this whole section is about: the
+ * shape of the picture actually on screen, next to the shape of the window it
+ * has to fill. They must agree in *both* orientations — a wide picture in a
+ * portrait window is the letterboxing bug, and so is a tall one in a landscape
+ * window. `tx` alone cannot show this: it is the encoder's own count, and it
+ * has read right while the picture was a quarter turn out.
+ */
+function logShape(what, v) {
+  if (!v?.videoWidth) return;
+  const shape = v.videoWidth > v.videoHeight ? 'wide' : 'tall';
+  const win = screenIsWide() ? 'wide' : 'tall';
+  diag(`${what} ${v.videoWidth}x${v.videoHeight} ${shape} ` +
+    `window ${window.innerWidth}x${window.innerHeight} ${win} ` +
+    `${shape === win ? 'MATCH' : 'MISMATCH'}`);
+}
+
+el.remote.addEventListener('resize', () => {
+  applyRemoteRotation();
+  logShape('rx', el.remote);          // the Viewer's stage: what it must fit
+});
+el.local.addEventListener('resize', () => {
+  applyOwnRotation();
+  if (S.role === 'station') logShape('cam', el.local);
+});
