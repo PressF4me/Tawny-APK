@@ -108,8 +108,11 @@ NOTES="$DEST/RELEASE-NOTES.md"
       echo "Since \`$PREV_COMMIT\`:"
       echo ""
 
-      # Categorize commits by type
-      declare -a bug_fixes ui_ux features other
+      # Categorize commits by type. Each must be initialized with `=()` —
+      # under `set -u`, a `declare -a` that never receives an element (e.g.
+      # a run with zero UI/UX commits) is still "unbound" to bash, and
+      # ${#arr[@]} on it aborts the script.
+      declare -a bug_fixes=() ui_ux=() features=() other=()
 
       while IFS= read -r line; do
         # Extract message for matching (remove leading "- ")
