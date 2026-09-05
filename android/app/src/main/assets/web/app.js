@@ -2808,11 +2808,14 @@ async function switchLens(index) {
   await setTorch(false, 'lens switch');
   try {
     const ns = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: { exact: cam.deviceId }, ...idealCaptureSize(1280, 720) },
+      video: {
+        deviceId: { exact: cam.deviceId },
+        ...idealCaptureSize(screenIsWide(), 1280, 720)
+      },
       audio: false
     });
     const nt = ns.getVideoTracks()[0];
-    await fixCaptureAxis(nt);
+    await shapeCapture(nt, screenIsWide(), null, 1280, 720);
     try { nt.contentHint = 'motion'; } catch {}
     for (const [, p] of S.peers) {
       const sender = p.pc?.getSenders().find((s) => s.track?.kind === 'video');
@@ -2946,41 +2949,97 @@ function screenIsWide() {
 // get a wide one, pixel-for-pixel swapped rather than merely relabelled, and
 // consistently so for arbitrary (non-16:9) sizes too. That is what made the
 // picture "always wide": every ideal aspect this app asked for came back
-// rotated a quarter turn from what it held. captureAxisSwapped, once set by
-// fixCaptureAxis() below, makes every idealCaptureSize() call ask for the
-// *opposite* of what is wanted, so the buggy pipeline lands on the right
-// shape. Devices that do not have the bug never trip the detector, so this
-// costs them nothing.
-let captureAxisSwapped = false;
+// rotated a quarter turn from what it held.
+//
+// The compensation for that used to be one sticky boolean, learned once from
+// the first frame of the session and inverted into every request afterwards —
+// and that is what broke landscape. A pipeline does not behave the same way in
+// both windows: on this phone a portrait window is served by cropping a
+// natively-wide sensor frame, which is a request the camera *can* honour,
+// while a landscape window needs no crop at all. A swap learned in portrait,
+// frozen, and then applied to a landscape window asks a phone lying on its
+// side for a *tall* frame — and gets one. Hence "works in vertical; goes
+// vertical in horizontal too".
+//
+// So: remember the correction **per orientation**, and never trust it. Every
+// shaping goes through shapeCapture() below, which asks, then looks at what
+// actually arrived, and asks the other way round if the camera disagreed.
+// A well-behaved camera is right on the first ask and this costs it nothing.
+const captureSwap = { wide: false, tall: false };
 
-function idealCaptureSize(long = 960, short = 540) {
-  const wide = screenIsWide() !== captureAxisSwapped;
-  return wide
+function idealCaptureSize(wide = screenIsWide(), long = 960, short = 540) {
+  const askWide = wide !== (wide ? captureSwap.wide : captureSwap.tall);
+  return askWide
     ? { width: { ideal: long }, height: { ideal: short } }
     : { width: { ideal: short }, height: { ideal: long } };
 }
 
-/** Call right after opening a video track, while it is still known which
- *  shape was actually asked for. Flips captureAxisSwapped (once, for the
- *  rest of the session) and re-applies the corrected shape if the camera
- *  handed back the perpendicular one. */
-async function fixCaptureAxis(track) {
-  if (!track || captureAxisSwapped) return;
-  const s = track.getSettings();
-  if (s.width == null || s.height == null || s.width === s.height) return;
-  const askedWide = screenIsWide();
-  const gotWide = s.width > s.height;
-  if (gotWide === askedWide) return;
-  captureAxisSwapped = true;
-  diag(`capture axis swapped by the camera (asked ${askedWide ? 'wide' : 'tall'}, ` +
-    `got ${s.width}x${s.height}) — compensating from here on`);
-  try { await track.applyConstraints(idealCaptureSize()); } catch {}
+/** Which way round the frames actually are: true wide, false tall, null if
+ *  the track will not say (no settings yet, or a perfect square). */
+function trackIsWide(track) {
+  const s = track?.getSettings?.() || {};
+  if (s.width == null || s.height == null || s.width === s.height) return null;
+  return s.width > s.height;
 }
 
-function cameraConstraints() {
+/** getSettings() can lag the constraint that changed it by a frame or two, so
+ *  give the pipeline a moment to land before judging it. */
+async function settledShape(track, want, ms = 600) {
+  const until = Date.now() + ms;
+  let got = trackIsWide(track);
+  while (got !== want && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 100));
+    got = trackIsWide(track);
+  }
+  return got;
+}
+
+/**
+ * Make the capture the shape the phone is being held — and check that it took.
+ *
+ * `extra` is merged over the constraint set (the dim-mode framerate cap), and
+ * note that applyConstraints replaces the whole set including `advanced`, so
+ * every caller has to reassert the torch afterwards.
+ */
+async function shapeCapture(track, wide = screenIsWide(), extra = null, long = 960, short = 540) {
+  if (!track) return false;
+  const key = wide ? 'wide' : 'tall';
+  const ask = async () => {
+    // Deliberately no facingMode: this runs on tracks that were opened with an
+    // exact deviceId (the lens picker), and re-stating a facing for those is at
+    // best noise. applyConstraints cannot move a track to another camera.
+    try {
+      await track.applyConstraints({
+        ...idealCaptureSize(wide, long, short),
+        frameRate: { ideal: 24, max: 30 },
+        ...(extra || {})
+      });
+    } catch {}
+    return settledShape(track, wide);
+  };
+
+  let got = await ask();
+  if (got === null || got === wide) return true;
+
+  // The camera handed back the perpendicular shape. Ask for the transpose —
+  // for this orientation only, so turning the phone re-opens the question
+  // instead of carrying a portrait answer into a landscape window.
+  captureSwap[key] = !captureSwap[key];
+  diag(`capture came back ${got ? 'wide' : 'tall'} for a ${key} window — asking for the transpose`);
+  got = await ask();
+  if (got === null || got === wide) return true;
+
+  // Neither way round works — this camera has one shape and that is that.
+  // Put the request back to the honest one so the next turn starts clean.
+  captureSwap[key] = !captureSwap[key];
+  diag(`camera will not give a ${key} frame — it stays ${got ? 'wide' : 'tall'}`);
+  return false;
+}
+
+function cameraConstraints(wide = screenIsWide()) {
   return {
     facingMode: { ideal: S.facing },
-    ...idealCaptureSize(),
+    ...idealCaptureSize(wide),
     frameRate: { ideal: 24, max: 30 }
   };
 }
@@ -3011,6 +3070,12 @@ async function start(role) {
       'Close Tawny and open it again.');
   }
 
+  // A new session may be a different camera on a differently-held phone, so it
+  // starts with no opinion about which way round this one hands frames back.
+  captureSwap.wide = false;
+  captureSwap.tall = false;
+  lastCaptureWide = null;
+
   const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
   try {
     S.local = role === 'station'
@@ -3021,7 +3086,7 @@ async function start(role) {
       ? 'Camera and microphone access was blocked. Allow it for this site, then try again.'
       : `Could not open the camera or microphone (${err.name}).`);
   }
-  if (role === 'station') await fixCaptureAxis(S.local.getVideoTracks()[0]);
+  if (role === 'station') await shapeCapture(S.local.getVideoTracks()[0]);
 
   S.captureLost = false;
   // A fresh session starts dark on both sides. The Monitor works out whether
@@ -3073,7 +3138,7 @@ async function start(role) {
     updatePeerChip();
     keepAwake();
     watchBrowserBattery();            // native shell drives window.tawnyBattery instead
-    lastCaptureWide = screenIsWide(); // getUserMedia above already matched this
+    lastCaptureWide = screenIsWide(); // shapeCapture above already settled this
     applyOwnRotation();               // the shell may already have reported a turn
   } else {
     for (const t of S.local.getAudioTracks()) t.enabled = false; // push-to-talk
@@ -3147,6 +3212,10 @@ async function reacquireLocal() {
     const fresh = await navigator.mediaDevices.getUserMedia({
       audio, video: cameraConstraints(),
     });
+    // A fresh camera is a fresh answer to "which way round does it hand frames
+    // back", and the phone may well have been turned while the app was away.
+    await shapeCapture(fresh.getVideoTracks()[0]);
+    lastCaptureWide = screenIsWide();
     // Retire the dead tracks, then adopt the new ones into the same stream so
     // everything already pointed at S.local keeps working.
     for (const t of S.local ? S.local.getTracks() : []) {
@@ -3507,7 +3576,8 @@ $('#btn-flip').addEventListener('click', async () => {
   }
 
   const track = stream.getVideoTracks()[0];
-  await fixCaptureAxis(track);
+  await shapeCapture(track);
+  lastCaptureWide = screenIsWide();
   try { track.contentHint = 'motion'; } catch {}
   S.local.addTrack(track);
   el.local.srcObject = S.local;
@@ -3555,12 +3625,12 @@ async function setDim(on) {
 
   // Take the capture itself down, not just the encode. This is the half the
   // sensor and the ISP actually feel; the encoder cap alone leaves them at 24.
+  // Through shapeCapture, so a constraint set written for the framerate cannot
+  // quietly undo the shape the phone is being held.
   for (const t of S.local?.getVideoTracks() ?? []) {
-    try {
-      await t.applyConstraints(on
-        ? { ...cameraConstraints(), frameRate: { ideal: POWER.captureFps, max: POWER.captureFps } }
-        : cameraConstraints());
-    } catch {}
+    await shapeCapture(t, screenIsWide(), on
+      ? { frameRate: { ideal: POWER.captureFps, max: POWER.captureFps } }
+      : null);
   }
   // That call just replaced the track's whole constraint set, `advanced` and
   // all. The light is independent of the screen and stays on through a doze.
@@ -3899,37 +3969,85 @@ function broadcastOrientation() {
   broadcast({ type: 'meta', rot: S.rot });
 }
 
+let rotTimer = null;
+let lastWindowCW = null;
+
 /**
  * The native shell's reading. Both angles are degrees clockwise from the
  * phone's natural orientation; see the note at the top of this section.
  */
 window.tawnyOrientation = function (deviceCW, windowCW) {
-  const rot = quarter(Number(windowCW || 0) - Number(deviceCW || 0));
+  const dev = quarter(Number(deviceCW || 0));
+  const win = quarter(Number(windowCW || 0));
+  const rot = quarter(win - dev);
+  const windowMoved = lastWindowCW !== null && win !== lastWindowCW;
+  lastWindowCW = win;
+
+  // Any reading supersedes a pending one.
+  clearTimeout(rotTimer);
   if (rot === S.rot) return false;
-  S.rot = rot;
-  diag(`orientation device=${deviceCW} window=${windowCW} → rotate ${rot}`);
-  applyOwnRotation();
-  broadcastOrientation();
+
+  const commit = () => {
+    rotTimer = null;
+    S.rot = rot;
+    diag(`orientation device=${dev} window=${win} → rotate ${rot}`);
+    applyOwnRotation();
+    broadcastOrientation();
+  };
+
+  // The accelerometer sees a turn about a second before the window does, so on
+  // a phone with auto-rotate *on* every rotation passes through a moment where
+  // the device has moved and the window has not — a correction of a whole
+  // quarter turn that is real for that second and wrong the next. Acting on it
+  // flipped the Monitor's preview and every Viewer's picture onto its side and
+  // back again on every turn. So a device-only change waits to see whether the
+  // window is going to follow; a window that has just moved is authoritative
+  // and lands at once. With auto-rotate off — the case this correction exists
+  // for — nothing follows, and the turn simply lands a beat later.
+  if (windowMoved) commit();
+  else rotTimer = setTimeout(commit, 1500);
   return true;
 };
 
 let reshapeTimer = null;
+let reshaping = false;
 let lastCaptureWide = null;
+
+/** Ask the camera for the shape the window is now, once the turn has settled. */
 function reshapeCapture() {
   if (S.role !== 'station' || !S.local) return;
-  const wide = screenIsWide();
-  if (wide === lastCaptureWide) return;
-  lastCaptureWide = wide;
+  if (screenIsWide() === lastCaptureWide) return;
   clearTimeout(reshapeTimer);
-  reshapeTimer = setTimeout(async () => {
-    const c = S.dimmed
-      ? { ...cameraConstraints(), frameRate: { ideal: POWER.captureFps, max: POWER.captureFps } }
-      : cameraConstraints();
-    for (const t of S.local.getVideoTracks()) {
-      try { await t.applyConstraints(c); } catch {}
+  reshapeTimer = setTimeout(runReshape, 350);
+}
+
+async function runReshape() {
+  reshapeTimer = null;
+  // shapeCapture waits on the pipeline, so a second turn can arrive mid-flight.
+  // One at a time, and the loop below picks up a window that moved again.
+  if (reshaping) return;
+  if (S.role !== 'station' || !S.local) return;
+  reshaping = true;
+  try {
+    // Read the window here, not when the timer was set: a turn fires a burst of
+    // resizes and it is the last one that counts.
+    let wide = screenIsWide();
+    for (let pass = 0; pass < 3 && wide !== lastCaptureWide; pass++) {
+      lastCaptureWide = wide;
+      for (const t of S.local.getVideoTracks()) {
+        await shapeCapture(t, wide, S.dimmed
+          ? { frameRate: { ideal: POWER.captureFps, max: POWER.captureFps } }
+          : null);
+      }
+      wide = screenIsWide();
     }
+    // applyConstraints replaced the whole constraint set, `advanced` and all —
+    // turning the phone must not put the camera light out.
+    await reassertTorch();
     for (const peer of S.peers.values()) tuneVideoSender(peer);
-  }, 350);
+  } finally {
+    reshaping = false;
+  }
 }
 for (const ev of ['resize', 'orientationchange']) {
   window.addEventListener(ev, () => {

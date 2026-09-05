@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Build a signed release AAB and file it in the Play Store submission pack,
-# one dated folder per day, named so a PR reviewer can tell at a glance which
-# build it is and pull it up in Play Console without guessing.
+# one timestamped folder per ship, named so a PR reviewer can tell at a glance
+# which build it is and pull it up in Play Console without guessing.
 #
 # Usage:
 #   tawny-ship-aab       build the release AAB, copy it into
-#                         "Tawny ship/Google Ready/<YYYYMMDD>/" as
+#                         "Tawny ship/Google Ready/<YYYYMMDD>-<HHMMSS>-b<build>/" as
 #                         app-release-<version>-<YYYYMMDD>-b<build>.aab,
 #                         log the git commit it was built from in
 #                         Google Ready/MANIFEST.md, and write
-#                         Google Ready/<YYYYMMDD>/RELEASE-NOTES.md — the
+#                         Google Ready/<YYYYMMDD>-<HHMMSS>-b<build>/RELEASE-NOTES.md — the
 #                         commit log between this build and the last one
-#                         shipped, ready to paste into Play Console as the
-#                         tester-facing release notes.
+#                         shipped, categorized by type and ready to paste into
+#                         Play Console as the tester-facing release notes.
 #
 set -euo pipefail
 
@@ -29,6 +29,7 @@ MANIFEST="$ROOT/MANIFEST.md"
 CODE=$(grep "^VERSION_CODE=" "$VPROPS" | cut -d= -f2 | tr -d '[:space:]')
 NAME=$(grep "^VERSION_NAME=" "$VPROPS" | cut -d= -f2 | tr -d '[:space:]')
 DATE=$(date +%Y%m%d)
+TIME=$(date +%H%M%S)
 COMMIT=$(git -C "$PROJECT" rev-parse --short HEAD)
 BRANCH=$(git -C "$PROJECT" rev-parse --abbrev-ref HEAD)
 DIRTY=""
@@ -36,7 +37,7 @@ git -C "$PROJECT" diff --quiet && git -C "$PROJECT" diff --cached --quiet \
   || DIRTY=" **(built from uncommitted changes)**"
 
 OUT="app-release-${NAME}-${DATE}-b${CODE}.aab"
-DEST="$ROOT/$DATE"
+DEST="$ROOT/${DATE}-${TIME}-b${CODE}"
 
 mkdir -p "$DEST"
 
@@ -79,7 +80,7 @@ if [ ! -f "$MANIFEST" ]; then
   } > "$MANIFEST"
 fi
 printf '| `%s/%s` | %s | %s | %s | `%s`%s | %s |\n' \
-  "$DATE" "$OUT" "$NAME" "$CODE" "$DATE" "$COMMIT" "$DIRTY" "$BRANCH" >> "$MANIFEST"
+  "${DATE}-${TIME}-b${CODE}" "$OUT" "$NAME" "$CODE" "$DATE" "$COMMIT" "$DIRTY" "$BRANCH" >> "$MANIFEST"
 
 # Release notes: the commit log from the last shipped build to this one,
 # filed next to the AAB it describes so it can be pasted straight into Play
@@ -106,7 +107,52 @@ NOTES="$DEST/RELEASE-NOTES.md"
     else
       echo "Since \`$PREV_COMMIT\`:"
       echo ""
-      echo "$LOG"
+
+      # Categorize commits by type
+      declare -a bug_fixes ui_ux features other
+
+      while IFS= read -r line; do
+        # Extract message for matching (remove leading "- ")
+        msg="${line#- }"
+
+        # Check categories in order (first match wins). Word-boundaries
+        # (\b) matter here — without them "ui" matches inside "build" and
+        # "new" matches inside "renew", mis-bucketing unrelated commits.
+        if echo "$msg" | grep -iqE '\b(fix|fixed|fixes|bug|crash|error|wrong|broken|regression)\b'; then
+          bug_fixes+=("$line")
+        elif echo "$msg" | grep -iqE '\b(redesign|ui|ux|screen|style|theme|icon|layout|copy|chime|sound|palette|animation|polish)\b'; then
+          ui_ux+=("$line")
+        elif echo "$msg" | grep -iqE '\b(add|adds|added|new|implement|introduce)\b|support for'; then
+          features+=("$line")
+        else
+          other+=("$line")
+        fi
+      done <<< "$LOG"
+
+      # Output categorized sections (only non-empty)
+      if [ ${#bug_fixes[@]} -gt 0 ]; then
+        echo "### Bug Fixes"
+        echo ""
+        printf '%s\n' "${bug_fixes[@]}"
+        echo ""
+      fi
+      if [ ${#ui_ux[@]} -gt 0 ]; then
+        echo "### UI/UX"
+        echo ""
+        printf '%s\n' "${ui_ux[@]}"
+        echo ""
+      fi
+      if [ ${#features[@]} -gt 0 ]; then
+        echo "### Features"
+        echo ""
+        printf '%s\n' "${features[@]}"
+        echo ""
+      fi
+      if [ ${#other[@]} -gt 0 ]; then
+        echo "### Other"
+        echo ""
+        printf '%s\n' "${other[@]}"
+      fi
     fi
   fi
 } > "$NOTES"
