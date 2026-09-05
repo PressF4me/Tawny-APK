@@ -94,6 +94,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
@@ -286,8 +287,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var root: FrameLayout
     private var web: WebView? = null
     private var pairOverlay: View? = null
-    /** The user asked to see the camera instead of the pairing code. */
-    private var pairOverlayHidden = false
     private var pairChip: View? = null      // way back to the code, over the live view
     /** The words behind the [+], revealed while a finger is on the chip. */
     private var pairChipLabel: TextView? = null
@@ -824,8 +823,8 @@ class MainActivity : AppCompatActivity() {
         pairStatus = null
         pairCountdown = null
         pairQrView = null
+        pairLinkView = null
         removePairChip()
-        pairOverlayHidden = false
         viewersNow = 0                 // a new screen knows about nobody
         viewersMax = MAX_VIEWERS
         web?.let {
@@ -1787,38 +1786,56 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun roleCard(
-        tag: String, title: String, blurb: String, kind: String, onClick: () -> Unit
-    ): View = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        background = pressable(roundRect(Hue.PANEL, Hue.LINE, Radius.CARD), Radius.CARD, Hue.BERRY)
-        setPadding(dp(18), dp(18), dp(18), dp(18))
-        layoutParams = lp(topMargin = 12)
-        tapFeedback(onClick)
-
-        addView(IconView(this@MainActivity, kind).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(42), dp(42)).also { it.bottomMargin = dp(8) }
-        })
-        addView(TextView(this@MainActivity).apply {
-            text = tag.uppercase()
-            setTextColor(Hue.BERRY)
-            textSize = Type.LABEL
-            letterSpacing = 0.16f
-            typeface = uiFontSemi
-        })
-        addView(TextView(this@MainActivity).apply {
-            text = title
-            setTextColor(Hue.TEXT)
-            textSize = Type.CARD_TITLE
-            typeface = uiFontSemi
-            setPadding(0, dp(4), 0, dp(4))
-        })
-        addView(TextView(this@MainActivity).apply {
-            text = blurb
-            setTextColor(Hue.DIM)
-            textSize = Type.SUB
-            typeface = uiFont
-            setLineSpacing(0f, Type.LEAD_BODY)
-        })
+        tag: String, title: String, blurb: String, kind: String, critter: String, onClick: () -> Unit
+    ): View {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            addView(IconView(this@MainActivity, kind).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(42), dp(42)).also { it.bottomMargin = dp(8) }
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = tag.uppercase()
+                setTextColor(Hue.BERRY)
+                textSize = Type.LABEL
+                letterSpacing = 0.16f
+                typeface = uiFontSemi
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                setTextColor(Hue.TEXT)
+                textSize = Type.CARD_TITLE
+                typeface = uiFontSemi
+                setPadding(0, dp(4), 0, dp(4))
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = blurb
+                setTextColor(Hue.DIM)
+                textSize = Type.SUB
+                typeface = uiFont
+                setLineSpacing(0f, Type.LEAD_BODY)
+            })
+        }
+        return FrameLayout(this).apply {
+            background = pressable(roundRect(Hue.PANEL, Hue.LINE, Radius.CARD), Radius.CARD, Hue.BERRY)
+            layoutParams = lp(topMargin = 12)
+            tapFeedback(onClick)
+            // Tucked in the corner the header row leaves empty (icon is top-
+            // left, title/blurb start below) — it can never end up under text
+            // because that space never holds any.
+            addView(CritterSilhouetteView(this@MainActivity, critter).apply {
+                // Loud enough to be an illustration, quiet enough that the eye
+                // still lands on the title first. The warm fur tones do most
+                // of the recessing on their own against the panel; alpha only
+                // has to take the outline and the eyes down with them.
+                alpha = if (paletteIsDark()) 0.54f else 0.58f
+                layoutParams = FrameLayout.LayoutParams(dp(64), dp(64)).also {
+                    it.gravity = Gravity.TOP or Gravity.END
+                    it.topMargin = dp(10); it.marginEnd = dp(12)
+                }
+            })
+            addView(content)
+        }
     }
 
     /**
@@ -1850,28 +1867,12 @@ class MainActivity : AppCompatActivity() {
      * that is left running) but they float over the video instead of cutting
      * it, and their icons flip to light because the video behind them is dark.
      */
-    /** True when the video itself is what is under the system bars. */
-    private fun videoIsBehindBars() =
-        isLive && pairOverlay?.visibility != View.VISIBLE
-
-    /**
-     * Edge-to-edge over the video, framed everywhere else.
-     *
-     * The pairing QR is a full-screen cream sheet mounted *over* the live
-     * WebView, so keying this off `isLive` alone put white status-bar icons on
-     * a cream background — the clock all but disappeared.
-     */
-    /** Reveal the live camera; leave one obvious way back to the code. */
-    private fun hidePairOverlay() {
-        pairOverlayHidden = true
-        pairOverlay?.visibility = View.GONE
-        stopPairCountdown()
-        syncPairChip()
-        refreshSystemBars()
-    }
+    /** True when the video itself is what is under the system bars — which,
+     *  with the pairing sheet now a transparent-top overlay rather than a
+     *  full-screen cream one, is simply whenever a call is live. */
+    private fun videoIsBehindBars() = isLive
 
     private fun showPairOverlay() {
-        pairOverlayHidden = false
         removePairChip()
         pairStatus?.text = pairSheetStatus().uppercase()
         pairOverlay?.visibility = View.VISIBLE
@@ -2805,6 +2806,8 @@ class MainActivity : AppCompatActivity() {
         clearScreen()
         screen = "handheld"
         swipeNav(back = { showWelcome() }, forward = { goLive("viewer") })
+        val pawView = PawTrailView(this)
+        root.addView(pawView, FrameLayout.LayoutParams(MP, MP))
         val name = prefs.getString("channelName", "your pet") ?: "your pet"
         val col = column(scroll = false)
         col.addView(IconView(this, "phone", behind = Hue.BG).apply {
@@ -2824,6 +2827,19 @@ class MainActivity : AppCompatActivity() {
         col.addView(primary("Watch $name now") { goLive("viewer") })
         col.addView(link("Connect to a different monitor") { onHandheld() })
         mountCentered(col)
+
+        // Same reasoning as showRole(): keep the trail off the actual content,
+        // recomputed on layout/scroll since mountCentered's ScrollView can
+        // move independently of the paw view underneath it.
+        val scroll = col.parent as? ScrollView
+        val updateAvoid = {
+            val a = IntArray(2); pawView.getLocationOnScreen(a)
+            val b = IntArray(2); col.getLocationOnScreen(b)
+            val x = (b[0] - a[0]).toFloat(); val y = (b[1] - a[1]).toFloat()
+            pawView.avoid = listOf(RectF(x, y, x + col.width, y + col.height))
+        }
+        scroll?.viewTreeObserver?.addOnGlobalLayoutListener { updateAvoid() }
+        scroll?.setOnScrollChangeListener { _, _, _, _, _ -> updateAvoid() }
     }
 
     // -------------------------------------------------------- role choice
@@ -2840,28 +2856,58 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().remove("role").apply()
         }
         swipeNav(back = { backToSessionsOrWelcome() }, forward = { if (!resumeSession()) onWatcher() })
+        val pawView = PawTrailView(this)
+        root.addView(pawView, FrameLayout.LayoutParams(MP, MP))
         val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
         val col = column(scroll = true)
         col.addView(backLink { backToSessionsOrWelcome() })
-        col.addView(heading("Set up Tawny", "How will you use this phone?"))
-        col.addView(
-            roleCard(
-                "The Monitor", "Stays with your pet",
-                "Plug it in and point the camera. It streams live video and " +
-                    "sound, and shows a code so others can watch too.",
-                "camera"
-            ) { onWatcher() }
-        )
-        col.addView(
-            roleCard(
-                "The Viewer", "Watch from this phone",
-                "Check in on your pet from here — around the house on Wi-Fi, " +
-                    "or from out and about.",
-                "phone"
-            ) { onHandheld() }
-        )
+        val head = heading("Set up Tawny", "How will you use this phone?")
+        col.addView(head)
+        val monitorCard = roleCard(
+            "The Monitor", "Stays with your pet",
+            "Plug it in and point the camera. It streams live video and " +
+                "sound, and shows a code so others can watch too.",
+            "camera", "cat"
+        ) { onWatcher() }
+        col.addView(monitorCard)
+        val viewerCard = roleCard(
+            "The Viewer", "Watch from this phone",
+            "Check in on your pet from here — around the house on Wi-Fi, " +
+                "or from out and about.",
+            "phone", "dog"
+        ) { onHandheld() }
+        col.addView(viewerCard)
         scroll.addView(col)
         root.addView(scroll)
+
+        // The trail has to steer around the cards *and* the header, in the paw
+        // view's own coordinates — recomputed on every layout pass and every
+        // scroll, since they move (scroll) independently of it. The header was
+        // missing from this list at first, and prints duly walked straight
+        // over the back arrow and the word "Tawny".
+        fun cardRect(v: View): RectF {
+            val a = IntArray(2); pawView.getLocationOnScreen(a)
+            val b = IntArray(2); v.getLocationOnScreen(b)
+            val x = (b[0] - a[0]).toFloat(); val y = (b[1] - a[1]).toFloat()
+            return RectF(x, y, x + v.width, y + v.height)
+        }
+        // The header goes in as one full-width slab from the very top of the
+        // view down to the bottom of the subtitle, not as the two text
+        // rectangles it is made of. The back arrow is barely 50dp wide, so
+        // the honest rectangles left a 40dp-tall slot open beside it — and a
+        // walker that seeded into that slot could only shuffle from side to
+        // side in it forever, since the full-width heading below sealed it
+        // off. Blocking the whole strip leaves one generous area, under the
+        // cards, and the trail actually roams.
+        val updateAvoid = {
+            val h = cardRect(head)
+            pawView.avoid = listOf(
+                RectF(0f, 0f, pawView.width.toFloat(), h.bottom),
+                cardRect(monitorCard), cardRect(viewerCard)
+            )
+        }
+        scroll.viewTreeObserver.addOnGlobalLayoutListener { updateAvoid() }
+        scroll.setOnScrollChangeListener { _, _, _, _, _ -> updateAvoid() }
     }
 
     // -------------------------------------------------------- the watcher
@@ -3031,21 +3077,6 @@ class MainActivity : AppCompatActivity() {
         if (!hasRendezvous) return null
         prefs.getString("myToken", null)?.let { return it }
         return randToken(16).also { prefs.edit().putString("myToken", it).apply() }
-    }
-
-    private fun showPairText(payload: String) {
-        themedDialog(
-            title = "Pairing link",
-            body = "Send this to the other phone. Treat it like a key to the camera \u2014 " +
-                "anyone who has it can watch.\n\n" + payload,
-            primaryLabel = "Copy",
-            onPrimary = {
-                val cm = getSystemService(android.content.ClipboardManager::class.java)
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("Tawny pairing", payload))
-                toast("Copied")
-            },
-            secondaryLabel = "Close"
-        )
     }
 
     // -------------------------------------------------------- the handheld
@@ -3645,7 +3676,7 @@ class MainActivity : AppCompatActivity() {
         if (pairPayload != null) {
             pairOverlay = buildPairOverlay(name, pairPayload)
             root.addView(pairOverlay, FrameLayout.LayoutParams(MP, MP))
-            refreshSystemBars()   // a cream sheet is now over the video
+            refreshSystemBars()   // the pairing sheet is now up over the video
         }
         // Station live view: swipe / back ends the session.
         if (role == "station") swipeNav(back = { confirmEndCall() }, forward = null)
@@ -3653,78 +3684,286 @@ class MainActivity : AppCompatActivity() {
         view.loadUrl(url)
     }
 
-    /** The pairing QR + links, shown over the Watcher's live view until a
-     *  Handheld connects (Bridge "watching"/"waiting" toggle its visibility). */
+    /**
+     * The pairing QR, shown over the Watcher's live view until a Handheld
+     * connects (Bridge "watching"/"waiting" toggle its visibility).
+     *
+     * A bottom sheet over a transparent top half, not a full-screen cream
+     * sheet: the live camera the Monitor is already showing plays right
+     * through the gap, so "is the pet actually in frame" is answered by
+     * looking, not by a separate "see what the camera sees" tap-away that
+     * used to be the only route back to a code you might still need. The
+     * pet's name is the rename trigger (no separate "Rename this monitor"
+     * row), and the link copies on a single tap (no separate "show as link"
+     * screen) \u2014 three formerly-separate actions folded into the controls
+     * that were already on screen for a different reason.
+     */
     private fun buildPairOverlay(name: String, payload: String): View {
-        val scroll = ScrollView(this).apply {
+        val root = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(MP, MP)
-            setBackgroundColor(Hue.BG)
-            // root is unpadded while live, so this sheet carries its own insets.
+            // No background: this sits over the Watcher's own live camera
+            // preview, and stays that way everywhere but the sheet below.
+        }
+
+        // A soft scrim, not a solid bar: the page's own status rail (dot,
+        // "Connecting", battery) is drawn by the WebView underneath and used
+        // to be hidden by the old full-screen cream sheet along with
+        // everything else. It would otherwise show through right where the
+        // back arrow sits; this fades it without hiding the camera itself,
+        // which stays fully visible everywhere below it.
+        root.addView(View(this).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0x8A000000.toInt(), 0x00000000)
+            )
+            layoutParams = FrameLayout.LayoutParams(MP, dp(110))
+        })
+
+        root.addView(backLink(overCamera = true) { confirmEndCall() }.apply {
+            layoutParams = FrameLayout.LayoutParams(WC, WC)
             ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
                 val b = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-                v.setPadding(0, b.top, 0, b.bottom)
+                (v.layoutParams as FrameLayout.LayoutParams).topMargin = b.top
+                insets
+            }
+        })
+
+        val sheet = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = GradientDrawable().apply {
+                setColor(Hue.PANEL)
+                val r = dp(Radius.CARD).toFloat()
+                cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            }
+            elevation = dp(8).toFloat()
+            setPadding(dp(24), dp(22), dp(24), dp(20))
+            layoutParams = LinearLayout.LayoutParams(MP, WC)
+            ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
+                val b = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, dp(20) + b.bottom)
                 insets
             }
         }
-        val col = column(scroll = true).apply { gravity = Gravity.CENTER_HORIZONTAL }
-        col.addView(backLink { confirmEndCall() })
-        // Centred: this column centres everything else, and heading() defaults to
-        // START, so the screen's own title used to be the one thing out of line.
-        col.addView(heading(name, "Scan this to start watching", center = true))
-        val qr = ImageView(this).apply {
-            val s = dp(260)
-            layoutParams = LinearLayout.LayoutParams(s, s).also { it.topMargin = dp(16) }
+
+        // The pet's name IS the rename control \u2014 tap it rather than hunt for a
+        // separate row further down. A quiet pencil sits beside it at rest so
+        // the affordance is discoverable at all (with nothing there, a first
+        // Monitor has no way to learn the name is tappable); the word "Rename"
+        // still only appears under a finger, the same reveal-on-touch trick the
+        // [+] chip uses, so the sheet does not read as "a button" at rest.
+        val nameRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = pressable(roundRect(0, Color.TRANSPARENT), tint = Hue.BERRY)
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            layoutParams = lp(centerH = true)
         }
-        col.addView(qr)
+        nameRow.addView(TextView(this).apply {
+            text = name
+            setTextColor(Hue.TEXT)
+            textSize = Type.TITLE
+            typeface = uiFontSemi
+            setLineSpacing(0f, Type.LEAD_TIGHT)
+        })
+        val pencil = PencilMark(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(15), dp(15)).also {
+                it.leftMargin = dp(9)
+                it.topMargin = dp(3)   // optical centre against a 27sp cap height
+            }
+        }
+        nameRow.addView(pencil)
+        val renameHint = TextView(this).apply {
+            text = "  Rename"
+            setTextColor(Hue.BERRY)
+            textSize = Type.SUB
+            typeface = uiFont
+            visibility = View.GONE
+        }
+        nameRow.addView(renameHint)
+        nameRow.setOnTouchListener { _, ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    renameHint.visibility = View.VISIBLE
+                    pencil.tint = Hue.BERRY
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    renameHint.visibility = View.GONE
+                    pencil.tint = Hue.DIM
+                }
+            }
+            false
+        }
+        nameRow.tapFeedback {
+            promptRoomName { newName ->
+                prefs.edit().putString("channelName", newName).apply()
+                goLive("station")   // rebuild the live view + a fresh QR
+            }
+        }
+        sheet.addView(nameRow)
+
+        // One axis. The name and this line used to be MATCH_PARENT and so read
+        // left-aligned (and 8dp further in than each other) under a centred QR
+        // \u2014 three different left edges on a sheet with one idea on it.
+        sheet.addView(TextView(this).apply {
+            text = "Scan to watch, or share the link below"
+            setTextColor(Hue.DIM)
+            textSize = Type.SUB
+            typeface = uiFont
+            gravity = Gravity.CENTER
+            layoutParams = lp(topMargin = 2)
+        })
+
+        val qr = ImageView(this).apply {
+            val s = dp(170)
+            layoutParams = LinearLayout.LayoutParams(s, s)
+        }
+        // The bitmap carries a one-module quiet zone, which is a quarter of what
+        // the spec asks for and left the code running right up to a hard white
+        // edge \u2014 a raw asset pasted onto the sheet, and on the dark palette a
+        // glaring square brick. The padding here is the rest of that quiet zone
+        // and the rounded card is what turns it into a deliberate surface; the
+        // hairline is what keeps the card's edge visible on the light palette,
+        // where Hue.PANEL is itself pure white.
+        sheet.addView(FrameLayout(this).apply {
+            background = roundRect(Color.WHITE, Hue.LINE, Radius.CARD)
+            val p = dp(13); setPadding(p, p, p, p)
+            layoutParams = lp(topMargin = 18, centerH = true)
+            addView(qr)
+        })
         // A 640x640 ZXing encode is not free, and this runs on the way into a
         // live session where the UI thread is already busy.
         pairQrView = qr
         pairPayloadNow = payload
         drawPairQr(payload)
 
+        // One tap, straight to the clipboard \u2014 the old "Show as link" screen
+        // was a whole extra dialog to get to the same string. The glyph carries
+        // the accent and the URL stays dim: the row is an action, and the forty
+        // characters of base64 in it are not something anyone reads.
+        val linkRow = TextView(this).apply {
+            setTextColor(Hue.DIM)
+            textSize = Type.LABEL
+            typeface = uiFont
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            gravity = Gravity.CENTER
+            setPadding(dp(14), dp(11), dp(14), dp(11))
+            background = pressable(roundRect(Hue.RAISE, Color.TRANSPARENT, Radius.CONTROL))
+            layoutParams = lp(topMargin = 16, centerH = true)
+            tapFeedback {
+                // Deliberately the *current* payload, not the one this sheet
+                // was built with: the code behind it rotates, and copying a
+                // stale link is the exact failure the countdown exists to
+                // prevent.
+                val live = pairPayloadNow ?: payload
+                val cm = getSystemService(android.content.ClipboardManager::class.java)
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Tawny pairing", live))
+                toast("Link copied")
+            }
+        }
+        pairLinkView = linkRow
+        showPairLink(payload)
+        sheet.addView(linkRow)
+
         // The code has ten minutes in it, and a Monitor is a phone left sitting
         // on this screen \u2014 so a silent deadline would mean a dead code on
-        // display with nothing to say why the far phone was refused. Count it
-        // down in words, and mint the next one in place when it runs out.
+        // display with nothing to say why the far phone was refused. It belongs
+        // with the code it describes, above the rule, not stacked under the
+        // status line as a second grey sentence of the same weight.
         pairCountdown = TextView(this).apply {
             setTextColor(Hue.DIM)
-            textSize = 12.5f
+            textSize = Type.CAPTION
             typeface = uiFont
             gravity = Gravity.CENTER
-            setLineSpacing(0f, 1.35f)
-            layoutParams = lp(topMargin = 10, centerH = true)
+            alpha = 0.85f
+            layoutParams = lp(topMargin = 12, centerH = true)
         }
-        col.addView(pairCountdown)
+        sheet.addView(pairCountdown)
 
-        col.addView(
-            body(
-                "On the other phone, open Tawny and tap \u201cI already have a " +
-                    "code to scan\u201d, then point its camera at this code. Up to " +
-                    "$MAX_VIEWERS phones can watch this monitor \u2014 the same code " +
-                    "works for each of them.",
-                maxW = 300
-            )
-        )
+        // A rule under the two ways in, so the live status below it reads as a
+        // footer rather than as a fourth line of small print.
+        sheet.addView(View(this).apply {
+            setBackgroundColor(Hue.LINE)
+            layoutParams = LinearLayout.LayoutParams(MP, dp(1)).also { it.topMargin = dp(17) }
+        })
+
         val statusRow = waitingRow(pairSheetStatus())
         pairStatus = statusRow.getChildAt(1) as? TextView
-        col.addView(statusRow)
-        // You cannot aim a pet camera through a full-screen QR code. Let the
-        // person setting the Monitor up check the framing without giving up the
-        // pairing screen.
-        col.addView(link("See what the camera sees") { hidePairOverlay() })
-        // Deliberately the *current* payload, not the one this sheet was built
-        // with: the code behind it rotates, and handing out a stale link would
-        // be the exact failure the countdown exists to prevent.
-        col.addView(link("Show as link") { showPairText(pairPayloadNow ?: payload) })
-        col.addView(link("Rename this monitor") {
-            promptRoomName { newName ->
-                prefs.edit().putString("channelName", newName).apply()
-                goLive("station")   // rebuild the live view + a fresh QR
-            }
+        statusRow.layoutParams = lp(topMargin = 15)
+        sheet.addView(statusRow)
+
+        // The sheet used to meet the camera on a bare edge. Over a bright scene
+        // \u2014 and on the light palette Hue.PANEL is pure white \u2014 that edge simply
+        // vanished, so the sheet had no bottom to it. This seats it: a short
+        // fade into the footage, the same device as the scrim behind the back
+        // arrow, sized and stacked so it always sits directly on the seam
+        // whatever the sheet's height turns out to be.
+        root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = FrameLayout.LayoutParams(MP, WC).also { it.gravity = Gravity.BOTTOM }
+            addView(View(this@MainActivity).apply {
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(0x00000000, 0x4D000000)
+                )
+                layoutParams = LinearLayout.LayoutParams(MP, dp(46))
+            })
+            addView(sheet)
         })
-        scroll.addView(col)
         startPairCountdown()
-        return scroll
+        return root
+    }
+
+    /** The truncated link on the pairing sheet. It has to be re-rendered when
+     *  the code rotates, or the string on screen quietly stops matching both
+     *  the QR above it and what a tap copies. */
+    private var pairLinkView: TextView? = null
+
+    private fun showPairLink(payload: String) {
+        val v = pairLinkView ?: return
+        val s = android.text.SpannableString("\u29c9  $payload")   // U+29C9, a link glyph
+        s.setSpan(
+            android.text.style.ForegroundColorSpan(Hue.BERRY), 0, 1,
+            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        v.text = s
+    }
+
+    /**
+     * The little pencil beside the pet's name, drawn rather than typed.
+     *
+     * The obvious character for it, ✎ (U+270E), is not in Mukta, so it fell
+     * through to whichever symbol font the device happens to carry: thin
+     * outline clip-art on a Pixel, and on any phone whose fallback for that
+     * block is the colour emoji font, a blue-and-yellow emoji that ignores
+     * setTextColor outright. Twelve lines of Canvas is the same mark on every
+     * device, in the palette's own colour, and this file draws everything else
+     * that way already.
+     */
+    private class PencilMark(ctx: Context) : View(ctx) {
+        private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val tip = Path()
+
+        /** Hue.DIM at rest, Hue.BERRY under a finger. */
+        var tint: Int = Hue.DIM
+            set(v) { field = v; invalidate() }
+
+        override fun onDraw(c: Canvas) {
+            if (width <= 0) return
+            p.color = tint
+            c.save()
+            // Nib up and to the right, the angle a pencil is held at; the body
+            // is drawn flat and the whole 24-unit box is turned instead.
+            c.rotate(-45f, width / 2f, height / 2f)
+            c.scale(width / 24f, width / 24f)
+            c.drawRoundRect(RectF(2.5f, 9.2f, 14.2f, 14.8f), 1.6f, 1.6f, p)
+            tip.reset()
+            tip.moveTo(15.2f, 9.2f); tip.lineTo(15.2f, 14.8f); tip.lineTo(21.5f, 12f)
+            tip.close()
+            c.drawPath(tip, p)      // the gap left of it is the wood shoulder
+            c.restore()
+        }
     }
 
     // ---- the pairing code's ten minutes, on screen -------------------------
@@ -3754,6 +3993,7 @@ class MainActivity : AppCompatActivity() {
         val payload = build()
         pairPayloadNow = payload
         drawPairQr(payload)
+        showPairLink(payload)
         web?.evaluateJavascript(
             "window.tawnyPairCode && window.tawnyPairCode(" +
                 "${jsStr(pairCode ?: "")},$pairCodeExp)", null
@@ -3769,9 +4009,16 @@ class MainActivity : AppCompatActivity() {
                 val left = pairCodeLeftMs()
                 if (left <= 0) refreshPairCode()
                 val secs = ((if (left <= 0) PAIR_TTL_MS else left) / 1000).toInt()
-                pairCountdown?.text =
-                    "This code works for another %d:%02d. A fresh one appears here when it runs out."
-                        .format(secs / 60, secs % 60)
+                pairCountdown?.apply {
+                    text = "Code refreshes in %d:%02d".format(secs / 60, secs % 60)
+                    // Fine print for nine of its ten minutes, and the one line
+                    // on the sheet that matters in the last one — a viewer part
+                    // way through typing the link in wants to know it is about
+                    // to be handed a different one.
+                    val close = secs < 60
+                    setTextColor(if (close) Hue.BERRY else Hue.DIM)
+                    alpha = if (close) 1f else 0.85f
+                }
                 pairTick = this
                 root.postDelayed(this, 1000)
             }
@@ -3940,7 +4187,6 @@ class MainActivity : AppCompatActivity() {
                         // camera — but keep offering the code while there is
                         // still room, because that is the whole "add another
                         // phone" affordance.
-                        pairOverlayHidden = false
                         pairOverlay?.visibility = View.GONE
                         syncPairChip()
                         refreshSystemBars()
@@ -3948,13 +4194,9 @@ class MainActivity : AppCompatActivity() {
                     "waiting" -> {
                         viewersNow = 0
                         viewersMax = obj.optInt("max", MAX_VIEWERS).coerceIn(1, MAX_VIEWERS)
-                        if (!pairOverlayHidden) {
-                            removePairChip()
-                            pairStatus?.text = pairSheetStatus().uppercase()
-                            pairOverlay?.visibility = View.VISIBLE
-                        } else {
-                            syncPairChip()
-                        }
+                        removePairChip()
+                        pairStatus?.text = pairSheetStatus().uppercase()
+                        pairOverlay?.visibility = View.VISIBLE
                         refreshSystemBars()
                     }
                     // The OS took the camera back (screen off / backgrounded).
@@ -4873,7 +5115,13 @@ private abstract class CritterScene(ctx: Context) : View(ctx) {
     protected val biscuitLo = paint(if (onDark) 0xFFA9784A.toInt() else 0xFFBB8453.toInt())
     protected val dove = paint(if (onDark) 0xFFB6AD99.toInt() else 0xFFC2B8A5.toInt())      // the cat
     protected val ink = paint(if (onDark) 0xFF2E2116.toInt() else 0xFF3C2A1E.toInt())       // eyes / muzzle dot
-    protected val berry = paint(Hue.BERRY)                   // noses, beak, inner ear, tongue
+    protected val berry = paint(Hue.BERRY)                   // noses, beak, inner ear
+    // A tongue is pink on any theme. Hue.BERRY is not: it's the app's brand
+    // accent, and turns "aged brass / tan" in dark mode by design (see
+    // values-night/colors.xml) — which used to make the dog's tongue read as
+    // brown whenever the phone was in dark mode. Fixed and separate from BERRY
+    // on purpose, so a future accent change can't re-tint it by accident.
+    protected val tongue = paint(0xFFE8728F.toInt())
     protected val sky = paint(Hue.SKY)                       // the ball, owl eyes
     protected val hi = paint(if (onDark) 0x22FFFFFF else 0x2BFFFFFF)   // volume highlight
     protected val lo = paint(if (onDark) 0x26000000 else 0x1F000000)   // volume shade
@@ -5402,7 +5650,7 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
             c.drawArc(RectF(hx - 6f, hy + 6f, hx, hy + 13f), 20f, 130f, false, hair)
             c.drawArc(RectF(hx, hy + 6f, hx + 6f, hy + 13f), 30f, 130f, false, hair)
             val loll = 4f + 1.5f * (0.5f + 0.5f * sin(t * 6.0 * PI).toFloat()) + dogA * 5f
-            c.drawRoundRect(hx - 2.4f, hy + 9f, hx + 2.4f, hy + 9f + loll, 2.4f, 2.4f, berry)
+            c.drawRoundRect(hx - 2.4f, hy + 9f, hx + 2.4f, hy + 9f + loll, 2.4f, 2.4f, tongue)
             c.restore()
         }
 
@@ -5581,7 +5829,7 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
             c.drawArc(RectF(hx - 5f, hy + 5f, hx, hy + 11f), 20f, 130f, false, hair)
             c.drawArc(RectF(hx, hy + 5f, hx + 5f, hy + 11f), 30f, 130f, false, hair)
             val loll = 3f + 1.6f * (0.5f + 0.5f * sin(t * 7.0 * PI).toFloat()) + toy * 2f + dAct * 4f
-            c.drawRoundRect(hx - 2.2f, hy + 7f, hx + 2.2f, hy + 7f + loll, 2.2f, 2.2f, berry)
+            c.drawRoundRect(hx - 2.2f, hy + 7f, hx + 2.2f, hy + 7f + loll, 2.2f, 2.2f, tongue)
             c.restore()
         }
 
@@ -5627,5 +5875,452 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
         sx in 24f..120f && sy in 68f..124f -> 1
         sx in 180f..292f && sy in 68f..124f -> 2
         else -> 0
+    }
+}
+
+/** True on the darker of the app's two palettes — same luminance test
+ *  [CritterScene] uses, for the same reason: several drawings here are tuned
+ *  differently per ground rather than just recoloured. */
+private fun paletteIsDark() =
+    (0.299f * Color.red(Hue.BG) + 0.587f * Color.green(Hue.BG) + 0.114f * Color.blue(Hue.BG)) < 128f
+
+/**
+ * A trail of paw prints that walks itself around the screen instead of
+ * sitting still — the role picker, mainly, where the choice itself
+ * (Monitor / Viewer) takes up too much of the frame for the trio in
+ * [PetSceneView] to have room to read. On-theme rather than abstract: this
+ * app is about a cat, a dog and an owlet, so "alive" should look like that.
+ *
+ * One walker, a new print roughly once a second, alternating left/right
+ * like real footsteps; each print fades in, holds, then erases itself as
+ * the trail moves on, capped at [maxPrints] so there is never more than a
+ * few steps' worth on screen at once. [avoid] names rectangles — the header
+ * and the two role cards, in this view's own coordinates — the walker
+ * steers around rather than corrects after the fact: a step into a wall or
+ * a card is never committed, a new heading is tried instead, and the seed
+ * itself prefers somewhere with room to walk. Reduce-motion lays a short
+ * motionless trail instead of walking at all.
+ */
+private class PawTrailView(ctx: Context) : View(ctx) {
+    /** Card rectangles, in this view's local coordinates, the trail must clear. */
+    var avoid: List<RectF> = emptyList()
+
+    /** [size] varies a few percent per print so a trail is never a row of
+     *  identical stamps. */
+    private data class Print(
+        val x: Float, val y: Float, val rotDeg: Float, val bornAt: Long, val size: Float
+    )
+
+    private val prints = ArrayDeque<Print>()
+    private val random = java.util.Random()
+    private var heading = random.nextFloat() * 360f
+    private var wx = 0f
+    private var wy = 0f
+    private var seeded = false
+
+    private val onDark = paletteIsDark()
+    // Warm tan rather than a tint of Hue.TEXT. A grey print on a cream ground
+    // reads as dirt on the screen; the same mark in the pets' own biscuit
+    // tone (the dog's colour in [CritterScene]) reads as part of the artwork.
+    private val pawColor = if (onDark) 0xFFCC9A63.toInt() else 0xFFC98C63.toInt()
+    private val baseAlpha = if (onDark) 88 else 96
+
+    private val reduceMotion: Boolean
+        get() = try {
+            Settings.Global.getFloat(
+                context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+            ) == 0f
+        } catch (e: Exception) { false }
+
+    private val stepMs = 850L
+    private val lifeMs = 7L * stepMs
+    // Strictly more than lifeMs/stepMs: a print must die of old age (fading
+    // out) rather than be dropped off the end of the queue while still fully
+    // opaque, which read as a print blinking out of existence.
+    private val maxPrints = 9
+
+    private val stepRunnable = object : Runnable {
+        override fun run() {
+            step()
+            invalidate()
+            postDelayed(this, stepMs)
+        }
+    }
+    // Repaints every frame so the fade in onDraw() is smooth between the
+    // once-a-second steps; only runs while there is something to fade.
+    private val fadeTicker = object : Runnable {
+        override fun run() {
+            invalidate()
+            if (prints.isNotEmpty()) postOnAnimation(this)
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        removeCallbacks(stepRunnable)
+        removeCallbacks(fadeTicker)
+        if (reduceMotion) {
+            seedStatic()
+        } else {
+            post(stepRunnable)
+            post(fadeTicker)
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(stepRunnable)
+        removeCallbacks(fadeTicker)
+        super.onDetachedFromWindow()
+    }
+
+    /** Set once [seedStatic] has laid a trail: [onDraw] then reads its alpha
+     *  off each print's place in the queue rather than off the clock, since
+     *  in this mode there is no clock and no second frame. */
+    private var staticTrail = false
+
+    /** A short, motionless trail so a reduce-motion screen is not bare.
+     *
+     *  This used to draw nothing at all: every print was stamped in the same
+     *  millisecond, the age-based fade put them all at the very start of
+     *  their fade-*in*, and with no ticker running to advance them they sat
+     *  at alpha zero for good. Hence [staticTrail]. */
+    private var seedTries = 0
+    private fun seedStatic() {
+        // Wait for both a size and the card rectangles — seeded before the
+        // caller has measured them, a static trail would be stamped straight
+        // across a card with no later step to walk it off again.
+        if (width <= 0 || height <= 0 || (avoid.isEmpty() && seedTries < 24)) {
+            seedTries++
+            postDelayed({ seedStatic() }, 40L)
+            return
+        }
+        seedStart()
+        repeat(6) { step() }
+        staticTrail = true
+        invalidate()
+    }
+
+    // [blocked] tests the print's centre, so this has to clear the print's
+    // own circumscribed radius — 0.71 of PAW_DP for the drawing, plus the 6%
+    // a print can be scaled up by — or a paw hangs off the screen edge or
+    // bleeds onto a card. The original 8dp did exactly that.
+    private fun pad() = (PAW_DP * 0.76f + 3f) * resources.displayMetrics.density
+
+    private fun blocked(x: Float, y: Float, pad: Float): Boolean {
+        if (x < pad || y < pad || x > width - pad || y > height - pad) return true
+        // The version chip sits in the screen's bottom-left corner and belongs
+        // to the shell, not to the role screen, so it can never arrive through
+        // [avoid] — but a print walking over it is just as unreadable.
+        val d = resources.displayMetrics.density
+        if (x < 82f * d && y > height - 72f * d) return true
+        for (r in avoid) {
+            if (x > r.left - pad && x < r.right + pad && y > r.top - pad && y < r.bottom + pad) return true
+        }
+        return false
+    }
+
+    private fun stepLen() = min(width, height) * 0.105f
+
+    /** How many of eight compass directions a full stride from ([x],[y])
+     *  could actually be taken in. A spot scoring low is a pocket: legal to
+     *  stand in, nowhere to walk. */
+    private fun roomAt(x: Float, y: Float, p: Float): Int {
+        var n = 0
+        val len = stepLen()
+        for (i in 0 until 8) {
+            val a = Math.toRadians(i * 45.0)
+            if (!blocked(x + (cos(a) * len).toFloat(), y + (sin(a) * len).toFloat(), p)) n++
+        }
+        return n
+    }
+
+    /** Somewhere on screen that isn't inside a card — tried a handful of
+     *  random spots rather than a fixed corner, so a fresh screen doesn't
+     *  always start its trail from the same place.
+     *
+     *  Being merely legal is not enough: a spot has to have somewhere to walk
+     *  to, or the trail paces on the spot for as long as the screen is up.
+     *  So the good spots are taken first, and a cramped one only if nothing
+     *  better turns up. */
+    private fun seedStart() {
+        val p = pad()
+        var bx = width * 0.5f; var by = height * 0.5f; var best = -1
+        for (i in 0 until 40) {
+            val x = p + random.nextFloat() * (width - 2 * p)
+            val y = p + random.nextFloat() * (height - 2 * p)
+            if (blocked(x, y, p)) continue
+            val r = roomAt(x, y, p)
+            if (r > best) { best = r; bx = x; by = y }
+            if (r >= 5) break
+        }
+        wx = bx; wy = by; seeded = true
+    }
+
+    private fun step() {
+        val w = width; val h = height
+        if (w <= 0 || h <= 0) return
+        if (!seeded) seedStart()
+
+        // Roughly a print and a half. Longer than that and consecutive prints
+        // stop reading as one animal's stride and start reading as marks
+        // sprinkled at random.
+        val stepLen = stepLen()
+        val pad = pad()
+        var nx = wx; var ny = wy
+        var found = false
+        // The current heading first, then widening random turns, until a
+        // step lands somewhere allowed — never taken until it is.
+        for (attempt in 0 until 12) {
+            val tryHeading = if (attempt == 0) heading
+                else heading + (random.nextFloat() - 0.5f) * 80f * attempt
+            val rad = Math.toRadians(tryHeading.toDouble())
+            val cx = wx + (cos(rad) * stepLen).toFloat()
+            val cy = wy + (sin(rad) * stepLen).toFloat()
+            if (!blocked(cx, cy, pad)) {
+                nx = cx; ny = cy; heading = tryHeading; found = true; break
+            }
+        }
+        if (!found) {
+            // Properly boxed in — a fresh random heading next beat. Aiming at
+            // the screen's literal centre here used to pull the walker back
+            // toward the same spot every time (the cards sit near the middle
+            // too), which read as pacing rather than wandering.
+            heading = random.nextFloat() * 360f
+            return
+        }
+        heading += (random.nextFloat() - 0.5f) * 14f   // a little wander, even on a clean step
+        wx = nx; wy = ny
+
+        // The left/right offset has to be a decent fraction of the stride or
+        // the prints land nearly on the centre line and the trail reads as
+        // scattered marks rather than something walking.
+        val perp = Math.toRadians((heading + 90f).toDouble())
+        val footSide = if (prints.size % 2 == 0) 1f else -1f
+        val footSpacing = stepLen * 0.26f
+        val px = wx + (cos(perp) * footSpacing * footSide).toFloat()
+        val py = wy + (sin(perp) * footSpacing * footSide).toFloat()
+
+        // A degree or two of splay on each print, and a few percent of size:
+        // a real animal doesn't set its feet down at identical angles, and a
+        // trail that does reads as a repeated sprite rather than a walk.
+        val splay = (random.nextFloat() - 0.5f) * 16f
+        val size = 0.94f + random.nextFloat() * 0.12f
+        prints.addLast(Print(px, py, heading + 90f + splay, SystemClock.uptimeMillis(), size))
+        while (prints.size > maxPrints) prints.removeFirst()
+    }
+
+    private val ink = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val toe = RectF()
+
+    /**
+     * The metacarpal pad, in a 31-unit space with the toes pointing at -y.
+     * Built once and re-used under a canvas transform.
+     *
+     * Broad and round at the heel, drawing in toward two soft shoulders with
+     * a *shallow* dip between them. The dip is the whole trick and it is
+     * easy to overdo: the first cut cut it four units deep, on a pad
+     * seventeen units tall, and the print came out reading as a cashew nut.
+     * A unit and a half is enough to say "pad" and not enough to say "bean".
+     */
+    private val padPath = Path().apply {
+        moveTo(0f, -1.6f)
+        cubicTo(2.8f, -3.4f, 6.4f, -3.4f, 8.6f, -0.6f)
+        cubicTo(10.6f, 1.9f, 10.8f, 6.4f, 8.2f, 9.8f)
+        cubicTo(5.8f, 12.9f, 2.8f, 14.2f, 0f, 14.2f)
+        cubicTo(-2.8f, 14.2f, -5.8f, 12.9f, -8.2f, 9.8f)
+        cubicTo(-10.8f, 6.4f, -10.6f, 1.9f, -8.6f, -0.6f)
+        cubicTo(-6.4f, -3.4f, -2.8f, -3.4f, 0f, -1.6f)
+        close()
+    }
+
+    /** One toe bean, sat on a short arc above the pad and turned to point out
+     *  along its own radius — splayed toes, not a row of dots. The arc is
+     *  deliberately tight (r=15 against a pad 11 wide): toes flung out on a
+     *  wide orbit stop reading as one foot. */
+    private fun toeAt(c: Canvas, angDeg: Float, rx: Float, ry: Float) {
+        val a = Math.toRadians(angDeg.toDouble())
+        val tx = (sin(a) * 15f).toFloat()
+        val ty = 3.5f - (cos(a) * 15f).toFloat()
+        c.save()
+        c.rotate(angDeg, tx, ty)
+        toe.set(tx - rx, ty - ry, tx + rx, ty + ry)
+        c.drawOval(toe, ink)
+        c.restore()
+    }
+
+    /**
+     * One paw print. Four splayed toe beans over a heart-shaped pad, with
+     * real air between every shape.
+     *
+     * The first cut was an oval plus four circles, which at 27dp read as a
+     * cluster of dots — no silhouette, no species, no craft. What makes a paw
+     * legible small is the shape language, not the detail: a notched pad and
+     * toes that fan out along their own radii.
+     */
+    private fun pawPrint(
+        c: Canvas, cx: Float, cy: Float, sizePx: Float, rotDeg: Float, alpha: Int
+    ) {
+        if (alpha <= 0) return
+        ink.color = (pawColor and 0x00FFFFFF) or (alpha shl 24)
+        c.save()
+        c.translate(cx, cy)
+        c.rotate(rotDeg)
+        val s = sizePx / 31f
+        c.scale(s, s)
+        c.drawPath(padPath, ink)
+        toeAt(c, -46f, 3.3f, 4.5f)     // outer left
+        toeAt(c, -15f, 3.6f, 4.9f)     // inner left
+        toeAt(c, 15f, 3.6f, 4.9f)      // inner right
+        toeAt(c, 46f, 3.3f, 4.5f)      // outer right
+        c.restore()
+    }
+
+    override fun onDraw(c: Canvas) {
+        if (prints.isEmpty()) return
+        val baseSize = PAW_DP * resources.displayMetrics.density
+        if (staticTrail) {
+            // Oldest print faintest, newest full: the same read as the live
+            // trail, held still.
+            prints.forEachIndexed { i, p ->
+                val u = (i + 1f) / prints.size
+                pawPrint(c, p.x, p.y, baseSize * p.size, p.rotDeg,
+                    (baseAlpha * (0.34f + 0.66f * u)).toInt())
+            }
+            return
+        }
+        val now = SystemClock.uptimeMillis()
+        for (p in prints) {
+            val age = now - p.bornAt
+            if (age > lifeMs) continue
+            val lifeFrac = age.toFloat() / lifeMs
+            // In fast, hold, then erase — real footprints don't blink into
+            // being and don't blink out either.
+            val a = when {
+                lifeFrac < 0.12f -> lifeFrac / 0.12f
+                lifeFrac > 0.6f -> (1f - lifeFrac) / 0.4f
+                else -> 1f
+            }.coerceIn(0f, 1f)
+            // …and they press in rather than materialise: the last few percent
+            // of size arrive with the ink.
+            val press = 0.9f + 0.1f * (if (lifeFrac < 0.12f) a else 1f)
+            pawPrint(c, p.x, p.y, baseSize * p.size * press, p.rotDeg, (baseAlpha * a).toInt())
+        }
+    }
+
+    private companion object {
+        /** Nose-to-heel, in dp. */
+        const val PAW_DP = 30f
+    }
+}
+
+/**
+ * A little portrait tucked into a role card's top-right corner, clear of the
+ * icon (top-left) and the text below — a cat for one card, a dog for the
+ * other.
+ *
+ * A [CritterScene] on purpose, rather than the flat grey silhouette that was
+ * here first. That version was one circle and two triangles at 20% alpha,
+ * and next to the fully painted trio on the welcome screen it read as a
+ * placeholder somebody forgot to finish. Subclassing gets this the app's own
+ * pet palette, outline weight, blink and the reduce-motion contract for
+ * free, so the corner is the *same* drawing at a quieter volume — which is
+ * what "on-brand but subordinate" actually means — instead of a different,
+ * worse drawing.
+ *
+ * Head only: at 60dp a whole sitting pose loses the face, and the face is
+ * the entire point. The caller sets the view's alpha, which is what keeps it
+ * behind the title and blurb.
+ */
+private class CritterSilhouetteView(ctx: Context, private val kind: String) : CritterScene(ctx) {
+    override val vw = 64f
+    override val vh = 64f
+    // A dog fidgets; a cat holds still longer.
+    override val loopMs = if (kind == "dog") 3400L else 4600L
+
+    /** Decoration, not a toy — the card underneath is the tap target. */
+    override fun critterAt(sx: Float, sy: Float) = 0
+
+    /** [CritterScene.hair] is sized for the big scenes; whiskers and a mouth
+     *  line at this scale need a finer nib or they read as scars. Warm brown
+     *  rather than Hue.DIM's grey: the caller's alpha is already taking a
+     *  chunk out of these, and a grey hairline on top of that washed out to
+     *  nothing at all. */
+    private val nib = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = if (onDark) 0xFF6B5238.toInt() else 0xFF6E5136.toInt()
+        strokeWidth = 1.45f
+        strokeCap = Paint.Cap.ROUND
+        alpha = if (onDark) 210 else 185
+    }
+
+    override fun drawScene(c: Canvas) = if (kind == "cat") cat(c) else dog(c)
+
+    private fun cat(c: Canvas) {
+        val tau = t * 2.0 * PI
+        val sway = sin(tau).toFloat()
+        // One ear flicks, once a loop, on its own beat — the cheapest thing
+        // that stops a looping idle from looking like a still image.
+        val flick = hump((((t + 0.35f) % 1f) - 0.02f) / 0.09f)
+        val hx = 32f; val hy = 36f
+
+        c.save()
+        c.rotate(sway * 2.2f, hx, 60f)                        // head lolls on the neck
+        c.scale(1f, 1f + 0.02f * sin(tau * 2.0).toFloat(), hx, 54f)   // breath
+
+        c.save(); c.rotate(-11f * flick, 17f, 30f)
+        softTri(c, 15f, 30f, 10.5f, 6f, 30f, 22f, dove, edge)
+        softTri(c, 17.5f, 28f, 14.5f, 13f, 27f, 22.5f, berry)
+        c.restore()
+        softTri(c, 49f, 30f, 53.5f, 6f, 34f, 22f, dove, edge)
+        softTri(c, 46.5f, 28f, 49.5f, 13f, 37f, 22.5f, berry)
+
+        mass(c, hx, hy, 41f, 36f, dove)
+        capsule(c, hx, hy + 8.5f, 19f, 13.5f, creamHi)        // muzzle
+        val bl = blink()
+        eye(c, hx - 8f, hy - 1.5f, 4.3f, bl)
+        eye(c, hx + 8f, hy - 1.5f, 4.3f, bl)
+        c.drawPath(Path().apply {
+            moveTo(hx, hy + 10.6f); lineTo(hx - 3.1f, hy + 7.2f); lineTo(hx + 3.1f, hy + 7.2f); close()
+        }, berry)
+        c.drawArc(RectF(hx - 5.5f, hy + 9.6f, hx, hy + 15.4f), 20f, 130f, false, nib)
+        c.drawArc(RectF(hx, hy + 9.6f, hx + 5.5f, hy + 15.4f), 30f, 130f, false, nib)
+        // Whiskers spring off the *muzzle*, not the middle of the cheek —
+        // started any higher they read as scars across the face.
+        for (s in intArrayOf(-1, 1)) {
+            c.drawLine(hx + 9.5f * s, hy + 7.5f, hx + 21f * s, hy + 4.5f, nib)
+            c.drawLine(hx + 9.5f * s, hy + 11f, hx + 21f * s, hy + 12.5f, nib)
+        }
+        c.restore()
+    }
+
+    private fun dog(c: Canvas) {
+        val tau = t * 2.0 * PI
+        val sway = sin(tau).toFloat()
+        val hx = 32f; val hy = 35f
+
+        c.save()
+        c.rotate(sway * 3.4f, hx, 62f)
+        c.scale(1f, 1f + 0.024f * sin(tau * 2.0).toFloat(), hx, 54f)
+
+        // Ears before the head, so only the part outside the skull shows —
+        // and they lag the head's sway, which is what sells the weight. Kept
+        // deliberately narrower than the first cut: splayed any wider the dog
+        // out-massed the cat on the card above and the pair stopped matching.
+        val lag = sin(tau - 0.7).toFloat() * 5f
+        floppyEar(c, hx - 14f, hy - 9f, 29f, 16.5f, 19f + lag, biscuitLo)
+        floppyEar(c, hx + 14f, hy - 9f, 29f, 16.5f, -19f + lag, biscuitLo)
+
+        mass(c, hx, hy, 36f, 32f, biscuit)
+        capsule(c, hx, hy + 8.5f, 20f, 14f, cream)            // muzzle
+        val bl = blink(0.12f)
+        eye(c, hx - 7.4f, hy - 2.5f, 3.9f, bl)
+        eye(c, hx + 7.4f, hy - 2.5f, 3.9f, bl)
+        capsule(c, hx, hy + 4.5f, 7.4f, 5.8f, ink)            // nose
+        c.drawCircle(hx - 1.9f, hy + 3f, 1.2f, creamHi)
+        c.drawArc(RectF(hx - 6f, hy + 7.6f, hx, hy + 14.6f), 20f, 130f, false, nib)
+        c.drawArc(RectF(hx, hy + 7.6f, hx + 6f, hy + 14.6f), 30f, 130f, false, nib)
+        val loll = 4.2f + 1.5f * (0.5f + 0.5f * sin(t * 6.0 * PI).toFloat())
+        c.drawRoundRect(hx - 2.4f, hy + 10.4f, hx + 2.4f, hy + 10.4f + loll, 2.4f, 2.4f, tongue)
+        c.restore()
     }
 }
