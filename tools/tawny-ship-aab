@@ -7,8 +7,12 @@
 #   tawny-ship-aab       build the release AAB, copy it into
 #                         "Tawny ship/Google Ready/<YYYYMMDD>/" as
 #                         app-release-<version>-<YYYYMMDD>-b<build>.aab,
-#                         and log the git commit it was built from in
-#                         Google Ready/MANIFEST.md
+#                         log the git commit it was built from in
+#                         Google Ready/MANIFEST.md, and write
+#                         Google Ready/<YYYYMMDD>/RELEASE-NOTES.md — the
+#                         commit log between this build and the last one
+#                         shipped, ready to paste into Play Console as the
+#                         tester-facing release notes.
 #
 set -euo pipefail
 
@@ -52,6 +56,16 @@ if command -v jarsigner >/dev/null 2>&1; then
   fi
 fi
 
+# The previous ship's commit — read before this run's row goes in, so the
+# diff is against the *last* build, not itself. The AAB-filename cell is also
+# backtick-wrapped but always has non-hex characters in it (the .aab
+# extension alone rules it out), so a pure-hex backtick span can only be a
+# commit hash.
+PREV_COMMIT=""
+if [ -f "$MANIFEST" ]; then
+  PREV_COMMIT=$(grep -oE '`[0-9a-f]{7,40}`' "$MANIFEST" | tail -1 | tr -d '`') || true
+fi
+
 if [ ! -f "$MANIFEST" ]; then
   {
     echo "# Google Ready — AAB build log"
@@ -67,5 +81,36 @@ fi
 printf '| `%s/%s` | %s | %s | %s | `%s`%s | %s |\n' \
   "$DATE" "$OUT" "$NAME" "$CODE" "$DATE" "$COMMIT" "$DIRTY" "$BRANCH" >> "$MANIFEST"
 
+# Release notes: the commit log from the last shipped build to this one,
+# filed next to the AAB it describes so it can be pasted straight into Play
+# Console's tester-facing release notes for this build.
+NOTES="$DEST/RELEASE-NOTES.md"
+{
+  echo "# Tawny v$NAME (build $CODE)"
+  echo ""
+  echo "Built $DATE from \`$COMMIT\` on \`$BRANCH\`.$DIRTY"
+  echo ""
+  echo "## Changes"
+  echo ""
+  if [ -z "$PREV_COMMIT" ]; then
+    echo "First build tracked in Google Ready — no prior commit on record to diff against."
+  elif [ "$PREV_COMMIT" = "$COMMIT" ]; then
+    echo "No changes — rebuilt from the same commit as the last ship (\`$PREV_COMMIT\`)."
+  elif ! git -C "$PROJECT" cat-file -e "$PREV_COMMIT" 2>/dev/null; then
+    echo "Last shipped commit \`$PREV_COMMIT\` is no longer in this repo (rebase/force-push?)" \
+      "— can't compute a diff. Full history: \`git log\`."
+  else
+    LOG=$(git -C "$PROJECT" log --no-merges --pretty=format:'- %s' "$PREV_COMMIT..$COMMIT")
+    if [ -z "$LOG" ]; then
+      echo "No commits between \`$PREV_COMMIT\` and \`$COMMIT\` (version/build bump only)."
+    else
+      echo "Since \`$PREV_COMMIT\`:"
+      echo ""
+      echo "$LOG"
+    fi
+  fi
+} > "$NOTES"
+
 echo "  ✓ $DEST/$OUT"
 echo "  ✓ logged in $MANIFEST"
+echo "  ✓ release notes in $NOTES"
