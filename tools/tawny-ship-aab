@@ -120,3 +120,18 @@ NOTES="$DEST/RELEASE-NOTES.md"
 echo "  ✓ $DEST/$OUT"
 echo "  ✓ logged in $MANIFEST"
 echo "  ✓ release notes in $NOTES"
+
+# Play Console's "What's new" field is capped at 500 characters, and it does
+# not tell you that until you are standing in it with a paste buffer that will
+# not fit. Notes written here have run to three times that. Anything a notes
+# file marks off as paste-ready gets measured on the way out.
+PLAY=$(sed -n '/<!-- play:start -->/,/<!-- play:end -->/p' "$NOTES" \
+  | sed '1d;$d' | sed 's/[[:space:]]*$//')
+if [ -n "$PLAY" ]; then
+  CHARS=$(printf '%s' "$PLAY" | wc -m | tr -d ' ')
+  if [ "$CHARS" -gt 500 ]; then
+    echo "  ! the paste-ready block is $CHARS characters — Play Console takes 500" >&2
+  else
+    echo "  ✓ paste-ready block fits Play Console ($CHARS/500 characters)"
+  fi
+fi
