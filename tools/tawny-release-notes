@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""
+Turn a range of commits into release notes someone would actually read.
+
+The first version of this lived inside tawny-ship-aab and worked from
+`git log --pretty=format:'- %s'` — subject lines, and nothing else. That is
+where its problem was: a subject line is written for the person reading `git
+log`, it is one clause long, and everything that says what actually changed
+and why anyone should care is in the body underneath, which was thrown away.
+A build whose single commit reworked four separate things came out as one
+bullet reading "Other", which is not a release note, it is a filename.
+
+So this reads the whole message, and takes the substance from it in whichever
+of these forms it finds first:
+
+  1. `Release-Note:` trailers. The explicit way, for when the automatic
+     reading gets it wrong or the wording matters:
+
+         Release-Note: UI/UX: The pets look at each other now.
+
+     Everything after the (optional) category is used verbatim.
+
+  2. `**Heading.**` sections in the body. A commit that already organises
+     itself into topics is a commit that has already written its own notes;
+     each section becomes one entry, headed by its own name.
+
+  3. `- ` bullets in the body.
+
+  4. Failing all that, the subject, with the body's opening sentence as its
+     detail.
+
+Categories are the four from the original: Bug Fixes, UI/UX, Features, Other,
+decided by the heading or subject, falling back to the detail only when that
+said nothing — reading the whole entry at once mis-files far more than it saves.
+
+Usage:  tawny-release-notes <repo> <prev-commit> <commit>
+Prints markdown on stdout.
+"""
+
+import pathlib
+import re
+import subprocess
+import sys
+
+CATEGORIES = [
+    ("Bug Fixes", r"\b(fix|fixed|fixes|fixing|bug|crash|crashes|error|wrong|"
+                  r"broken|breaks|regression|misses|missing|stale|leak)\b"),
+    ("UI/UX", r"\b(redesign|redesigned|ui|ux|screen|screens|style|theme|icon|"
+              r"layout|copy|chime|sound|palette|animation|animations|animate|"
+              r"motion|polish|spacing|colour|color|wording|label|gaze|eyes|"
+              r"looking|blink|pose)\b"),
+    ("Features", r"(\b(add|adds|added|new|implement|implements|introduce|"
+                 r"introduces|switch|toggle|option|setting)\b|support for)"),
+]
+
+# Trailers and bookkeeping that are not release notes. The `Build 28.` line
+# has to be anchored to a line of its own: matched loosely it also swallows
+# any sentence opening "Build 27's fix judged…", which is how the first cut of
+# this managed to start an entry halfway through a sentence.
+SKIP_LINE = re.compile(
+    r"^\s*(?:(?:co-authored-by|claude-session|signed-off-by|change-id)\s*:"
+    r"|build\s+\d+\.?\s*$)",
+    re.I,
+)
+SECTION = re.compile(r"^\*\*(.+?)\.?\*\*\s*(.*)$")
+BULLET = re.compile(r"^\s*[-*]\s+(.+)$")
+NOTE_TRAILER = re.compile(r"^\s*release[-_ ]?notes?\s*:\s*(.+)$", re.I)
+
+
+def sentences(text, limit=190):
+    """
+    A paragraph's opening sentence, tidied onto one line.
+
+    Only ever one: these are notes someone skims in Play Console, not the
+    commit message, and the first sentence of a well-written paragraph is
+    already the summary of it. The split requires a capital after the full
+    stop, or `track.getSettings()` and `5.5Hz` become sentence boundaries —
+    which is exactly what the first cut of this did.
+    """
+    flat = " ".join(text.split())
+    if not flat:
+        return ""
+    first = re.split(r"(?<=[.!?])\s+(?=[A-Z\"'“])", flat)[0].strip()
+    if len(first) > limit:
+        cut = first.rfind(" ", 0, limit)
+        first = first[:cut if cut > 0 else limit].rstrip(" ,;:—-") + "…"
+    return first
+
+
+def categorise(*texts):
+    """
+    First of [texts] that matches anything wins, in category order.
+
+    Each text is tried in full before moving to the next, so a heading or
+    subject decides the category and the detail is only consulted when the
+    heading said nothing useful. Reading them all at once is what put "Add a
+    draggable pairing sheet" under Bug Fixes: three paragraphs down it
+    mentioned a "fixed height".
+    """
+    for text in texts:
+        if not text:
+            continue
+        for name, pattern in CATEGORIES:
+            if re.search(pattern, text, re.I):
+                return name
+    return "Other"
+
+
+def body_paragraphs(body):
+    """The body split into paragraphs, with trailers and noise dropped."""
+    kept = [ln for ln in body.splitlines() if not SKIP_LINE.match(ln)]
+    paras, cur = [], []
+    for ln in kept:
+        if ln.strip():
+            cur.append(ln)
+        elif cur:
+            paras.append("\n".join(cur))
+            cur = []
+    if cur:
+        paras.append("\n".join(cur))
+    return paras
+
+
+def entries_for(subject, body):
+    """One commit in, a list of (category, markdown bullet) out."""
+    paras = body_paragraphs(body)
+
+    # 1. Explicit trailers win outright.
+    notes = []
+    for ln in body.splitlines():
+        m = NOTE_TRAILER.match(ln)
+        if m:
+            text = m.group(1).strip()
+            cat = None
+            if ":" in text:
+                head, rest = text.split(":", 1)
+                for name, _ in CATEGORIES + [("Other", "")]:
+                    if head.strip().lower() == name.lower():
+                        cat, text = name, rest.strip()
+                        break
+            notes.append((cat or categorise(text), f"- {text}"))
+    if notes:
+        return notes
+
+    # 2. **Heading.** sections — a commit that already sorted itself out.
+    sections = []
+    for para in paras:
+        first, _, rest = para.partition("\n")
+        m = SECTION.match(first.strip())
+        if not m:
+            continue
+        name = m.group(1).strip()
+        detail = sentences((m.group(2) + " " + rest).strip())
+        sections.append((categorise(name, detail),
+                         f"- **{name}** — {detail}" if detail else f"- **{name}**"))
+    if sections:
+        return sections
+
+    # 3. Bullets the author already wrote.
+    bullets = []
+    for para in paras:
+        for ln in para.splitlines():
+            m = BULLET.match(ln)
+            if m:
+                bullets.append((categorise(subject, m.group(1)),
+                                f"- {m.group(1).strip()}"))
+    if bullets:
+        return bullets
+
+    # 4. The subject, with whatever the body opens with as its detail.
+    detail = sentences(paras[0]) if paras else ""
+    line = f"- **{subject}** — {detail}" if detail else f"- {subject}"
+    return [(categorise(subject, detail), line)]
+
+
+def main():
+    if len(sys.argv) < 4:
+        sys.exit("usage: tawny-release-notes <repo> <prev-commit> <commit> [build]")
+    repo, prev, head = sys.argv[1], sys.argv[2], sys.argv[3]
+    build = sys.argv[4] if len(sys.argv) > 4 else None
+
+    # A hand-written file wins over anything read out of the log. Everything
+    # below is a good guess at what a build changed, but a commit body argues
+    # its case starting from the problem — "every movement was a
+    # fixed-frequency sine" — and a release note wants the other end of that
+    # story. When the wording matters, write it here and it is used verbatim.
+    if build:
+        override = pathlib.Path(repo) / "docs" / "release-notes" / f"{build}.md"
+        if override.is_file():
+            print(override.read_text().strip())
+            return
+
+    sep = "\x1e"
+    raw = subprocess.run(
+        ["git", "-C", repo, "log", "--no-merges", f"--pretty=format:%s%n%b{sep}",
+         f"{prev}..{head}"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+
+    buckets = {name: [] for name, _ in CATEGORIES}
+    buckets["Other"] = []
+    seen = set()
+    for chunk in raw.split(sep):
+        if not chunk.strip():
+            continue
+        subject, _, body = chunk.strip().partition("\n")
+        for cat, line in entries_for(subject.strip(), body):
+            if line in seen:          # a section repeated across commits
+                continue
+            seen.add(line)
+            buckets[cat].append(line)
+
+    out = []
+    for name in [c[0] for c in CATEGORIES] + ["Other"]:
+        if buckets[name]:
+            out.append(f"### {name}")
+            out.append("")
+            out.extend(buckets[name])
+            out.append("")
+    print("\n".join(out).rstrip())
+
+
+if __name__ == "__main__":
+    main()

@@ -101,61 +101,18 @@ NOTES="$DEST/RELEASE-NOTES.md"
     echo "Last shipped commit \`$PREV_COMMIT\` is no longer in this repo (rebase/force-push?)" \
       "— can't compute a diff. Full history: \`git log\`."
   else
-    LOG=$(git -C "$PROJECT" log --no-merges --pretty=format:'- %s' "$PREV_COMMIT..$COMMIT")
+    LOG=$(git -C "$PROJECT" log --no-merges --oneline "$PREV_COMMIT..$COMMIT")
     if [ -z "$LOG" ]; then
       echo "No commits between \`$PREV_COMMIT\` and \`$COMMIT\` (version/build bump only)."
     else
       echo "Since \`$PREV_COMMIT\`:"
       echo ""
-
-      # Categorize commits by type. Each must be initialized with `=()` —
-      # under `set -u`, a `declare -a` that never receives an element (e.g.
-      # a run with zero UI/UX commits) is still "unbound" to bash, and
-      # ${#arr[@]} on it aborts the script.
-      declare -a bug_fixes=() ui_ux=() features=() other=()
-
-      while IFS= read -r line; do
-        # Extract message for matching (remove leading "- ")
-        msg="${line#- }"
-
-        # Check categories in order (first match wins). Word-boundaries
-        # (\b) matter here — without them "ui" matches inside "build" and
-        # "new" matches inside "renew", mis-bucketing unrelated commits.
-        if echo "$msg" | grep -iqE '\b(fix|fixed|fixes|bug|crash|error|wrong|broken|regression)\b'; then
-          bug_fixes+=("$line")
-        elif echo "$msg" | grep -iqE '\b(redesign|ui|ux|screen|style|theme|icon|layout|copy|chime|sound|palette|animation|polish)\b'; then
-          ui_ux+=("$line")
-        elif echo "$msg" | grep -iqE '\b(add|adds|added|new|implement|introduce)\b|support for'; then
-          features+=("$line")
-        else
-          other+=("$line")
-        fi
-      done <<< "$LOG"
-
-      # Output categorized sections (only non-empty)
-      if [ ${#bug_fixes[@]} -gt 0 ]; then
-        echo "### Bug Fixes"
-        echo ""
-        printf '%s\n' "${bug_fixes[@]}"
-        echo ""
-      fi
-      if [ ${#ui_ux[@]} -gt 0 ]; then
-        echo "### UI/UX"
-        echo ""
-        printf '%s\n' "${ui_ux[@]}"
-        echo ""
-      fi
-      if [ ${#features[@]} -gt 0 ]; then
-        echo "### Features"
-        echo ""
-        printf '%s\n' "${features[@]}"
-        echo ""
-      fi
-      if [ ${#other[@]} -gt 0 ]; then
-        echo "### Other"
-        echo ""
-        printf '%s\n' "${other[@]}"
-      fi
+      # Note generation moved out to tools/tawny-release-notes: it reads whole
+      # commit messages rather than subject lines, which is where anything
+      # worth telling a tester actually lives, and picking a paragraph apart is
+      # not work for bash. A hand-written docs/release-notes/<build>.md wins
+      # over all of it when the wording matters.
+      "$PROJECT/tools/tawny-release-notes" "$PROJECT" "$PREV_COMMIT" "$COMMIT" "$CODE"
     fi
   fi
 } > "$NOTES"
