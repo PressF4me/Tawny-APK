@@ -63,6 +63,8 @@ import android.widget.ScrollView
 import android.widget.Space
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -464,6 +466,14 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        // Edge-to-edge on every API level, not just 35+. Fully transparent
+        // scrims: native screens are inset by the listener below, and the live
+        // view draws its own gradient behind the bars. auto() still picks the
+        // icon contrast from day/night, which refreshSystemBars() then owns.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT)
+        )
         Diag.init(applicationContext)
         Hue.load(this)                       // resolves light vs. dark palette
         root = FrameLayout(this).apply { setBackgroundColor(Hue.BG) }
@@ -2159,11 +2169,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshSystemBars() {
         val over = videoIsBehindBars()
-        val bar = if (over) Color.TRANSPARENT else Hue.BG
-        @Suppress("DEPRECATION")
-        window.statusBarColor = bar
-        @Suppress("DEPRECATION")
-        window.navigationBarColor = bar
         val light = !over && !isNightMode()
         androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = light
