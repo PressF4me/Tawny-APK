@@ -273,7 +273,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
  * wider of the two strings so nothing reflows. On press each mark then plays
  * its own character, exactly as IconView does: the Ko-fi heart double-thumps
  * (beat()), the bolt takes one hard zap with a bloom behind it (strike()).
- * The global prefers-reduced-motion block above collapses all of it.
+ * The global [data-motion="off"] block collapses all of it.
  */
 
 .tips {
@@ -1279,26 +1279,33 @@ body.dimmed #theme-toggle { display: none; }
   #local { width: 180px; max-width: 180px; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: .001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .001ms !important;
-  }
-
-  /* A collapsed loop stops on its last keyframe, which for the two live-view
-     loops is "almost invisible" — the connecting bars at a quarter height, the
-     talk halo at zero alpha. Park them somewhere that still reads instead. */
-  .loader i { transform: scaleY(.72); opacity: .95; }
-  .loader::before { transform: scale(1); opacity: .7; }
-  .talk-fab.hot::after { opacity: .32; transform: scale(1.06); }
-  /* and no scale-dip at all, since it can no longer spring back */
-  .ctl:active .ico,
-  .talk-fab:active,
-  .chimes button:active,
-  .lens-btn:active,
-  .sas .wide:active { transform: none; }
+/* Hold still.
+   Keyed off an attribute rather than off `prefers-reduced-motion` directly,
+   because two different things ask for this and only one of them is a media
+   query: the OS setting, and Tawny's own Animations switch, which a WebView
+   cannot see (it reads the media query from the system animator scale, the
+   very thing that switch is meant to be independent of). applyMotion() in
+   app.js sets the attribute for either, so the rules live in one place. */
+[data-motion="off"] *,
+[data-motion="off"] *::before,
+[data-motion="off"] *::after {
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
 }
+
+/* A collapsed loop stops on its last keyframe, which for the two live-view
+   loops is "almost invisible" — the connecting bars at a quarter height, the
+   talk halo at zero alpha. Park them somewhere that still reads instead. */
+[data-motion="off"] .loader i { transform: scaleY(.72); opacity: .95; }
+[data-motion="off"] .loader::before { transform: scale(1); opacity: .7; }
+[data-motion="off"] .talk-fab.hot::after { opacity: .32; transform: scale(1.06); }
+/* and no scale-dip at all, since it can no longer spring back */
+[data-motion="off"] .ctl:active .ico,
+[data-motion="off"] .talk-fab:active,
+[data-motion="off"] .chimes button:active,
+[data-motion="off"] .lens-btn:active,
+[data-motion="off"] .sas .wide:active { transform: none; }
 
 /* ==================== v2: channels, sheets, pairing ==================== */
 

@@ -3752,6 +3752,32 @@ function applyTheme(mode) {
 function savedTheme() {
   try { return localStorage.getItem('tawny.theme') || 'system'; } catch { return 'system'; }
 }
+
+/**
+ * Park every animation on the page, or let them run.
+ *
+ * There are two ways to arrive at "hold still" and only one of them is a media
+ * query: the OS setting, which `prefers-reduced-motion` reports, and Tawny's
+ * own Animations switch, which a WebView cannot see (it derives the media query
+ * from the system animator scale, which is exactly what that switch is meant to
+ * be independent of). So the stylesheet keys off `data-motion="off"` on <html>
+ * and this is the one place that decides it — either opinion is enough.
+ */
+let shellWantsStill = false;
+function paintMotion() {
+  let still = shellWantsStill;
+  try {
+    still = still || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {}
+  if (still) document.documentElement.setAttribute('data-motion', 'off');
+  else document.documentElement.removeAttribute('data-motion');
+}
+function applyMotion(off) { shellWantsStill = !!off; paintMotion(); }
+paintMotion();
+try {
+  window.matchMedia('(prefers-reduced-motion: reduce)')
+    .addEventListener?.('change', paintMotion);
+} catch {}
 // Set from the toggle (and mirrored from the native shell). Applies instantly —
 // pure CSS custom properties, so it works mid-session too.
 window.tawnySetTheme = (mode) => {
@@ -3798,6 +3824,11 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
     try { localStorage.setItem('tawny.theme', opts.theme); } catch {}
     applyTheme(opts.theme);
   }
+  // The shell's own Animations switch. A WebView derives
+  // prefers-reduced-motion from the system animator scale, so it cannot see an
+  // app-level setting deliberately kept separate from the system one — the
+  // shell passes it in and the stylesheet keys off the attribute.
+  if (opts && opts.motion) applyMotion(opts.motion === 'off');
   S.signalUrl = signalUrl || null;              // may be null on a cloud-only pairing
   if (rendezvousUrl) S.cfg.rendezvous = rendezvousUrl;
   // The Servers screen (behind the diagnostics hatch). `fallback` is the

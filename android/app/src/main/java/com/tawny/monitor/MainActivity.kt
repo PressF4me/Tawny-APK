@@ -96,6 +96,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.sin
@@ -281,6 +282,25 @@ private const val MIN_REFRESH_HZ = 30f
  * page reports the ceiling back and the shell only uses it for wording.
  */
 private const val MAX_VIEWERS = 3
+
+/**
+ * The prefs key behind the Animations row. Named here rather than typed out in
+ * four places because the drawn scenes read it directly — they are file-scope
+ * views with no handle on the Activity, and a typo in one of them would fail
+ * silently as "this one screen ignores the setting".
+ */
+private const val STILL_MODE = "stillMode"
+
+/**
+ * Whether the user has asked this app to hold still, read straight from the
+ * prefs file for the benefit of the drawn scenes.
+ *
+ * Only ever called when a view is attached or detached, never per frame — the
+ * scenes latch it once and keep it, because a SharedPreferences lookup inside
+ * onDraw would cost more than the animation it is trying to save.
+ */
+private fun stillModeOn(ctx: Context) =
+    ctx.getSharedPreferences("tawny", Context.MODE_PRIVATE).getBoolean(STILL_MODE, false)
 
 class MainActivity : AppCompatActivity() {
 
@@ -804,8 +824,29 @@ class MainActivity : AppCompatActivity() {
 
     // -------------------------------------------------------- screen frame
 
+    /**
+     * The user's own "hold still" switch, from the Animations row on the home
+     * and About screens.
+     *
+     * Android already has a system-wide one, and the app has always honoured it
+     * — but reaching it means Developer options or Accessibility, it is worded
+     * for the whole phone rather than for this app, and plenty of the phones
+     * this matters on are somebody's spare handset that they would rather not
+     * go rummaging in. A monitor left running on a cheap phone spends its whole
+     * day redrawing pets nobody is looking at; this is the switch that says
+     * don't.
+     */
+    private fun stillMode() = prefs.getBoolean(STILL_MODE, false)
+
+    /**
+     * How long an animation should run, as a multiple of its natural duration:
+     * the system's animator scale, or a hard 0 when the user has asked this app
+     * to hold still. Every animate() in this file is already multiplied by it,
+     * so returning 0 here is what actually stops them — see [metaPress],
+     * [metaPanel] and the screen cross-fade.
+     */
     private val animScale: Float
-        get() = try {
+        get() = if (stillMode()) 0f else try {
             Settings.Global.getFloat(
                 contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f
             )
@@ -1257,6 +1298,65 @@ class MainActivity : AppCompatActivity() {
         isClickable = true; isFocusable = true
         metaPress(this, icon, glyph, kind, trail, wipe)
         setOnClickListener { haptic(); onClick() }
+    }
+
+    /**
+     * The Animations row, for the two panels that carry it.
+     *
+     * A row rather than a switch widget because everything else in these panels
+     * is a row, and because the state belongs in the trailing slot where the
+     * eye is already going for the chevron: "Animations … On". Tapping it flips
+     * the pref and rebuilds the screen it is on — [rebuild] — which is both how
+     * the row repaints itself and how the scene above it stops, since the drawn
+     * views latch the setting when they are attached.
+     */
+    private fun motionRow(rebuild: () -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = pressable(roundRect(0, Color.TRANSPARENT, 0), 0, Hue.BERRY)
+        val ph = dp(16); val pv = dp(15)
+        setPadding(ph, pv, ph, pv)
+        minimumHeight = dp(54)
+        addView(IconView(this@MainActivity, "motion", behind = Hue.PANEL, tint = Hue.DIM).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(19), dp(19))
+        })
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(13) }
+            addView(TextView(this@MainActivity).apply {
+                text = "Animations"
+                setTextColor(Hue.TEXT)
+                textSize = Type.SUB
+                typeface = uiFontSemi
+                letterSpacing = 0.01f
+                maxLines = 1
+            })
+            addView(TextView(this@MainActivity).apply {
+                // The state is the switch's job, so this says what the setting
+                // *does* rather than repeating "on" in a second voice.
+                text = if (stillMode()) "The pets hold still — lighter on older phones"
+                else "The pets potter about"
+                setTextColor(Hue.DIM)
+                textSize = 12.5f
+                typeface = uiFont
+                setPadding(0, dp(2), 0, 0)
+            })
+        })
+        val knob = SwitchMark(this@MainActivity, !stillMode()).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(46), dp(28))
+                .also { it.leftMargin = dp(12) }
+        }
+        addView(knob)
+        isClickable = true; isFocusable = true
+        contentDescription = "Animations"
+        // Flip the knob under the finger, then rebuild. Without the first half
+        // the switch would appear to lag a whole screen rebuild behind the tap.
+        setOnClickListener {
+            haptic()
+            knob.on = stillMode()          // about to become the new value
+            prefs.edit().putBoolean(STILL_MODE, !stillMode()).apply()
+            rebuild()
+        }
     }
 
     /**
@@ -2103,7 +2203,13 @@ class MainActivity : AppCompatActivity() {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER
         layoutParams = lp(topMargin = 8)
-        addView(ProgressBar(this@MainActivity).apply {
+        // An indeterminate ProgressBar spins off its own drawable animation
+        // rather than off the animator scale, so it is the one thing on the
+        // pairing sheet that would keep turning after the user asked the app to
+        // hold still — on the very screen a Monitor sits on for hours. Dropped
+        // entirely in that case: the label beside it already says what it is
+        // waiting for, and a frozen spinner reads as a hang.
+        if (!stillMode()) addView(ProgressBar(this@MainActivity).apply {
             isIndeterminate = true
             indeterminateTintList = ColorStateList.valueOf(Hue.BERRY)
             layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).also { it.rightMargin = dp(10) }
@@ -2456,6 +2562,7 @@ class MainActivity : AppCompatActivity() {
             metaRow("bolt", "Tip in Bitcoin", Hue.SKY, "›") {
                 lnFromAbout = false; showLightningTip()
             },
+            motionRow { showSessionsHome() },
             metaRow("info", "About Tawny", Hue.TEXT, "›") { showAbout() },
         ))
 
@@ -2575,6 +2682,13 @@ class MainActivity : AppCompatActivity() {
                 "between ever sees your video or the code that pairs your " +
                 "phones. On your own Wi-Fi, none of it leaves the house."
         ))
+
+        // Repeated from the home screen on purpose. Home is where someone who
+        // already has a session will look, but a phone that struggles with the
+        // drawn pets is exactly the phone whose owner goes hunting through
+        // About for something to turn off.
+        col.addView(eyebrow("On this phone"))
+        col.addView(metaPanel(motionRow { showAbout() }))
 
         col.addView(eyebrow("Keeping it running"))
         col.addView(aboutBody(
@@ -3646,6 +3760,11 @@ class MainActivity : AppCompatActivity() {
                         "${jsStr(role)},${jsStr(key)},${jsStr(name)}," +
                         "${signal?.let { jsStr(it) } ?: "null"},${jsStr(rendezvous)}," +
                         "${token?.let { jsStr(it) } ?: "null"},{theme:${jsStr(currentTheme())}," +
+                        // The page cannot see the app's own Animations switch —
+                        // a WebView reads prefers-reduced-motion off the system
+                        // setting, which is the one thing this switch exists to
+                        // be independent of — so it has to be told.
+                        "motion:${jsStr(if (stillMode()) "off" else "on")}," +
                         "pairCode:${pairCodeArg?.let { jsStr(it) } ?: "null"}," +
                         "pairExp:$pairCodeExpArg,servers:${serversJson()}})",
                     null
@@ -4217,6 +4336,60 @@ class MainActivity : AppCompatActivity() {
      * device, in the palette's own colour, and this file draws everything else
      * that way already.
      */
+    /**
+     * The switch on the Animations row.
+     *
+     * The row used to end in the word "On" or "Off", set in the same weight as
+     * the chevrons beside it — which made it read as a third kind of trailing
+     * glyph rather than as a control, and left the state to be *read* on a
+     * panel where everything else is recognised at a glance. A track and a knob
+     * are what a setting looks like; the label under the title carries the
+     * meaning, and this carries the state.
+     *
+     * Drawn rather than a Material `SwitchCompat` for the same reason as
+     * everything else in this file: the stock widget brings its own accent,
+     * its own ripple and its own metrics, none of which are the palette's, and
+     * it would be the only imported control on any screen.
+     */
+    private class SwitchMark(ctx: Context, on: Boolean) : View(ctx) {
+        private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        var on: Boolean = on
+            set(v) { field = v; invalidate() }
+
+        override fun onDraw(c: Canvas) {
+            if (width <= 0 || height <= 0) return
+            // Authored in a 46x28 box and scaled, so the knob keeps its inset
+            // and the track its radius whatever density this lands on.
+            val s = min(width / 46f, height / 28f)
+            c.save()
+            c.translate((width - 46f * s) / 2f, (height - 28f * s) / 2f)
+            c.scale(s, s)
+            p.style = Paint.Style.FILL
+            // Off is a grey track under a pale knob — the usual way round, and
+            // the reason it is Hue.DIM held down rather than Hue.LINE is that
+            // Hue.LINE is a hairline colour: against Hue.PANEL, which is pure
+            // white on the light palette, it left the whole control a rumour.
+            p.color = if (on) Hue.BERRY else Hue.DIM
+            if (!on) p.alpha = 78
+            c.drawRoundRect(RectF(0f, 0f, 46f, 28f), 14f, 14f, p)
+            p.alpha = 255
+            p.color = if (on) Hue.ON_ACCENT else Hue.PANEL
+            c.drawCircle(if (on) 32f else 14f, 14f, 10f, p)
+            // The knob gets its own edge when off, so it reads as a disc
+            // sitting in the track rather than as a hole punched through it.
+            if (!on) {
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = 1.1f
+                p.color = Hue.DIM
+                p.alpha = 70
+                c.drawCircle(14f, 14f, 9.5f, p)
+                p.alpha = 255
+            }
+            c.restore()
+        }
+    }
+
     private class PencilMark(ctx: Context) : View(ctx) {
         private val p = Paint(Paint.ANTI_ALIAS_FLAG)
         private val tip = Path()
@@ -5335,6 +5508,17 @@ private class IconView(
                 canvas.drawCircle(24f, 15.5f, 2.7f, cut)         // dot
                 rr(canvas, 21.4f, 20.5f, 26.6f, 34f, 2.6f, cut)  // stem
             }
+            "motion" -> {
+                // Speed lines: the mark for movement itself, which is what the
+                // Animations row switches. A ball with a trail would have been
+                // more literal and also unreadable at 19dp — three bars ranged
+                // right, each shorter than the one above, say "moving" at any
+                // size, and the round caps keep them in the same family as the
+                // plus and the info stem.
+                rr(canvas, 8f, 15.5f, 40f, 20.5f, 2.5f, body)
+                rr(canvas, 16f, 24.5f, 40f, 29.5f, 2.5f, body)
+                rr(canvas, 24f, 33.5f, 40f, 38.5f, 2.5f, body)
+            }
             "plus" -> {
                 // Drawn rather than typed: a "+" set in the UI font sits a
                 // couple of units high in its line box and is a hair too light
@@ -5426,7 +5610,7 @@ private abstract class CritterScene(ctx: Context) : View(ctx) {
         addUpdateListener { phase = it.animatedValue as Float; invalidate() }
     }
     private val reduceMotion: Boolean
-        get() = try {
+        get() = stillModeOn(context) || try {
             Settings.Global.getFloat(
                 context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f
             ) == 0f
@@ -5435,7 +5619,10 @@ private abstract class CritterScene(ctx: Context) : View(ctx) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         animator.duration = loopMs
-        if (!reduceMotion && !animator.isStarted) animator.start()
+        // Read the setting once, here, and keep it: the free-running clock is
+        // sampled every frame and must not be a ContentResolver round-trip.
+        motionOff = reduceMotion
+        if (!motionOff && !animator.isStarted) animator.start()
     }
 
     override fun onDetachedFromWindow() {
@@ -5529,6 +5716,180 @@ private abstract class CritterScene(ctx: Context) : View(ctx) {
 
     protected fun lerp(a: Float, b: Float, u: Float) = a + (b - a) * u
 
+    // ------------------------------------------------------------ organic motion
+    //
+    // Everything below exists to get the animals off the metronome. A raw
+    // sin() on the loop clock is honest about what it is: one rate, one
+    // amplitude, forever, and every limb in lockstep because every limb is
+    // reading the same tick. Live animals don't do that. They accent one
+    // direction of a stroke and drift back from it; they work in bursts and
+    // then go quiet; their light parts arrive late to whatever their heavy
+    // parts did; and every so often they simply break the idle with an event
+    // — an ear flick, a head cock, a sniff — that belongs to no cycle at all.
+    //
+    // The tools are deliberately arithmetic. No Random, no allocation, no
+    // state to keep in step with the frame loop: feed them the clock and the
+    // same instant always comes out the same way, which is what lets an
+    // "unpredictable" idle survive being redrawn sixty times a second behind
+    // live UI.
+
+    private var motionOff = false
+    private val born = SystemClock.uptimeMillis()
+
+    /** Free-running seconds since this view was built. Deliberately *not* the
+     *  loop phase [t]: anything whose period is the loop is the very thing
+     *  that reads as clockwork, because the eye learns the loop in two passes.
+     *  Frozen at zero when the system asks for no animation, so the
+     *  reduce-motion still frame is the neutral pose rather than a random one. */
+    protected val clock: Float
+        get() = if (motionOff) 0f else (SystemClock.uptimeMillis() - born) / 1000f
+
+    protected val twoPi = 6.2831855f
+
+    /** Deterministic 0..1 from an integer — the pseudo-randomness the idle
+     *  events schedule themselves with, without an allocated Random anywhere
+     *  near onDraw. */
+    protected fun hash01(n: Int): Float {
+        var h = n * 374761393 + 668265263
+        h = (h xor (h ushr 13)) * 1274126177
+        return ((h xor (h ushr 16)) and 0x07FFFFFF) / 134217727f
+    }
+
+    /**
+     * True when the app has been asked to hold still.
+     *
+     * Everything below rests at its neutral value in that case, which is the
+     * difference between a still life and a pause. Stopping the clock wherever
+     * it happened to be leaves an animal mid-gesture — one ear up, the head
+     * cocked at nothing, a tail flung out to the side, eyes caught halfway
+     * through a blink — and a drawing frozen mid-blink is exactly the thing
+     * that reads as unsettling rather than asleep. So a stopped scene is not
+     * this scene paused; it is a pose of its own, and these are the values that
+     * make it one.
+     */
+    protected val still: Boolean get() = motionOff
+
+    /** A smooth wander in −1..1: three sines whose rates share no common
+     *  multiple, so the sum has no beat an eye can anticipate. Flat when still,
+     *  so ears sit level and tails hang straight. */
+    protected fun drift(u: Float): Float =
+        if (still) 0f
+        else (sin(u) + 0.62f * sin(u * 1.73f + 1.3f) + 0.41f * sin(u * 2.91f + 2.6f)) * 0.49f
+
+    /** The shape nearly every deliberate movement has: out fast, back slow.
+     *  [u] runs 0..1 across the whole gesture and [out] is the share of it
+     *  spent going out. A sine spends the same time on both halves, which is
+     *  the single biggest reason a sine reads as machinery. */
+    protected fun snap(u: Float, out: Float = 0.22f): Float =
+        if (u <= 0f || u >= 1f) 0f
+        else if (u < out) ramp(u / out) else 1f - ramp((u - out) / (1f - out))
+
+    /** Breathing at time [at] in seconds, 0..1: a quicker draw in than sigh
+     *  out. Sampling it at a couple of offsets is all "follow-through" is —
+     *  the head rides the breath the ribcage had a moment ago. */
+    protected fun breath(at: Float, period: Float = 2.9f): Float {
+        // Mid-breath when still: every caller reads this as (breath - 0.5), so
+        // a half is the ribcage at rest rather than at the top or bottom of a
+        // held breath.
+        if (still) return 0.5f
+        val u = at / period
+        return snap(u - floor(u), 0.42f)
+    }
+
+    /** Idle punctuation. Once inside each [every]-second window — but only
+     *  with probability [chance], and at a moment inside the window picked by
+     *  the hash rather than by a cycle — this returns 0..1 progress through a
+     *  [dur]-second event, and 0 the rest of the time. Give every event its
+     *  own [seed] and no two of them ever queue up in the same order twice in
+     *  one sitting, which is what stops a loop from being a loop. */
+    protected fun beat(seed: Int, every: Float, dur: Float, chance: Float = 1f): Float {
+        val ck = clock
+        if (ck <= 0f) return 0f
+        val w = ck / every + hash01(seed * 977 + 13)
+        val i = floor(w).toInt()
+        if (chance < 1f && hash01(i * 8191 + seed) > chance) return 0f
+        val at = hash01(i * 131 + seed * 7) * (1f - dur / every).coerceAtLeast(0f)
+        val u = (w - i - at) * every / dur
+        return if (u <= 0f || u >= 1f) 0f else u
+    }
+
+    /** Blinking on the wall clock, at an irregular interval and sometimes in
+     *  pairs. [blink] fires once a loop, which means the eyes shut on the same
+     *  tick the tail returns on — one give-away tells the eye the whole animal
+     *  is one clockwork. 1 = open. */
+    protected fun blinkAt(seed: Int): Float {
+        val shut = maxOf(
+            snap(beat(seed, 3.6f, 0.30f), 0.38f),
+            snap(beat(seed + 101, 5.3f, 0.26f, 0.45f), 0.38f)   // clusters into doubles
+        )
+        return 1f - 0.94f * shut
+    }
+
+    /** Flattens the peaks of a −1..1 swing so the stroke hurries through the
+     *  middle and hangs at the ends — what a tail (or a bounce at the top of
+     *  its arc) does, and what a sine conspicuously doesn't. */
+    protected fun hangs(s: Float, k: Float = 0.55f): Float = (1f + k) * s / (1f + k * abs(s))
+
+    // --------------------------------------------------------------- looking
+    //
+    // Where an animal's eyes point, in −1..1, to be scaled into pixels by the
+    // caller.
+    //
+    // Left to itself every pet in this app aims its eyes dead ahead, which
+    // puts three faces on the welcome screen staring out of the glass at
+    // whoever is holding the phone, indefinitely, and never at each other or at
+    // anything in the scene they are supposedly in. Two eyes locked on the
+    // viewer and never moving is the oldest trick in the uncanny book, and it
+    // is the one thing these drawings were doing by default.
+    //
+    // So each animal has a `home` — the direction of whatever it is actually
+    // interested in, usually the pet next to it — and it mostly looks there.
+    // It wanders around that, now and then looks somewhere else entirely, and
+    // only rarely and briefly out at the viewer, which is what makes that a
+    // moment rather than a stare. When the scene is stopped, `home` is what is
+    // left: the still frame is animals regarding one another.
+
+    /**
+     * How much this animal is looking straight at whoever is holding the
+     * phone, 0..1.
+     *
+     * A pet that never once meets your eye is as odd as one that never looks
+     * away — it reads as a drawing that happens to be facing you rather than
+     * as something aware you are there. So every so often each of them turns
+     * and looks, and because both axes are steered from this one number the
+     * look lands dead centre rather than merely somewhere near it.
+     *
+     * The shape is a plateau, not a peak: it turns to the lens over about a
+     * third of the gesture, *holds* there, and turns away again. Eye contact
+     * that only touches centre for a single frame on its way past is not eye
+     * contact, it is a flinch. Roughly one look every quarter of a minute per
+     * animal, each on its own schedule, so they never all do it at once.
+     */
+    protected fun contact(seed: Int): Float {
+        val u = beat(seed * 31 + 8, 8.5f, 2.2f, 0.55f)
+        if (u <= 0f) return 0f
+        return (ramp(u / 0.3f) * (1f - ramp((u - 0.62f) / 0.38f))).coerceIn(0f, 1f)
+    }
+
+    /** Sideways gaze. [home] is where this animal's attention lives (−1 left,
+     *  +1 right); the rest is it thinking about other things, or about you. */
+    protected fun gazeX(seed: Int, home: Float): Float {
+        if (still) return home
+        val wander = drift(clock * 0.29f + seed * 1.7f) * 0.3f
+        // Off to something else on the other side.
+        val away = snap(beat(seed * 31 + 7, 9.5f, 2.0f, 0.45f), 0.25f)
+        val base = (home + wander) * (1f - away) - home * away * 0.9f
+        return base * (1f - contact(seed))
+    }
+
+    /** The same for up and down — mostly level, with the odd glance upward,
+     *  which is where a real animal looks when it hears something. */
+    protected fun gazeY(seed: Int, home: Float = 0f): Float {
+        if (still) return home
+        val up = snap(beat(seed * 31 + 9, 12f, 1.6f, 0.45f), 0.28f) * -0.85f
+        return (home + up) * (1f - contact(seed))
+    }
+
     protected data class Flight(val fx: Float, val fy: Float, val bank: Float, val look: Float)
 
     /** The owlet's flight path for tap-progress [op] 0..1: lift off the perch,
@@ -5608,9 +5969,16 @@ private abstract class CritterScene(ctx: Context) : View(ctx) {
 
     /** Dark bean eye with a catch-light; [open] 1..0 squashes it shut, [look]
      *  shifts the whole eye toward what it's watching. */
-    protected fun eye(c: Canvas, cx: Float, cy: Float, r: Float, open: Float, look: Float = 0f) {
+    /** [look] aims the eye sideways, [lookY] up (negative) or down. The catch
+     *  light stays put while the eye moves under it, which is what stops an
+     *  aimed eye reading as the whole head having turned. */
+    protected fun eye(
+        c: Canvas, cx: Float, cy: Float, r: Float, open: Float,
+        look: Float = 0f, lookY: Float = 0f,
+    ) {
         val o = open.coerceIn(0f, 1f)
-        c.drawOval(RectF(cx - r + look, cy - r * o, cx + r + look, cy + r * o), ink)
+        val y = cy + lookY * o          // a shut eye has nowhere to look
+        c.drawOval(RectF(cx - r + look, y - r * o, cx + r + look, y + r * o), ink)
         if (o > 0.55f) c.drawCircle(cx - r * 0.34f + look, cy - r * 0.44f, r * 0.36f, creamHi)
     }
 
@@ -5763,8 +6131,11 @@ private abstract class CritterScene(ctx: Context) : View(ctx) {
         val flap = (hop / 8f).coerceIn(0f, 1f) + near * 0.45f
         val lean = track * 8f                                  // body rocks after the ball
         val faceDx = track * 4f                                // and she cranes her face over
-        val lookX = if (tracking) track * 2.1f else cos(tNorm * 2.0 * PI).toFloat() * 0.9f
-        val lookY = if (ballY != null) ((ballY - (cy - 4f)) / 19f).coerceIn(-1.3f, 1f) else 0f
+        // She takes her turn at meeting your eye too, on her own schedule, so
+        // the three of them are never all looking out at once.
+        val owlUp = 1f - contact(4)
+        val lookX = (if (tracking) track * 2.1f else cos(tNorm * 2.0 * PI).toFloat() * 0.9f) * owlUp
+        val lookY = (if (ballY != null) ((ballY - (cy - 4f)) / 19f).coerceIn(-1.3f, 1f) else 0f) * owlUp
 
         castShadow(c, x, groundY + 3f, 26f * (1f - 0.35f * flap.coerceAtMost(1f)),
             (34 * (1f - 0.5f * flap.coerceAtMost(1f))).toInt())
@@ -5862,8 +6233,12 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
             capsule(c, hx, hy + 6f, 15f, 12f, creamHi)
             val bl = (blink() - spring).coerceIn(0f, 1f)
             val er = 3.4f + active * 1.0f
-            eye(c, hx - 6f, hy - 1f, er, bl)
-            eye(c, hx + 6f, hy - 1f, er, bl)
+            // The owlet and the dog are both to the cat's right, so that is
+            // where it is looking when it is not thinking about something else.
+            val gx = gazeX(2, 1f) * 1.7f
+            val gy = gazeY(2) * 1.2f
+            eye(c, hx - 6f, hy - 1f, er, bl, gx, gy)
+            eye(c, hx + 6f, hy - 1f, er, bl, gx, gy)
             c.drawPath(Path().apply {
                 moveTo(hx, hy + 8f); lineTo(hx - 2.4f, hy + 5.6f); lineTo(hx + 2.4f, hy + 5.6f); close()
             }, berry)
@@ -5877,21 +6252,57 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
         // ---------------- dog, sitting, right ----------------
         run {
             val x = 190f
-            val by = sin(tau + 0.6).toFloat() * 1.6f
+            val ck = clock
+            // The ribcage breathes on the wall clock, not on the scene loop, and
+            // the head rides the breath it had an eighth of a second ago. Two
+            // offsets of one curve is the whole of follow-through, and it is
+            // what stops the dog reading as a single rigid object being nudged
+            // up and down.
+            val by = (breath(ck) - 0.5f) * 3.2f
+            val hby = (breath(ck - 0.13f) - 0.5f) * 3.4f
             castShadow(c, x + 2f, g + 4f, 78f, 40)
 
             // tap → play-bow, then a couple of happy bounces, tail going mad.
+            // The bow drops fast and comes back up slowly, and the bounces hang
+            // at the top of the arc the way a real hop does instead of tracing
+            // the perfectly even |sin| they used to.
             val dp = reactP(2)
-            val bow = ramp(dp / 0.26f) * (1f - ramp((dp - 0.30f) / 0.16f))
+            val bow = ramp(dp / 0.20f) * (1f - ramp((dp - 0.30f) / 0.22f))
             val bounce = if (dp in 0.30f..0.92f)
-                abs(sin(((dp - 0.30f) / 0.62f) * PI * 2f).toFloat()) else 0f
+                hangs(abs(sin(((dp - 0.30f) / 0.62f) * PI * 2f).toFloat()), 0.5f) else 0f
             val dogA = (bow + bounce).coerceAtMost(1f)
+            // A sitting dog shifts its weight every now and then. It is barely
+            // two degrees and it is the difference between resting and paused.
+            val lean = snap(beat(21, 11f, 2.4f, 0.6f), 0.3f) -
+                snap(beat(22, 13f, 2.4f, 0.6f), 0.3f)
             c.save()
-            c.rotate(-13f * bow, x, g)
+            c.rotate(-13f * bow + lean * 2.2f, x, g)
             c.translate(0f, -bounce * 9f)
+            // Landing squashes; the top of a bounce stretches. Free, and the
+            // eye reads it as weight even when it can't say why.
+            c.scale(1f + bounce * 0.03f, 1f - bounce * 0.045f, x, g)
 
-            val wag = sin(t * 7.0 * PI + dogA * reactSecs() * 40f).toFloat()
-            c.save(); c.rotate(wag * (8f + dogA * 18f), x + 14f, g - 8f)
+            // Wag. A fixed-frequency sine here is the most obviously clockwork
+            // thing a drawn dog can do, so this is a carrier whose *phase*
+            // wanders — which drifts the rate smoothly instead of jumping it —
+            // under an envelope that spends real time at the bottom. The tail
+            // therefore comes in bursts: it winds up, works, and then simply
+            // stops for a second or two and hangs a little lower, which is a
+            // beat no metronome can give you.
+            // Tuned so the tail is going about 60% of the time and its longest
+            // rest is a few seconds: any deader and the hero screen looks
+            // broken rather than calm.
+            val zeal = ramp(drift(ck * 0.42f + 2.1f) * 1.15f + 0.66f)
+            val wagPh = ck * 3.5f + 1.5f * drift(ck * 0.44f)
+            // The stroke itself is asymmetric too: warping the angle by half a
+            // sine of itself moves the peak early, so the tail leaves fast and
+            // drifts back — a sine gives the flick and the return exactly the
+            // same time, which is the tell.
+            val th = wagPh * twoPi
+            val wag = hangs(sin(th + 0.5f * sin(th)), 0.4f) * (0.18f + 0.82f * zeal)
+            val wagArc = wag * (7f + 8f * zeal + dogA * 20f) +
+                dogA * sin(reactSecs() * 40f).toFloat() * 6f
+            c.save(); c.rotate(wagArc + (1f - zeal) * 3f - dogA * 6f, x + 14f, g - 8f)
             val dogTail = Path().apply {
                 moveTo(x + 12f, g - 4f)
                 cubicTo(x + 40f, g - 4f, x + 48f, g - 26f, x + 36f, g - 40f)
@@ -5908,26 +6319,68 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
             capsule(c, x - 8f, g - 3f, 13f, 10f, cream, edge)
             capsule(c, x + 8f, g - 3f, 13f, 10f, cream, edge)
 
-            val hx = x; val hy = g - 62f + by
-            val sway = sin(tau + 0.6).toFloat() * 3f + sin(reactSecs() * 24f).toFloat() * dogA * 6f
+            // Idle punctuation for the head: every so often it cocks over and
+            // holds there before straightening — the "what was that?" a dog
+            // does when nothing whatsoever has happened — and now and then it
+            // takes three quick sniffs at the air. Two of these on a slow
+            // irregular schedule are what turn a loop into an animal.
+            val cock = (snap(beat(24, 9.7f, 2.1f, 0.6f), 0.16f) -
+                snap(beat(23, 8.2f, 2.1f, 0.6f), 0.16f)) * 11f
+            val sniff = beat(25, 12f, 0.9f, 0.5f)
+            val sniffY = if (sniff > 0f) sin(sniff * 3f * twoPi) * hump(sniff) * 1.7f else 0f
+
+            val hx = x; val hy = g - 62f + hby + sniffY - bow * 2f
+            c.save()
+            c.rotate(cock, hx, hy + 17f)                    // pivot at the throat
             // Ears hang from the top corners of the head and splay outward, so
             // they read beside the face. Drawn BEFORE the head: only the part
             // outside the skull shows, exactly like a real floppy ear.
             // (+ve rotates clockwise on screen, so the LEFT ear takes the +ve
             // angle to swing away from the face.)
-            floppyEar(c, hx - 15f, hy - 9f, 33f, 18f, 22f + sway, biscuitLo)
-            floppyEar(c, hx + 15f, hy - 9f, 33f, 18f, -22f - sway, biscuitLo)
+            //
+            // They are lighter than the skull and arrive late: the sway reads
+            // the breath from a quarter-second back, so ears and body are never
+            // at the extremes of their travel on the same frame. Each ear also
+            // flicks on its own schedule, independently — a pair of ears moving
+            // as one is a pair of ears bolted to a board.
+            val sway = (breath(ck - 0.26f) - 0.5f) * 5.6f + drift(ck * 0.62f) * 1.4f +
+                sin(reactSecs() * 24f).toFloat() * dogA * 6f
+            val flickL = snap(beat(26, 5.2f, 0.45f, 0.55f), 0.14f) * 12f
+            val flickR = snap(beat(27, 6.7f, 0.45f, 0.55f), 0.14f) * 12f
+            floppyEar(c, hx - 15f, hy - 9f, 33f, 18f, 22f + sway + flickL, biscuitLo)
+            floppyEar(c, hx + 15f, hy - 9f, 33f, 18f, -22f - sway - flickR, biscuitLo)
             mass(c, hx, hy, 34f, 31f, cream)
             capsule(c, hx, hy + 7f, 18f, 14f, creamHi)
-            val bl = blink(0.12f)
-            eye(c, hx - 6f, hy - 2f, 3.4f, bl)
-            eye(c, hx + 6f, hy - 2f, 3.4f, bl)
+            val bl = blinkAt(2)
+            // The owlet and the cat are both to the dog's left — the mirror of
+            // the cat's own gaze, so at rest the two of them are looking across
+            // the owlet at each other rather than out of the screen.
+            val gaze = gazeX(3, -1f) * 1.7f
+            val gazeVert = gazeY(3) * 1.2f
+            eye(c, hx - 6f, hy - 2f, 3.4f, bl, gaze, gazeVert)
+            eye(c, hx + 6f, hy - 2f, 3.4f, bl, gaze, gazeVert)
             capsule(c, hx, hy + 4f, 6f, 5f, ink)
             c.drawCircle(hx - 1.6f, hy + 2.6f, 1.1f, creamHi)
             c.drawArc(RectF(hx - 6f, hy + 6f, hx, hy + 13f), 20f, 130f, false, hair)
             c.drawArc(RectF(hx, hy + 6f, hx + 6f, hy + 13f), 30f, 130f, false, hair)
-            val loll = 4f + 1.5f * (0.5f + 0.5f * sin(t * 6.0 * PI).toFloat()) + dogA * 5f
-            c.drawRoundRect(hx - 2.4f, hy + 9f, hx + 2.4f, hy + 9f + loll, 2.4f, 2.4f, tongue)
+            // The tongue used to be out and pumping on its own fixed cycle for
+            // the entire life of the screen, which is the one thing here nobody
+            // ever read as an animal. Now the dog pants in bouts: the tongue
+            // comes out fast, works for a few seconds, and is drawn back in
+            // between times — and a tap brings it straight out, because a happy
+            // dog pants.
+            // Two overlapping schedules rather than one: a single window leaves
+            // half-minute stretches with no tongue at all, and this is the
+            // screen the store shots come from.
+            val pant = maxOf(
+                maxOf(snap(beat(30, 7f, 3.0f, 0.85f), 0.10f),
+                    snap(beat(31, 11f, 2.4f, 0.55f), 0.10f)),
+                dogA
+            )
+            val loll = (pant * (4.4f + 1.2f * sin(ck * 12f)) + dogA * 4f).coerceAtLeast(0f)
+            if (loll > 0.5f)
+                c.drawRoundRect(hx - 2.4f, hy + 9f, hx + 2.4f, hy + 9f + loll, 2.4f, 2.4f, tongue)
+            c.restore()
             c.restore()
         }
 
@@ -5939,7 +6392,9 @@ private class PetSceneView(ctx: Context) : CritterScene(ctx) {
             val flap = 0.55f + 0.45f * abs(sin(reactSecs() * 24f).toFloat())
             owlet(c, 130f, g - 2f, t, flyX = fx, flyY = fy, flyBank = bank, flyFlap = flap, flyLook = look)
         } else {
-            owlet(c, 130f, g - 2f, t, hop = (0.5f + 0.5f * sin(tau).toFloat()) * 2f)
+            // Feet down when still: caught mid-hop she reads as hovering.
+            owlet(c, 130f, g - 2f, t,
+                hop = if (still) 0f else (0.5f + 0.5f * sin(tau).toFloat()) * 2f)
         }
     }
 
@@ -5966,10 +6421,23 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
         // (dead centre) and only dropping low at the two ends where they bat it —
         // so a centred owl is never in its way, and her gaze sweeps end to end.
         val swing = sin(tau).toFloat()
-        val ballX = 150f + 56f * swing                         // 94 (kitten) … 206 (dog)
         val arc = abs(cos(tau).toFloat())                      // 1 over centre, 0 at the ends
-        val endBounce = abs(sin(t * 7.0 * PI).toFloat())
-        val ballLift = arc * 40f + (1f - arc) * endBounce * 13f
+        // Still: the ball is put down, not left wherever the loop happened to
+        // stop. At the phase a stopped scene rests on, the swing has it dead
+        // centre and the arc has it at the very top of its flight — a ball
+        // hanging in mid-air over the owlet's head, holding there forever,
+        // which is the single most obviously wrong thing about a paused scene.
+        // On the floor by the kitten's paws it reads as a toy between games.
+        val ballX = if (still) 104f else 150f + 56f * swing    // 94 (kitten) … 206 (dog)
+        // The ball touches down exactly when a paw is there to meet it. At 7
+        // half-cycles the bounce was coprime with the swing that carries the
+        // ball, so it arrived at each end mid-hop, at whatever height it
+        // happened to be — the paw could be perfectly timed and still swipe
+        // through empty air under it. 8 puts a bottom of the bounce on t=0.25
+        // and t=0.75, which are precisely the instants the dog's swat and the
+        // kitten's pounce peak.
+        val endBounce = abs(sin(t * 8.0 * PI).toFloat())
+        val ballLift = if (still) 0f else arc * 40f + (1f - arc) * endBounce * 13f
         val ballY = g - 8f - ballLift
 
         // ---------- kitten, crouched, left, springs at the ball ----------
@@ -6026,9 +6494,16 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
             mass(c, hx, hy, 26f, 24f, dove)
             capsule(c, hx, hy + 5f, 12f, 10f, creamHi)
             val bl = (blink() + pounce).coerceAtMost(1f)
-            val kitLook = ((ballX - hx) / 80f).coerceIn(-1f, 1f) * 1.7f
-            eye(c, hx - 4.5f, hy - 1f, 2.9f + 0.5f * pounce, bl, kitLook)
-            eye(c, hx + 4.5f, hy - 1f, 2.9f + 0.5f * pounce, bl, kitLook)
+            // The ball is the whole point of this scene, so the kitten watches
+            // it rather than the viewer — and when the scene is stopped the
+            // ball is on the floor at its paws, so it is looking down at it.
+            // ...but it does look up from the game every so often to check on
+            // you, which is the one thing a cat watching a toy actually does.
+            val kitUp = 1f - contact(8)
+            val kitLook = ((ballX - hx) / 80f).coerceIn(-1f, 1f) * 1.7f * kitUp
+            val kitLookY = ((ballY - hy) / 60f).coerceIn(-0.6f, 1f) * 1.4f * kitUp
+            eye(c, hx - 4.5f, hy - 1f, 2.9f + 0.5f * pounce, bl, kitLook, kitLookY)
+            eye(c, hx + 4.5f, hy - 1f, 2.9f + 0.5f * pounce, bl, kitLook, kitLookY)
             c.drawPath(Path().apply {
                 moveTo(hx, hy + 6.5f); lineTo(hx - 2f, hy + 4.5f); lineTo(hx + 2f, hy + 4.5f); close()
             }, berry)
@@ -6043,24 +6518,66 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
         // ---------- dog, right — its bone, and it bats the ball when it lands ----------
         run {
             val x = 236f
+            val ck = clock
             // 0 when the ball is away, 1 when it drops in near the dog's paws.
             val toy = ((ballX - 168f) / 38f).coerceIn(0f, 1f)
-            val bat = toy * abs(sin(t * 11.0 * PI).toFloat())          // paw-swat rhythm
-            val gnaw = sin(t * 8.0 * PI).toFloat().coerceAtLeast(0f) * 3f * (1f - toy)
+
+            // One swat, timed to the ball — not a shiver.
+            //
+            // The paw used to be driven by `toy * abs(sin(t * 11 * PI))`: a
+            // 5.5Hz flutter switched on by nothing more than the ball being
+            // somewhere nearby. Nothing in it knew *where* the ball was, so the
+            // paw shook through the whole approach and happened to be wherever
+            // it was at the moment of contact — which is precisely why the dog
+            // read as fumbling it. The kitten at the far end never had this
+            // problem, because its pounce is one clean hump phase-locked to the
+            // ball's arrival, and a single gesture aimed at the right instant is
+            // all "catching it" has ever been.
+            //
+            // So: the same idea, with the accent a strike wants. The ball
+            // reaches this end at t = 0.25, and `snap` puts the peak there —
+            // 0.23 of the loop to swing up into it, and a longer 0.37 to ride
+            // back down, so the paw drives and then follows through instead of
+            // snapping back like a mousetrap.
+            val swat = snap((t - 0.02f) / 0.60f, 0.38f)
+            // Gnawing in bouts. A dog does not chew a bone at one unwavering
+            // 4 Hz from the moment you open the app: it works at it, pauses
+            // with its jaw resting on the thing, and starts again. Each bite
+            // closes fast and releases slowly, so the rhythm has a downbeat.
+            val chewBout = beat(41, 6.2f, 3.1f, 0.8f) * (1f - toy)
+            val gnaw = if (chewBout > 0f) {
+                val u = ck * 3.4f
+                snap(u - floor(u), 0.3f) * hump(chewBout) * 3.4f
+            } else 0f
             castShadow(c, x + 4f, g + 3f, 106f, 40)
 
             // tap → head snaps up, paws paddle, tail goes wild, a few body bounces.
             val dp = reactP(2)
-            val dHead = ramp(dp / 0.20f) * (1f - ramp((dp - 0.76f) / 0.20f))
+            val dHead = ramp(dp / 0.14f) * (1f - ramp((dp - 0.72f) / 0.24f))   // up fast, down slow
             val dBounce = if (dp in 0.25f..0.90f)
-                abs(sin(((dp - 0.25f) / 0.65f) * PI * 3f).toFloat()) else 0f
+                hangs(abs(sin(((dp - 0.25f) / 0.65f) * PI * 3f).toFloat()), 0.5f) else 0f
             val dAct = (dHead + dBounce).coerceAtMost(1f)
-            val by = sin(tau).toFloat() * 1.5f - toy * abs(sin(t * 8.0 * PI).toFloat()) * 3f -
-                dBounce * 5f
+            // The body used to carry a second flutter of its own here — a 4Hz
+            // jitter, again gated only on the ball being near — which had the
+            // dog vibrating while it flailed. It leans up into the swat instead:
+            // one movement, the whole animal behind it.
+            val by = (breath(ck) - 0.5f) * 3f - swat * 2.4f - dBounce * 5f
+            val hby = (breath(ck - 0.15f) - 0.5f) * 3f                 // the head arrives late
             c.save()
 
-            val wag = sin(t * 9.0 * PI + dAct * reactSecs() * 44f).toFloat()
-            c.save(); c.rotate(wag * (12f + toy * 14f + dAct * 24f), x + 40f, g - 12f)
+            // Wag in bursts under a wandering phase — see the sitting dog on the
+            // welcome screen for why this isn't a plain sine. A lying dog's tail
+            // is mostly still and then suddenly isn't, which is exactly what the
+            // envelope's long trips to zero buy.
+            val zeal = ramp(drift(ck * 0.39f + 5.3f) * 1.2f + 0.58f)
+            val wagPh = ck * 4.1f + 1.6f * drift(ck * 0.47f)
+            val th = wagPh * twoPi
+            val wag = hangs(sin(th + 0.5f * sin(th)), 0.4f) * (0.14f + 0.86f * zeal)
+            c.save(); c.rotate(
+                wag * (10f + 10f * zeal + toy * 14f + dAct * 24f) +
+                    dAct * sin(reactSecs() * 44f).toFloat() * 7f,
+                x + 40f, g - 12f
+            )
             val lyingTail = Path().apply {
                 moveTo(x + 36f, g - 8f)
                 cubicTo(x + 58f, g - 10f, x + 64f, g - 30f, x + 52f, g - 42f)
@@ -6076,12 +6593,17 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
             capsule(c, x + 24f, g - 4f, 30f, 12f, biscuitLo, edge)
             capsule(c, x + 12f, g - 3f, 14f, 9f, cream, edge)
 
-            // inner front paw planted; the outer one lifts to swat the ball / paddle
+            // Inner front paw planted; the outer one swings up to meet the ball.
+            // The ball sits at x = 206 with a radius of 9 when it arrives, and
+            // the paw's travel is set so the top of it lands on the underside of
+            // the ball at the peak of the swat rather than somewhere near it —
+            // contact you can actually see, which is the other half of why this
+            // used to look like a miss.
             capsule(c, x - 16f, g - 3f, 24f, 10f, cream, edge)
             val paddle = dHead * abs(sin(reactSecs() * 27f).toFloat())
-            val batX = x - 30f - toy * 5f
-            val batY = g - 3f - toy * 6f - bat * 12f - paddle * 9f
-            if (toy > 0.02f || dHead > 0.05f)
+            val batX = x - 30f - swat * 4f
+            val batY = g - 3f - swat * 9f - paddle * 9f
+            if (swat > 0.02f || dHead > 0.05f)
                 taper(c, x - 6f, g - 6f, batX + 4f, batY, 4.5f, biscuit, edge)
             capsule(c, batX, batY, 22f, 10f, cream, edge)
             c.drawLine(x - 38f, g - 3f, x - 38f, g - 7f, hair)
@@ -6089,24 +6611,52 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
 
             bone(c, x - 27f, g + 1f, 7.5f)
 
-            val hx = x - 18f; val hy = g - 30f + by + gnaw - toy * 4f - dHead * 9f
-            val sway = sin(tau + 0.5).toFloat() * 3f
+            // An occasional head cock, and a lift-and-settle when nothing at all
+            // has happened — the punctuation that stops the idle repeating.
+            val cock = (snap(beat(43, 10.4f, 2.0f, 0.55f), 0.16f) -
+                snap(beat(42, 8.9f, 2.0f, 0.55f), 0.16f)) * 9f
+            val perk = snap(beat(44, 13f, 1.8f, 0.5f), 0.18f) * 4f
+            val hx = x - 18f
+            val hy = g - 30f + hby + gnaw - toy * 4f - dHead * 9f - perk
+            c.save()
+            c.rotate(cock, hx, hy + 15f)
             // Ears hang from the top corners and splay outward — drawn BEFORE the
-            // head, so only the part beside the skull shows.
-            floppyEar(c, hx - 13f, hy - 8f, 29f, 16f, 22f + sway, biscuitLo)
-            floppyEar(c, hx + 13f, hy - 8f, 29f, 16f, -22f - sway, biscuitLo)
+            // head, so only the part beside the skull shows. They read the breath
+            // from a moment ago and each flicks on its own beat, so they never
+            // travel in lockstep with the ribs or with one another.
+            val sway = (breath(ck - 0.28f) - 0.5f) * 5.2f + drift(ck * 0.58f + 1.7f) * 1.3f
+            val flickL = snap(beat(45, 5.8f, 0.45f, 0.5f), 0.14f) * 11f
+            val flickR = snap(beat(46, 7.1f, 0.45f, 0.5f), 0.14f) * 11f
+            floppyEar(c, hx - 13f, hy - 8f, 29f, 16f, 22f + sway + flickL, biscuitLo)
+            floppyEar(c, hx + 13f, hy - 8f, 29f, 16f, -22f - sway - flickR, biscuitLo)
             mass(c, hx, hy, 30f, 28f, cream)
             capsule(c, hx, hy + 6f, 16f, 13f, creamHi)
-            val bl = blink(0.1f)
-            val dogLook = -toy * 2f
-            eye(c, hx - 5.5f, hy - 2f, 3.1f, bl, dogLook)
-            eye(c, hx + 5.5f, hy - 2f, 3.1f, bl, dogLook)
+            val bl = blinkAt(4)
+            // Watching the ball wherever it is: hard left down the length of
+            // the scene while the kitten has it, swinging round to its own paws
+            // as it arrives. The stopped frame leaves it looking left at the
+            // ball on the floor, which is also the kitten's way.
+            val dogUp = 1f - contact(9)
+            val dogLook = (lerp(-1.5f, 0f, toy) - toy * 0.6f) * dogUp
+            val dogLookY = ((ballY - hy) / 70f).coerceIn(-0.5f, 1f) * 1.3f * dogUp
+            eye(c, hx - 5.5f, hy - 2f, 3.1f, bl, dogLook, dogLookY)
+            eye(c, hx + 5.5f, hy - 2f, 3.1f, bl, dogLook, dogLookY)
             capsule(c, hx + dogLook, hy + 3f, 5.5f, 4.5f, ink)
             c.drawCircle(hx + dogLook - 1.5f, hy + 1.7f, 1f, creamHi)
             c.drawArc(RectF(hx - 5f, hy + 5f, hx, hy + 11f), 20f, 130f, false, hair)
             c.drawArc(RectF(hx, hy + 5f, hx + 5f, hy + 11f), 30f, 130f, false, hair)
-            val loll = 3f + 1.6f * (0.5f + 0.5f * sin(t * 7.0 * PI).toFloat()) + toy * 2f + dAct * 4f
-            c.drawRoundRect(hx - 2.2f, hy + 7f, hx + 2.2f, hy + 7f + loll, 2.2f, 2.2f, tongue)
+            // Panting in bouts rather than permanently — and the ball coming
+            // within reach, or a tap, brings the tongue straight out. See the
+            // welcome-screen dog: a tongue that never rests is the giveaway.
+            val pant = maxOf(
+                maxOf(snap(beat(49, 7.5f, 3.0f, 0.8f), 0.10f),
+                    snap(beat(50, 11.5f, 2.4f, 0.5f), 0.10f)),
+                maxOf(toy, dAct)
+            )
+            val loll = (pant * (3.4f + 1.3f * sin(ck * 13f)) + dAct * 3f).coerceAtLeast(0f)
+            if (loll > 0.5f)
+                c.drawRoundRect(hx - 2.2f, hy + 7f, hx + 2.2f, hy + 7f + loll, 2.2f, 2.2f, tongue)
+            c.restore()
             c.restore()
         }
 
@@ -6129,7 +6679,10 @@ private class PlayfulSceneView(ctx: Context) : CritterScene(ctx) {
             val bx = ballX
             val by = ballY
             val lift01 = (ballLift / 40f).coerceIn(0f, 1f)
-            val sqY = 0.74f + 0.26f * lift01
+            // The squash is an impact reading — flattest at the moment it meets
+            // the floor. A ball that is simply sitting there has not just landed
+            // on anything, so it keeps its own shape.
+            val sqY = if (still) 1f else 0.74f + 0.26f * lift01
             val sqX = 2f - sqY
             castShadow(c, bx, g + 3f, 22f * (0.55f + 0.45f * (1f - lift01)), (42 * (1f - 0.7f * lift01)).toInt())
             c.save()
@@ -6203,7 +6756,7 @@ private class PawTrailView(ctx: Context) : View(ctx) {
     private val baseAlpha = if (onDark) 88 else 96
 
     private val reduceMotion: Boolean
-        get() = try {
+        get() = stillModeOn(context) || try {
             Settings.Global.getFloat(
                 context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f
             ) == 0f
@@ -6554,8 +7107,14 @@ private class CritterSilhouetteView(ctx: Context, private val kind: String) : Cr
         mass(c, hx, hy, 41f, 36f, dove)
         capsule(c, hx, hy + 8.5f, 19f, 13.5f, creamHi)        // muzzle
         val bl = blink()
-        eye(c, hx - 8f, hy - 1.5f, 4.3f, bl)
-        eye(c, hx + 8f, hy - 1.5f, 4.3f, bl)
+        // These two sit in the corner of a card with a paragraph of text beside
+        // them, so they look *at the card* — inward and slightly down, toward
+        // the words — rather than out past the reader's shoulder. The cat's
+        // card has its text to the left.
+        val gx = gazeX(5, -1f) * 2.1f
+        val gy = gazeY(5, 0.25f) * 1.5f
+        eye(c, hx - 8f, hy - 1.5f, 4.3f, bl, gx, gy)
+        eye(c, hx + 8f, hy - 1.5f, 4.3f, bl, gx, gy)
         c.drawPath(Path().apply {
             moveTo(hx, hy + 10.6f); lineTo(hx - 3.1f, hy + 7.2f); lineTo(hx + 3.1f, hy + 7.2f); close()
         }, berry)
@@ -6571,33 +7130,53 @@ private class CritterSilhouetteView(ctx: Context, private val kind: String) : Cr
     }
 
     private fun dog(c: Canvas) {
-        val tau = t * 2.0 * PI
-        val sway = sin(tau).toFloat()
+        val ck = clock
         val hx = 32f; val hy = 35f
 
+        // Same argument as the two big scenes, at a quieter volume: the sway
+        // wanders instead of ticking, and the head cocks over now and then.
+        // At 60dp behind a card's title nobody will read the detail — but they
+        // will notice a head that pivots on a perfect metronome, because that
+        // is the one thing peripheral vision is actually good at.
+        val sway = drift(ck * 0.72f) * 2.6f +
+            (snap(beat(63, 9.1f, 1.9f, 0.55f), 0.16f) - snap(beat(62, 7.8f, 1.9f, 0.55f), 0.16f)) * 7f
         c.save()
-        c.rotate(sway * 3.4f, hx, 62f)
-        c.scale(1f, 1f + 0.024f * sin(tau * 2.0).toFloat(), hx, 54f)
+        c.rotate(sway, hx, 62f)
+        c.scale(1f, 1f + 0.024f * (breath(ck) - 0.5f) * 2f, hx, 54f)
 
         // Ears before the head, so only the part outside the skull shows —
         // and they lag the head's sway, which is what sells the weight. Kept
         // deliberately narrower than the first cut: splayed any wider the dog
         // out-massed the cat on the card above and the pair stopped matching.
-        val lag = sin(tau - 0.7).toFloat() * 5f
-        floppyEar(c, hx - 14f, hy - 9f, 29f, 16.5f, 19f + lag, biscuitLo)
-        floppyEar(c, hx + 14f, hy - 9f, 29f, 16.5f, -19f + lag, biscuitLo)
+        // The lag is now a real delay on the same wander rather than a fixed
+        // phase offset, and one ear can flick without the other.
+        val lag = drift(ck * 0.72f - 0.5f) * 4.4f
+        val flickL = snap(beat(64, 5.5f, 0.45f, 0.5f), 0.14f) * 10f
+        val flickR = snap(beat(65, 6.9f, 0.45f, 0.5f), 0.14f) * 10f
+        floppyEar(c, hx - 14f, hy - 9f, 29f, 16.5f, 19f + lag + flickL, biscuitLo)
+        floppyEar(c, hx + 14f, hy - 9f, 29f, 16.5f, -19f + lag - flickR, biscuitLo)
 
         mass(c, hx, hy, 36f, 32f, biscuit)
         capsule(c, hx, hy + 8.5f, 20f, 14f, cream)            // muzzle
-        val bl = blink(0.12f)
-        eye(c, hx - 7.4f, hy - 2.5f, 3.9f, bl)
-        eye(c, hx + 7.4f, hy - 2.5f, 3.9f, bl)
+        val bl = blinkAt(6)
+        // Same as the cat's card, and the same direction: both icons sit top-
+        // right of their card with the words to their left.
+        val gx = gazeX(7, -1f) * 2f
+        val gy = gazeY(7, 0.25f) * 1.4f
+        eye(c, hx - 7.4f, hy - 2.5f, 3.9f, bl, gx, gy)
+        eye(c, hx + 7.4f, hy - 2.5f, 3.9f, bl, gx, gy)
         capsule(c, hx, hy + 4.5f, 7.4f, 5.8f, ink)            // nose
         c.drawCircle(hx - 1.9f, hy + 3f, 1.2f, creamHi)
         c.drawArc(RectF(hx - 6f, hy + 7.6f, hx, hy + 14.6f), 20f, 130f, false, nib)
         c.drawArc(RectF(hx, hy + 7.6f, hx + 6f, hy + 14.6f), 30f, 130f, false, nib)
-        val loll = 4.2f + 1.5f * (0.5f + 0.5f * sin(t * 6.0 * PI).toFloat())
-        c.drawRoundRect(hx - 2.4f, hy + 10.4f, hx + 2.4f, hy + 10.4f + loll, 2.4f, 2.4f, tongue)
+        // Panting in bouts, as on the big scenes — the tongue is in more often
+        // than it is out, and it arrives quickly rather than easing out on a
+        // cycle you can set your watch by.
+        val pant = maxOf(snap(beat(66, 7f, 3.0f, 0.85f), 0.10f),
+            snap(beat(67, 11f, 2.4f, 0.55f), 0.10f))
+        val loll = (pant * (4.2f + 1.2f * sin(ck * 12f))).coerceAtLeast(0f)
+        if (loll > 0.5f)
+            c.drawRoundRect(hx - 2.4f, hy + 10.4f, hx + 2.4f, hy + 10.4f + loll, 2.4f, 2.4f, tongue)
         c.restore()
     }
 }
