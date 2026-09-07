@@ -28,7 +28,7 @@
     <string name="pet_monitor">Pet Monitor</string>
 
     <!-- ================================ welcome ============================ -->
-    <string name="welcome_blurb">Keep an eye on your pet from the next room or across town. You need two phones: one stays with your pet, one comes with you. No accounts, nothing to set up.</string>
+    <string name="welcome_blurb">Keep an eye on your pet from the next room or across town. You need two phones: one stays with your pet, one comes with you. No accounts, ever.</string>
     <string name="welcome_get_started">Get started</string>
     <string name="welcome_have_code">I already have a code to scan</string>
 
