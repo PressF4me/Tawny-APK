@@ -231,7 +231,7 @@ function status(text, kind) {
   el.dot.className = 'dot' + (kind ? ' ' + kind : '');
   // A nominal state (live, or a connection still coming up) collapses to just
   // the dot on a portrait phone; a state the user might act on keeps its word.
-  const nominal = kind === 'live' || kind === 'on' || /^waiting$/i.test(text);
+  const nominal = kind === 'live' || kind === 'on' || kind === 'wait' || /^waiting$/i.test(text);
   el.rail?.classList.toggle('rail-ok', nominal);
   bumpRail();
 }
@@ -743,7 +743,7 @@ $('#pair-close').addEventListener('click', closePair);
 $('#pair-copy').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(pairLink());
-    toast('Link copied');
+    toast(TawnyT.t('w_toast_link_copied'));
   } catch {
     toast('Copy failed — select the link text instead.');
   }
@@ -1161,7 +1161,7 @@ function fallBackToDefault(entry, why) {
   const fb = fallbackBase();
   if (!fb || entry.usingFallback || entry.base === fb) return false;
   diag(`custom relay unusable (${why}) — falling back to the built-in tunnel`);
-  toast('Your own server did not answer. Using Tawny’s relay instead.');
+  toast(TawnyT.t('w_toast_own_server_failed'));
   entry.usingFallback = true;
   entry.base = fb;
   entry.retry = 0;
@@ -1340,13 +1340,12 @@ function syncStationSas() {
 
   if (ask.sasFailed) {
     const behind = failed.length - 1;
-    el.sascode.textContent = 'unavailable — connection may be tampered with';
+    el.sascode.textContent = TawnyT.t('w_sas_code_unavailable');
     el.sasnote.textContent =
-      'The safety code for a phone connecting from outside your Wi-Fi could not '
-      + 'be worked out. If you did not expect that, disconnect it'
-      + (behind > 0 ? ` (${behind} more phone${behind > 1 ? 's' : ''} after it).` : '.');
-    if (el.sasok) el.sasok.textContent = 'Keep it connected';
-    if (el.sasno) el.sasno.textContent = 'Disconnect it';
+      TawnyT.t('w_sas_monitor_fail')
+      + (behind > 0 ? TawnyT.t('w_sas_more', behind) + '.' : '.');
+    if (el.sasok) el.sasok.textContent = TawnyT.t('w_sas_keep_connected');
+    if (el.sasno) el.sasno.textContent = TawnyT.t('w_sas_disconnect_it');
     el.sas.classList.add('sas--warn');
     el.sas.hidden = false;
     return;
@@ -1355,10 +1354,10 @@ function syncStationSas() {
   const behind = pending.length - 1;
   el.sascode.textContent = ask.sas;
   el.sasnote.textContent =
-    'A phone is connecting from outside your Wi-Fi. It should be showing this code'
-    + (behind > 0 ? ` (${behind} more phone${behind > 1 ? 's' : ''} after it):` : ':');
-  if (el.sasok) el.sasok.textContent = 'Looks right';
-  if (el.sasno) el.sasno.textContent = 'Disconnect it';
+    TawnyT.t('w_sas_monitor_note')
+    + (behind > 0 ? TawnyT.t('w_sas_more', behind) + ':' : ':');
+  if (el.sasok) el.sasok.textContent = TawnyT.t('w_sas_looks_right');
+  if (el.sasno) el.sasno.textContent = TawnyT.t('w_sas_disconnect_it');
   el.sas.classList.remove('sas--warn');
   el.sas.hidden = false;
 }
@@ -1397,17 +1396,15 @@ function showViewerSas(code) {
 
   el.saschip.hidden = true;      // the code lives on the card, never in the rail
 
-  el.sascode.textContent = code || 'unavailable — connection may be tampered with';
+  el.sascode.textContent = code || TawnyT.t('w_sas_code_unavailable');
   el.sas.classList.toggle('sas--warn', !code);
   if (el.sasnote) {
     el.sasnote.textContent = code
-      ? 'Check the Monitor is showing this same code. You are only asked this '
-        + 'once for this monitor.'
-      : 'The safety code for this connection could not be worked out. If you did '
-        + 'not expect that, disconnect.';
+      ? TawnyT.t('w_sas_viewer_note')
+      : TawnyT.t('w_sas_viewer_fail');
   }
-  if (el.sasok) el.sasok.textContent = 'Looks right';
-  if (el.sasno) el.sasno.textContent = 'Disconnect';
+  if (el.sasok) el.sasok.textContent = TawnyT.t('w_sas_looks_right');
+  if (el.sasno) el.sasno.textContent = TawnyT.t('w_sas_disconnect');
   el.sas.hidden = false;
 }
 
@@ -1512,7 +1509,7 @@ function openSignal(base, tag) {
       if (ev.code === 4005) {
         diag(`${tag} replaced by another monitor on this channel`);
         closeSignal(entry);
-        if (S.role === 'station') toast('This monitor was taken over by another device.');
+        if (S.role === 'station') toast(TawnyT.t('w_toast_taken_over'));
         return;
       }
 
@@ -1530,7 +1527,7 @@ function openSignal(base, tag) {
           const retryable = tag === 'cloud' && ev.code !== 4003 &&
             entry.refused < STATION_CLOUD_RETRIES;
           if (retryable) {
-            if (entry.refused === 0) toast('Reconnecting…');
+            if (entry.refused === 0) toast(TawnyT.t('w_toast_reconnecting'));
             const wait = Math.min(1000 * 2 ** entry.refused++, 15000);
             diag(`${tag} refused ${ev.code} — retry ${entry.refused}/${STATION_CLOUD_RETRIES} in ${wait}ms`);
             updateStatus();
@@ -1542,15 +1539,15 @@ function openSignal(base, tag) {
           // off the Wi-Fi was being turned away at the relay.
           diag(`${tag} FATAL ${ev.code} — monitor is NOT reachable over the internet`);
           closeSignal(entry);
-          if (ev.code === 4004) toast('Another phone is now using this monitor.');
+          if (ev.code === 4004) toast(TawnyT.t('w_toast_another_phone'));
           if (ev.code === 4008 && tag === 'cloud') {
-            toast('This monitor can only be watched from your Wi-Fi right now. Phones somewhere else will not be able to connect.');
+            toast(TawnyT.t('w_toast_wifi_only'));
           }
           return;
         }
         return bail(
           ev.code === 4003 ? FULL_MESSAGE
-          : ev.code === 4004 ? 'This monitor is already running on another phone.'
+          : ev.code === 4004 ? TawnyT.t('w_bail_already_running')
           // 4008 is the relay's own refusal — a ticket that no longer matches
           // the room. Different cause from the Monitor's pairing gate, same
           // thing to do about it, so it gets the same sentence and the same
@@ -1629,8 +1626,8 @@ function connectAll() {
   if (S.role === 'station') {
     if (S.signalUrl) openSignal(S.signalUrl, 'lan');
     if (rv) openSignal(rv, 'cloud');
-    if (!S.signals.length) return bail('This phone is not on Wi-Fi yet. Connect it to Wi-Fi and try again.');
-    status('Waiting', null);
+    if (!S.signals.length) return bail(TawnyT.t('w_bail_not_on_wifi'));
+    status(TawnyT.t('w_status_waiting'), 'wait');
     return;
   }
   raceTransports();
@@ -1657,7 +1654,7 @@ function raceTransports() {
     S.committedTag = 'cloud';
     openSignal(rv, 'cloud');
   } else {
-    bail('This code only works on the same Wi-Fi as the other phone. Put both phones on the same Wi-Fi and try again.');
+    bail(TawnyT.t('w_bail_wifi_only_code'));
   }
 }
 
@@ -1860,19 +1857,19 @@ function updateStatus() {
     const st = sp?.pc?.connectionState;
     // A paused Monitor is still "connected" — the picture just stopped. Saying
     // "Live" over a frozen frame is the lie this whole path exists to stop.
-    if (S.remotePaused && st === 'connected') return status('Monitor paused', 'warn');
-    if (st === 'connected') status('Live', 'live');
-    else if (st === 'connecting' || st === 'new') status('Connecting', 'on');
-    else if (!sp) status('Monitor offline', null);
-    else status('Reconnecting', null);
+    if (S.remotePaused && st === 'connected') return status(TawnyT.t('w_status_monitor_paused'), 'warn');
+    if (st === 'connected') status(TawnyT.t('w_status_live'), 'live');
+    else if (st === 'connecting' || st === 'new') status(TawnyT.t('w_status_connecting'), 'on');
+    else if (!sp) status(TawnyT.t('w_status_monitor_offline'), null);
+    else status(TawnyT.t('w_status_reconnecting'), null);
     return;
   }
-  if (S.captureLost) return status('Paused — screen off', 'warn');
+  if (S.captureLost) return status(TawnyT.t('w_status_paused_screen_off'), 'warn');
   const vs = viewerPeers();
-  if (!vs.length) { status('Waiting', null); return; }
+  if (!vs.length) { status(TawnyT.t('w_status_waiting'), 'wait'); return; }
   const live = vs.filter((p) => p.pc?.connectionState === 'connected').length;
   // The count lives in the rail's phone glyph now, not in words here.
-  status(live ? 'On air' : 'Connecting', live ? 'live' : 'on');
+  status(live ? TawnyT.t('w_status_on_air') : TawnyT.t('w_status_connecting'), live ? 'live' : 'on');
 }
 
 function updatePeerChip() {
@@ -2066,10 +2063,9 @@ async function handle(m, entry) {
       // backgrounded). Say so, instead of leaving a frozen frame up.
       if (typeof m.paused === 'boolean') {
         S.remotePaused = m.paused;
-        stageNote(m.paused ? 'The monitor is paused' : null,
-          'Its screen turned off or the app moved to the background. The picture '
-          + 'comes back on its own when the monitor phone is woken.');
-        status(m.paused ? 'Monitor paused' : 'On air', m.paused ? 'warn' : 'live');
+        stageNote(m.paused ? TawnyT.t('w_note_monitor_paused_title') : null,
+          TawnyT.t('w_note_monitor_paused_body'));
+        status(m.paused ? TawnyT.t('w_status_monitor_paused') : TawnyT.t('w_status_on_air'), m.paused ? 'warn' : 'live');
         if (!m.petName) break;
       }
       if (typeof m.petName !== 'string') break;
@@ -2153,7 +2149,7 @@ async function handle(m, entry) {
       // longer the one the Monitor is showing. Say that, not "call ended".
       if (m.reason === 'expired' && S.role === 'viewer') return bail(EXPIRED_MESSAGE, 'expired');
       removePeer(m.from);
-      if (!S.peers.size) status(S.role === 'viewer' ? 'Call ended' : 'Waiting', null);
+      if (!S.peers.size) status(S.role === 'viewer' ? TawnyT.t('w_status_call_ended') : TawnyT.t('w_status_waiting'), 'wait');
       break;
   }
 }
@@ -2267,11 +2263,10 @@ function newPC(peer) {
         diag(`connect timeout (ice=${peer.pc.iceConnectionState})`);
         const relayed = (S.ice || []).some((e) => /^turns?:/i.test(
           Array.isArray(e.urls) ? e.urls[0] || '' : e.urls || ''));
-        stageNote('Still trying to connect', relayed
-          ? 'Check the monitor phone is awake with Tawny open.'
-          : 'A direct connection could not be made from this network. If both '
-            + 'phones are on mobile data, try putting this one on Wi-Fi.');
-        status('Still trying', 'warn');
+        stageNote(TawnyT.t('w_note_still_trying_title'), relayed
+          ? TawnyT.t('w_note_still_trying_body_relayed')
+          : TawnyT.t('w_note_still_trying_body_direct'));
+        status(TawnyT.t('w_status_still_trying'), 'warn');
       }
     }, CONNECT_TIMEOUT_MS);
   }
@@ -2703,7 +2698,7 @@ async function setTorch(on, why) {
   if (S.torchOn) {
     S.torchTimer = setTimeout(() => {
       setTorch(false, 'auto-off');
-      toast('Light turned off to save the battery.');
+      toast(TawnyT.t('w_toast_light_off_battery'));
     }, TORCH_MAX_MS);
   }
   diag(`torch ${S.torchOn ? 'on' : 'off'}${why ? ` (${why})` : ''}`);
@@ -2832,7 +2827,7 @@ async function switchLens(index) {
     S.zoomLevel = 1.0;
     updateLensUI();
     await refreshTorchSupport();
-  } catch { toast('Could not switch lens.'); }
+  } catch { toast(TawnyT.t('w_toast_could_not_switch_lens')); }
 }
 
 function updateLensUI() {
@@ -3125,8 +3120,7 @@ async function start(role) {
   fetchIce();   // non-blocking; new PCs pick up S.ice when it lands
 
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-    return bail('Tawny could not get to the camera and microphone on this phone. ' +
-      'Close Tawny and open it again.');
+    return bail(TawnyT.t('w_bail_cam_mic_generic'));
   }
 
   // A new session may be a different camera on a differently-held phone, so it
@@ -3142,7 +3136,7 @@ async function start(role) {
       : await navigator.mediaDevices.getUserMedia({ audio });
   } catch (err) {
     return bail(err.name === 'NotAllowedError'
-      ? 'Camera and microphone access was blocked. Allow it for this site, then try again.'
+      ? TawnyT.t('w_bail_cam_mic_blocked')
       : `Could not open the camera or microphone (${err.name}).`);
   }
   // Attach the preview now, so frames start flowing at once — the shaping
@@ -3220,7 +3214,7 @@ async function start(role) {
   el.channel.textContent = room || 'Pet camera';
 
   show(el.live);
-  status('Connecting', null);
+  status(TawnyT.t('w_status_connecting'), null);
   tellNative('live', { role });
   connectAll();
 
@@ -3243,7 +3237,7 @@ function onCaptureLost(why) {
   if (S.role !== 'station' || S.captureLost) return;
   S.captureLost = true;
   diag(`capture lost (${why})`);
-  status('Paused — screen off', 'warn');
+  status(TawnyT.t('w_status_paused_screen_off'), 'warn');
   // The camera has been taken back, so the light went with it. Say so, or every
   // Viewer keeps a lit key over a room that is now dark.
   clearTimeout(S.torchTimer);
@@ -3318,7 +3312,7 @@ async function reacquireLocal() {
     updateStatus();
   } catch (e) {
     diag(`capture recovery failed: ${e && e.name}`);
-    status('Paused — tap to resume', 'warn');
+    status(TawnyT.t('w_status_paused_tap_resume'), 'warn');
   } finally {
     S.reacquiring = false;
   }
@@ -3394,7 +3388,7 @@ el.chimes.addEventListener('click', (e) => {
   const sound = e.target.dataset.sound;
   if (!sound) return;
   const sp = stationPeer();
-  if (!sp) return toast('No monitor connected yet.');
+  if (!sp) return toast(TawnyT.t('w_toast_no_monitor_connected'));
   sig({ type: 'chime', to: sp.id, sound }, sp);
   el.chimes.hidden = true;
   press($('#btn-chime'), false);
@@ -3403,7 +3397,7 @@ el.chimes.addEventListener('click', (e) => {
 $('#btn-torch')?.addEventListener('click', () => {
   if (S.role !== 'viewer') return;
   const sp = stationPeer();
-  if (!sp) return toast('No monitor connected yet.');
+  if (!sp) return toast(TawnyT.t('w_toast_no_monitor_connected'));
   // Note what is NOT here: a refusal of our own. The Monitor is the only end
   // that knows, and the only end holding the camera — so even a key we have
   // drawn as unavailable still asks, and the Monitor either lights up or says
@@ -3424,7 +3418,7 @@ $('#btn-cam').addEventListener('click', async () => {
   const tr = sp?.pc?.getTransceivers().find(
     (t) => t.receiver.track?.kind === 'video' || t.sender.track?.kind === 'video'
   );
-  if (!tr) return toast('Start a call first.');
+  if (!tr) return toast(TawnyT.t('w_toast_start_call_first'));
 
   if (S.camSending) {
     const old = tr.sender.track;
@@ -3447,7 +3441,7 @@ $('#btn-cam').addEventListener('click', async () => {
       el.local.srcObject = new MediaStream([track]);
       el.local.hidden = false;
       S.camSending = true;
-    } catch { return toast('Could not open your camera.'); }
+    } catch { return toast(TawnyT.t('w_toast_could_not_open_camera')); }
   }
   // Changing the transceiver direction needs a fresh offer.
   if (sp) await makeOffer(sp);
@@ -3456,7 +3450,7 @@ $('#btn-cam').addEventListener('click', async () => {
 
 $('#btn-snap').addEventListener('click', () => {
   const v = el.remote;
-  if (!v.videoWidth) return toast('Nothing to capture yet.');
+  if (!v.videoWidth) return toast(TawnyT.t('w_toast_nothing_to_capture'));
   // A snapshot must come out the way the picture looked on screen. The frame
   // itself is turned to the Monitor's *window*, so a Monitor whose window is
   // pinned while the phone lies on its side sends a sideways frame that the
@@ -3484,7 +3478,7 @@ $('#btn-snap').addEventListener('click', () => {
     a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    toast('Snapshot saved');
+    toast(TawnyT.t('w_toast_snapshot_saved'));
   }, 'image/png');
 });
 
@@ -3527,10 +3521,10 @@ $('#btn-video').addEventListener('click', () => {
   if (videoRec) { stopVideoCapture(); return; }
 
   const v = el.remote;
-  if (!v.videoWidth) return toast('Nothing to capture yet.');
+  if (!v.videoWidth) return toast(TawnyT.t('w_toast_nothing_to_capture'));
   const mime = pickVideoMime();
   if (!window.MediaRecorder || !mime) {
-    return toast('Video recording is not supported here.');
+    return toast(TawnyT.t('w_toast_video_not_supported'));
   }
 
   const rot = S.role === 'viewer' ? quarter(S.remoteRot) : 0;
@@ -3587,7 +3581,7 @@ $('#btn-video').addEventListener('click', () => {
     a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    toast('Video saved');
+    toast(TawnyT.t('w_toast_video_saved'));
   };
 
   recorder.start();
@@ -3638,7 +3632,7 @@ $('#btn-flip').addEventListener('click', async () => {
   } catch {
     try { stream = await grab(S.facing); }          // roll back to what we had
     catch {
-      toast('Could not switch camera.');
+      toast(TawnyT.t('w_toast_could_not_switch_camera'));
       btn.disabled = false;
       return;
     }
@@ -3829,6 +3823,7 @@ window.tawnyStart = function (role, key, name, signalUrl, rendezvousUrl, token, 
   // app-level setting deliberately kept separate from the system one — the
   // shell passes it in and the stylesheet keys off the attribute.
   if (opts && opts.motion) applyMotion(opts.motion === 'off');
+  if (opts && opts.lang && window.TawnyT) window.TawnyT.set(opts.lang);
   S.signalUrl = signalUrl || null;              // may be null on a cloud-only pairing
   if (rendezvousUrl) S.cfg.rendezvous = rendezvousUrl;
   // The Servers screen (behind the diagnostics hatch). `fallback` is the
@@ -3945,7 +3940,7 @@ window.tawnyPairCode = function (code, expMs) {
 window.addEventListener('tawny:background', () => {
   // "Backgrounded" was a developer word rendered straight into the live rail.
   // Say what it means for the person watching.
-  if (S.role === 'station') status('Paused — screen off', 'warn');
+  if (S.role === 'station') status(TawnyT.t('w_status_paused_screen_off'), 'warn');
 });
 
 window.addEventListener('tawny:foreground', () => {

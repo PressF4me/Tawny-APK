@@ -442,24 +442,22 @@ class MainActivity : AppCompatActivity() {
             android.Manifest.permission.RECORD_AUDIO
         ) && !shouldShowRequestPermissionRationale(android.Manifest.permission.CAMERA)
         if (!permanent) {
-            toast("Tawny needs the camera and microphone for this.")
+            toast(getString(R.string.perm_needs_toast))
             return
         }
         themedDialog(
-            title = "Permission needed",
-            body = "Tawny can't stream without the camera and microphone, and " +
-                "Android won't ask again from here. You can switch them on in " +
-                "this app's system settings.",
-            primaryLabel = "Open settings",
+            title = getString(R.string.perm_needed_title),
+            body = getString(R.string.perm_needed_body),
+            primaryLabel = getString(R.string.perm_open_settings),
             onPrimary = {
                 try {
                     startActivity(
                         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                             .setData(Uri.fromParts("package", packageName, null))
                     )
-                } catch (e: Exception) { toast("Could not open settings.") }
+                } catch (e: Exception) { toast(getString(R.string.perm_open_settings_failed)) }
             },
-            secondaryLabel = "Not now"
+            secondaryLabel = getString(R.string.common_not_now)
         )
     }
 
@@ -572,19 +570,19 @@ class MainActivity : AppCompatActivity() {
     private fun confirmEndCall() {
         val watching = prefs.getString("role", null) == "station"
         themedDialog(
-            title = if (watching) "Stop watching?" else "End the call?",
+            title = if (watching) getString(R.string.endcall_stop_title) else getString(R.string.endcall_end_title),
             body = if (watching)
-                "Viewers won't be able to check in until you start monitoring again."
+                getString(R.string.endcall_stop_body)
             else
-                "You can watch again from the home screen.",
-            primaryLabel = if (watching) "Stop" else "End call",
+                getString(R.string.endcall_end_body),
+            primaryLabel = if (watching) getString(R.string.endcall_stop) else getString(R.string.endcall_end),
             onPrimary = {
                 saveRecentSession()
                 endLive()
                 if (watching) stopServers()
                 afterSession()
             },
-            secondaryLabel = "Keep going"
+            secondaryLabel = getString(R.string.endcall_keep_going)
         )
     }
 
@@ -652,10 +650,9 @@ class MainActivity : AppCompatActivity() {
         val data = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data ?: return false
         val p = parsePairing(data.toString()) ?: run {
             themedDialog(
-                title = "That link didn\u2019t work",
-                body = "It looks like a Tawny link but Tawny can\u2019t read it. Ask for a " +
-                    "fresh code from the monitor phone.",
-                primaryLabel = "OK",
+                title = getString(R.string.pair_link_bad_title),
+                body = getString(R.string.pair_link_bad_body),
+                primaryLabel = getString(R.string.common_ok),
                 onPrimary = {}
             )
             return false
@@ -674,19 +671,19 @@ class MainActivity : AppCompatActivity() {
         // Deliberately not the host:port. The address is meaningless to the
         // person holding the phone and reads like an error code; what they can
         // actually act on is which network the connection goes over.
-        val where = if (p.signal != null) "a monitor on your Wi-Fi"
-            else "your monitor over the internet"
+        val where = if (p.signal != null) getString(R.string.pair_where_lan)
+            else getString(R.string.pair_where_internet)
         themedDialog(
-            title = "Connect to “${p.name}”?",
-            body = "This code connects to $where.\n\n" + (
+            title = getString(R.string.pair_confirm_title, p.name),
+            body = getString(R.string.pair_confirm_body, where,
                 if (replacing)
-                    "Connecting will replace the monitor this phone is paired with now."
+                    getString(R.string.pair_confirm_replacing)
                 else
-                    "Only connect if this is your own monitor."
+                    getString(R.string.pair_confirm_own)
             ),
-            primaryLabel = "Connect",
+            primaryLabel = getString(R.string.common_connect),
             onPrimary = { joinAsHandheld(p) },
-            secondaryLabel = "Not now"
+            secondaryLabel = getString(R.string.common_not_now)
         )
     }
 
@@ -721,14 +718,11 @@ class MainActivity : AppCompatActivity() {
         Diag.log("shell", "pairing refused — code expired")
         stopScanner()
         themedDialog(
-            title = "That code has expired",
-            body = "Pairing codes stop working ten minutes after the monitor phone " +
-                "shows them, so an old photo of one cannot be used later.\n\n" +
-                "On the monitor phone, go back to its pairing screen — it shows a " +
-                "fresh code — and scan that one.",
-            primaryLabel = "Scan again",
+            title = getString(R.string.pair_expired_title),
+            body = getString(R.string.pair_expired_body),
+            primaryLabel = getString(R.string.pair_scan_again),
             onPrimary = { onHandheld() },
-            secondaryLabel = "Not now",
+            secondaryLabel = getString(R.string.common_not_now),
             onSecondary = { showRole() }
         )
     }
@@ -750,23 +744,22 @@ class MainActivity : AppCompatActivity() {
             clipboardText()?.let { if (it.startsWith("tawny://pair")) setText(it) }
         }
         themedDialog(
-            title = "Paste the pairing link",
-            body = "On the monitor phone, tap \u201cShow as link\u201d and send it to yourself.",
-            primaryLabel = "Connect",
+            title = getString(R.string.pair_paste_title),
+            body = getString(R.string.pair_paste_body),
+            primaryLabel = getString(R.string.common_connect),
             onPrimary = {
                 val p = parsePairing(input.text.toString())
                 if (p == null) {
                     themedDialog(
-                        title = "That link didn\u2019t work",
-                        body = "It doesn\u2019t look like a Tawny pairing link. Copy the whole " +
-                            "thing \u2014 it starts with tawny://pair \u2014 and try again.",
-                        primaryLabel = "Try again",
+                        title = getString(R.string.pair_link_bad_title),
+                        body = getString(R.string.pair_link_paste_bad_body),
+                        primaryLabel = getString(R.string.common_try_again),
                         onPrimary = { promptPairLink() },
-                        secondaryLabel = "Cancel"
+                        secondaryLabel = getString(R.string.common_cancel)
                     )
                 } else joinAsHandheld(p)
             },
-            secondaryLabel = "Cancel",
+            secondaryLabel = getString(R.string.common_cancel),
             content = input,
         )
     }
@@ -780,13 +773,11 @@ class MainActivity : AppCompatActivity() {
         Diag.log("shell", "scanner: camera unavailable")
         stopScanner()
         themedDialog(
-            title = "The camera is busy",
-            body = "Tawny couldn\u2019t open this phone\u2019s camera \u2014 another app may be " +
-                "using it. Close that app and try again, or paste the monitor\u2019s " +
-                "pairing link instead.",
-            primaryLabel = "Paste a link",
+            title = getString(R.string.cam_busy_title),
+            body = getString(R.string.cam_busy_body),
+            primaryLabel = getString(R.string.common_paste_a_link),
             onPrimary = { promptPairLink() },
-            secondaryLabel = "Back",
+            secondaryLabel = getString(R.string.common_back),
             onSecondary = { showRole() }
         )
     }
@@ -810,25 +801,20 @@ class MainActivity : AppCompatActivity() {
         if (needed.isEmpty()) { then(); return }
 
         val body = if (needCamera)
-            "This phone will use its camera and microphone to stream your pet to " +
-                "your other phone while Tawny is open. The video and sound are sent " +
-                "encrypted, directly between your devices, and are never recorded or " +
-                "stored anywhere."
+            getString(R.string.perm_disclose_cam_body)
         else
-            "Tawny will use this phone's microphone so you can talk back to your " +
-                "pet. Your voice is sent encrypted, directly to the monitor phone, and is " +
-                "never recorded or stored anywhere."
+            getString(R.string.perm_disclose_mic_body)
 
         themedDialog(
-            title = if (needCamera) "Camera & microphone" else "Microphone",
+            title = if (needCamera) getString(R.string.perm_disclose_cam_title) else getString(R.string.perm_disclose_mic_title),
             body = body,
-            primaryLabel = "Continue",
+            primaryLabel = getString(R.string.common_continue),
             onPrimary = {
                 pendingConsent = then
                 consentTag = tag
                 askPermissions.launch(needed.toTypedArray())
             },
-            secondaryLabel = "Not now"
+            secondaryLabel = getString(R.string.common_not_now)
         )
     }
 
@@ -1085,7 +1071,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         })
         addView(TextView(this@MainActivity).apply {
-            text = "Pet Monitor"
+            text = getString(R.string.pet_monitor)
             setTextColor(Hue.DIM)
             textSize = 15f
             letterSpacing = 0.04f
@@ -1334,7 +1320,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(13) }
             addView(TextView(this@MainActivity).apply {
-                text = "Animations"
+                text = getString(R.string.motion_title)
                 setTextColor(Hue.TEXT)
                 textSize = Type.SUB
                 typeface = uiFontSemi
@@ -1344,8 +1330,8 @@ class MainActivity : AppCompatActivity() {
             addView(TextView(this@MainActivity).apply {
                 // The state is the switch's job, so this says what the setting
                 // *does* rather than repeating "on" in a second voice.
-                text = if (stillMode()) "The pets hold still — lighter on older phones"
-                else "The pets potter about"
+                text = if (stillMode()) getString(R.string.motion_still)
+                else getString(R.string.motion_on)
                 setTextColor(Hue.DIM)
                 textSize = 12.5f
                 typeface = uiFont
@@ -1358,7 +1344,7 @@ class MainActivity : AppCompatActivity() {
         }
         addView(knob)
         isClickable = true; isFocusable = true
-        contentDescription = "Animations"
+        contentDescription = getString(R.string.a11y_animations)
         // Flip the knob under the finger, then rebuild. Without the first half
         // the switch would appear to lag a whole screen rebuild behind the tap.
         setOnClickListener {
@@ -1419,7 +1405,7 @@ class MainActivity : AppCompatActivity() {
         setTextColor(Hue.DIM)
         alpha = 0.5f
         letterSpacing = 0.06f
-        contentDescription = "App version — long-press for diagnostics"
+        contentDescription = getString(R.string.a11y_app_version)
         layoutParams = FrameLayout.LayoutParams(WC, WC).also {
             it.gravity = Gravity.START or Gravity.BOTTOM
             it.leftMargin = dp(12); it.bottomMargin = dp(8)
@@ -1446,7 +1432,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = FrameLayout.LayoutParams(MP, MP)
         }
         outer.addView(backLink { afterSession() })
-        outer.addView(heading("Diagnostics", "The last few sessions, as the app saw them."))
+        outer.addView(heading(getString(R.string.diag_title), getString(R.string.diag_subtitle)))
 
         // Vertical scroller wrapping a horizontal one: the lines are long and
         // must not wrap, so the log pans in both directions.
@@ -1474,18 +1460,17 @@ class MainActivity : AppCompatActivity() {
                 Intent.createChooser(
                     Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, "Tawny diagnostics v${BuildConfig.VERSION_NAME}")
+                        putExtra(Intent.EXTRA_SUBJECT, getString(R.string.diag_share_subject, BuildConfig.VERSION_NAME))
                         putExtra(Intent.EXTRA_TEXT, report)
                     },
-                    "Send Tawny diagnostics"
+                    getString(R.string.diag_share_chooser)
                 )
             )
         }
         if (BuildConfig.RENDEZVOUS_URL.isNotBlank()) {
-            outer.addView(primary("Send to Tawny") { sendReport(report, shareOut) })
+            outer.addView(primary(getString(R.string.diag_send_to_tawny)) { sendReport(report, shareOut) })
             outer.addView(TextView(this).apply {
-                text = "Sends the log above plus this phone's model and Android " +
-                    "version — nothing else. No account, no location."
+                text = getString(R.string.diag_send_body)
                 setTextColor(Hue.DIM)
                 textSize = 12.5f
                 typeface = uiFont
@@ -1493,21 +1478,21 @@ class MainActivity : AppCompatActivity() {
                 setLineSpacing(0f, 1.35f)
                 layoutParams = lp(topMargin = 8, centerH = true).also { it.leftMargin = dp(12); it.rightMargin = dp(12) }
             })
-            outer.addView(link("Send another way") { shareOut() })
+            outer.addView(link(getString(R.string.diag_send_another_way)) { shareOut() })
         } else {
-            outer.addView(primary("Send report") { shareOut() })
+            outer.addView(primary(getString(R.string.diag_send_report)) { shareOut() })
         }
-        outer.addView(link("Copy to clipboard") {
+        outer.addView(link(getString(R.string.diag_copy)) {
             copyToClipboard("Tawny diagnostics", report)
-            toast("Copied")
+            toast(getString(R.string.diag_copied))
         })
-        outer.addView(link("Clear log") {
+        outer.addView(link(getString(R.string.diag_clear)) {
             themedDialog(
-                title = "Clear the log?",
-                body = "The recorded history is deleted from this phone.",
-                primaryLabel = "Clear",
+                title = getString(R.string.diag_clear_title),
+                body = getString(R.string.diag_clear_body),
+                primaryLabel = getString(R.string.common_clear),
                 onPrimary = { Diag.clear(); Diag.init(applicationContext); showDiagnostics() },
-                secondaryLabel = "Keep it"
+                secondaryLabel = getString(R.string.diag_keep)
             )
         })
         // The other thing behind this hatch. Same reasoning as the hatch
@@ -1541,17 +1526,9 @@ class MainActivity : AppCompatActivity() {
         val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
         val col = column(scroll = true)
         col.addView(backLink { showDiagnostics() })
-        col.addView(heading("Servers", "For running Tawny on your own infrastructure."))
+        col.addView(heading(getString(R.string.servers_title), getString(R.string.servers_subtitle)))
         col.addView(aboutBody(
-            "On your own Wi-Fi none of this is used: the monitor phone carries " +
-                "the session itself and nothing leaves the house. These apply to " +
-                "watching from somewhere else, which needs a small always-on " +
-                "service to introduce the two phones — and, when neither can be " +
-                "reached directly, a TURN relay to forward the (still encrypted) " +
-                "media. Deploy steps are in rendezvous/README.md.\n\n" +
-                "Leave a field empty to use Tawny's own. If your relay cannot be " +
-                "reached, the app falls back to Tawny's rather than failing — a " +
-                "wrong address here costs a few seconds, not a working app."
+            getString(R.string.servers_body)
         ))
         fun tipCard(title: String, body: String) = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1575,18 +1552,8 @@ class MainActivity : AppCompatActivity() {
             })
         }
         col.addView(tipCard(
-            "The easiest way to run your own",
-            "Install Tailscale on an always-on machine you own — a home server, a " +
-                "Pi, an old laptop — and on it:\n\n" +
-                "npm install && node server.js\ntailscale serve --bg 8099\n\n" +
-                "That gives you a private wss:// address " +
-                "(yourmachine.your-tailnet.ts.net) that only your own devices can " +
-                "reach — a real certificate, no port-forwarding, nothing exposed to " +
-                "the internet. Paste it into Rendezvous below.\n\n" +
-                "Both phones need to be on that same tailnet to reach it — which " +
-                "usually means they can already reach each other directly too, the " +
-                "same way two phones on one Wi-Fi can. So leave STUN and TURN " +
-                "further down empty; add them only if a call still won't connect."
+            getString(R.string.servers_tailscale_title),
+            getString(R.string.servers_tailscale_body)
         ))
 
         // input -> the small red line under it. Populated by field(), read by
@@ -1656,28 +1623,25 @@ class MainActivity : AppCompatActivity() {
         val rvIn = field("Rendezvous", "wss://relay.example.net", PREF_RENDEZVOUS)
 
         col.addView(TextView(this).apply {
-            text = "STUN / TURN — usually not needed"
+            text = getString(R.string.servers_stunturn_title)
             setTextColor(Hue.TEXT)
             textSize = Type.SUB
             typeface = uiFontSemi
             layoutParams = lp(topMargin = 28)
         })
         col.addView(aboutBody(
-            "A separate concern from Rendezvous above: these only matter if the two " +
-                "phones can't already reach each other directly once introduced. If " +
-                "they share a private network — the same Wi-Fi, or the same Tailscale " +
-                "tailnet — that's already true, and both fields below can stay empty."
+            getString(R.string.servers_stunturn_body)
         ).apply { layoutParams = lp(topMargin = 6) })
 
-        val stunIn = field("STUN (comma separated)", "stun:stun.example.net:3478", PREF_STUN)
-        val turnIn = field("TURN (comma separated)", "turns:turn.example.net:5349", PREF_TURN)
+        val stunIn = field(getString(R.string.servers_stun_label), "stun:stun.example.net:3478", PREF_STUN)
+        val turnIn = field(getString(R.string.servers_turn_label), "turns:turn.example.net:5349", PREF_TURN)
         // No asterisk: these are not unconditionally required, only alongside a
         // TURN address (enforced below) — a static "*" next to both would have
         // read as "fill this in regardless," which is exactly the ambiguity
         // that sent Tailscale users looking for TURN credentials they never
         // needed.
-        val userIn = field("TURN username", "blank unless TURN is set above", PREF_TURN_USER)
-        val passIn = field("TURN password", "blank unless TURN is set above", PREF_TURN_PASS, password = true)
+        val userIn = field(getString(R.string.servers_turn_user_label), getString(R.string.servers_turn_blank_hint), PREF_TURN_USER)
+        val passIn = field(getString(R.string.servers_turn_pass_label), getString(R.string.servers_turn_blank_hint), PREF_TURN_PASS, password = true)
 
         val note = TextView(this).apply {
             setTextColor(Hue.DIM)
@@ -1686,13 +1650,13 @@ class MainActivity : AppCompatActivity() {
             setLineSpacing(0f, 1.35f)
             layoutParams = lp(topMargin = 14)
             text = if (customRendezvous().isNotBlank())
-                "Now using your rendezvous. Tawny's stays as the fallback."
-            else "Using Tawny's rendezvous" +
-                (if (BuildConfig.RENDEZVOUS_URL.isBlank()) " — none in this build (LAN only)." else ".")
+                getString(R.string.servers_using_yours_toast)
+            else getString(R.string.servers_using_tawny_toast) +
+                (if (BuildConfig.RENDEZVOUS_URL.isBlank()) getString(R.string.servers_none_lan_only) else ".")
         }
         col.addView(note)
 
-        col.addView(primary("Save") {
+        col.addView(primary(getString(R.string.common_save)) {
             val rv = rvIn.text.toString().trim()
             val turnList = turnIn.text.toString().split(',').map { it.trim() }.filter { it.isNotEmpty() }
             val userVal = userIn.text.toString().trim()
@@ -1708,29 +1672,29 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (rv.isNotEmpty() && !RELAY_URL_RE.matches(rv))
-                flag(rvIn, "Must start with wss:// (or ws:// on your own LAN).")
+                flag(rvIn, getString(R.string.servers_err_rendezvous))
             val stunBad = stunIn.text.toString().split(',').map { it.trim() }
                 .filter { it.isNotEmpty() && !STUN_URL_RE.matches(it) }
             if (stunBad.isNotEmpty())
-                flag(stunIn, "Must start with stun: or stuns: — check ${stunBad.first()}.")
+                flag(stunIn, getString(R.string.servers_err_stun, stunBad.first()))
             val turnBad = turnList.filterNot { TURN_URL_RE.matches(it) }
             if (turnBad.isNotEmpty())
-                flag(turnIn, "Must start with turn: or turns: — check ${turnBad.first()}.")
+                flag(turnIn, getString(R.string.servers_err_turn, turnBad.first()))
             // A TURN server with no credentials will not authenticate a real
             // caller, and half a credential pair is never valid either way — so
             // these three fields are mandatory together, or not at all.
             if (turnList.isNotEmpty() && userVal.isEmpty())
-                flag(userIn, "Required — this TURN server needs a username.")
+                flag(userIn, getString(R.string.servers_err_turn_user))
             if (turnList.isNotEmpty() && passVal.isEmpty())
-                flag(passIn, "Required — this TURN server needs a password.")
+                flag(passIn, getString(R.string.servers_err_turn_pass))
             if (turnList.isEmpty() && (userVal.isNotEmpty() || passVal.isNotEmpty()))
-                flag(turnIn, "Add a TURN address to use these credentials, or clear them.")
+                flag(turnIn, getString(R.string.servers_err_turn_orphan))
 
             if (issues.isNotEmpty()) {
                 themedDialog(
-                    title = "Check the highlighted fields",
+                    title = getString(R.string.servers_check_fields_title),
                     body = issues.toString().trim(),
-                    primaryLabel = "Back", onPrimary = { firstBad?.requestFocus() }
+                    primaryLabel = getString(R.string.common_back), onPrimary = { firstBad?.requestFocus() }
                 )
                 return@primary
             }
@@ -1748,34 +1712,30 @@ class MainActivity : AppCompatActivity() {
             stopServers()
             val usingOwn = rv.isNotBlank() || turnList.isNotEmpty() || stunIn.text.toString().isNotBlank()
             themedDialog(
-                title = if (rv.isNotBlank() && rv.startsWith("ws://")) "Saved — one warning" else "Saved",
+                title = if (rv.isNotBlank() && rv.startsWith("ws://")) getString(R.string.servers_saved_warning_title) else getString(R.string.servers_saved),
                 body = if (rv.isNotBlank() && rv.startsWith("ws://"))
-                    "ws:// is not encrypted. It is fine for a relay on your own network, " +
-                        "but over the internet anyone on the path can read the signalling. " +
-                        "(Your video and sound stay encrypted either way.)\n\n" +
-                        "Takes effect on the next session."
+                    getString(R.string.servers_saved_ws_body)
                 else if (usingOwn)
-                    "Using your servers now. Tawny's stay as the automatic fallback if " +
-                        "yours doesn't answer.\n\nTakes effect on the next session."
+                    getString(R.string.servers_saved_yours_body)
                 else "Back to Tawny's own servers.\n\nTakes effect on the next session.",
-                primaryLabel = "OK", onPrimary = { showDiagnostics() }
+                primaryLabel = getString(R.string.common_ok), onPrimary = { showDiagnostics() }
             )
         })
-        col.addView(link("Use Tawny's servers") {
+        col.addView(link(getString(R.string.servers_use_tawny)) {
             themedDialog(
-                title = "Back to Tawny's servers?",
-                body = "Your addresses are cleared from this phone.",
-                primaryLabel = "Clear",
+                title = getString(R.string.servers_back_title),
+                body = getString(R.string.servers_back_body),
+                primaryLabel = getString(R.string.common_clear),
                 onPrimary = {
                     prefs.edit()
                         .remove(PREF_RENDEZVOUS).remove(PREF_STUN).remove(PREF_TURN)
                         .remove(PREF_TURN_USER).remove(PREF_TURN_PASS)
                         .apply()
                     stopServers()
-                    toast("Back to Tawny's servers")
+                    toast(getString(R.string.servers_back_toast))
                     showServers()
                 },
-                secondaryLabel = "Keep them"
+                secondaryLabel = getString(R.string.servers_keep_them)
             )
         })
         col.addView(gap(16))
@@ -1794,7 +1754,7 @@ class MainActivity : AppCompatActivity() {
             .replaceFirst(Regex("^ws", RegexOption.IGNORE_CASE), "http")
             .trimEnd('/')
         if (base.isBlank()) { onFail(); return }
-        toast("Sending…")
+        toast(getString(R.string.diag_sending))
         io.execute {
             val ok = try {
                 val payload = org.json.JSONObject().apply {
@@ -1823,9 +1783,9 @@ class MainActivity : AppCompatActivity() {
             }
             runOnUiThread {
                 if (ok) {
-                    toast("Sent — thank you")
+                    toast(getString(R.string.diag_sent_thanks))
                 } else {
-                    toast("Couldn't reach Tawny — pick another way")
+                    toast(getString(R.string.diag_send_failed))
                     onFail()
                 }
             }
@@ -1849,7 +1809,7 @@ class MainActivity : AppCompatActivity() {
                 it.topMargin = dp(6); it.rightMargin = dp(6)
             }
             isClickable = true; isFocusable = true
-            contentDescription = "Toggle light / dark theme"
+            contentDescription = getString(R.string.a11y_theme_toggle)
             text = if (currentTheme() == "dark") "☾" else "☀"
             setOnClickListener {
                 val next = if (currentTheme() == "dark") "light" else "dark"
@@ -1857,6 +1817,87 @@ class MainActivity : AppCompatActivity() {
                 applyNightMode(next)   // recreates the activity
             }
         }
+    }
+
+    // ---------------------------------------------------------- language
+
+    /** The languages Tawny ships, in menu order: BCP-47 tag -> its own endonym.
+     *  Add a row here and a res/values-<tag>/strings.xml to add a language. */
+    private val languages = linkedMapOf(
+        "en" to "English",
+        "es" to "Español",
+    )
+
+    /** Tag of the language on screen now: the app override if one is set and
+     *  supported, else the best system match, else English. */
+    private fun currentLang(): String {
+        val picked = androidx.appcompat.app.AppCompatDelegate.getApplicationLocales()
+        for (i in 0 until picked.size()) {
+            picked[i]?.language?.let { if (languages.containsKey(it)) return it }
+        }
+        val sys = resources.configuration.locales[0].language
+        return if (languages.containsKey(sys)) sys else "en"
+    }
+
+    private fun setLang(tag: String) {
+        if (tag == currentLang()) return
+        // Persists (see AppLocalesMetadataHolderService in the manifest) and
+        // recreates the activity in the new locale.
+        androidx.appcompat.app.AppCompatDelegate.setApplicationLocales(
+            androidx.core.os.LocaleListCompat.forLanguageTags(tag)
+        )
+    }
+
+    /** Small round language pill, bottom-right of the landing screens. */
+    private fun languageToggleView(): View = TextView(this).apply {
+        textSize = 12f
+        typeface = uiFontSemi
+        gravity = Gravity.CENTER
+        setTextColor(Hue.DIM)
+        letterSpacing = 0.08f
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Hue.PANEL)
+            setStroke(dp(1), Hue.LINE)
+        }
+        val s = dp(38)
+        layoutParams = FrameLayout.LayoutParams(s, s).also {
+            it.gravity = Gravity.END or Gravity.BOTTOM
+            it.rightMargin = dp(6); it.bottomMargin = dp(8)
+        }
+        isClickable = true; isFocusable = true
+        text = currentLang().uppercase()
+        contentDescription = getString(R.string.a11y_language)
+        setOnClickListener { haptic(); showLanguageMenu() }
+    }
+
+    private fun showLanguageMenu() {
+        val now = currentLang()
+        val holder = arrayOfNulls<AlertDialog>(1)
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8), 0, 0)
+            for ((tag, name) in languages) {
+                addView(TextView(this@MainActivity).apply {
+                    text = if (tag == now) "$name  ✓" else name
+                    setTextColor(if (tag == now) Hue.BERRY else Hue.TEXT)
+                    textSize = Type.BODY
+                    typeface = if (tag == now) uiFontSemi else uiFont
+                    setPadding(dp(4), dp(14), dp(4), dp(14))
+                    isClickable = true; isFocusable = true
+                    background = pressable(roundRect(0, Color.TRANSPARENT))
+                    setOnClickListener { holder[0]?.dismiss(); setLang(tag) }
+                })
+            }
+        }
+        themedDialog(
+            title = getString(R.string.language_title),
+            body = "",
+            primaryLabel = getString(R.string.close),
+            onPrimary = {},
+            content = list,
+            onShow = { holder[0] = it },
+        )
     }
 
     private fun applyNightMode(mode: String) {
@@ -1887,7 +1928,7 @@ class MainActivity : AppCompatActivity() {
         minWidth = dp(48)
         minHeight = dp(48)
         background = pressable(roundRect(0, Color.TRANSPARENT))
-        contentDescription = "Back"
+        contentDescription = getString(R.string.common_back)
         layoutParams = LinearLayout.LayoutParams(WC, WC).also {
             it.gravity = Gravity.START
             it.leftMargin = -dp(6)               // keep the glyph optically aligned
@@ -2005,7 +2046,7 @@ class MainActivity : AppCompatActivity() {
 
     /** What the [+] says once you touch it. The count is the sheet's job. */
     private fun pairChipCopy() =
-        if (viewersNow == 0) "Show the pairing code" else "Add another phone"
+        if (viewersNow == 0) getString(R.string.pairchip_show_code) else getString(R.string.pairchip_add_phone)
 
     /**
      * The one affordance for adding phones two and three.
@@ -2138,11 +2179,11 @@ class MainActivity : AppCompatActivity() {
 
     /** What the pairing sheet says under the QR, given who is already watching. */
     private fun pairSheetStatus() = when {
-        viewersNow == 0 -> "Waiting for a phone to connect"
-        viewersNow == 1 -> "1 phone watching · ${viewersMax - 1} more can join"
+        viewersNow == 0 -> getString(R.string.pairsheet_status_waiting)
+        viewersNow == 1 -> getString(R.string.pairsheet_status_one, viewersMax - 1)
         viewersNow < viewersMax ->
-            "$viewersNow phones watching · ${viewersMax - viewersNow} more can join"
-        else -> "$viewersNow phones watching · that is the maximum"
+            getString(R.string.pairsheet_status_some, viewersNow, viewersMax - viewersNow)
+        else -> getString(R.string.pairsheet_status_max, viewersNow)
     }
 
     private var lastInsets: Pair<Int, Int> = 0 to 0
@@ -2185,19 +2226,18 @@ class MainActivity : AppCompatActivity() {
     private fun relayFailed() {
         Diag.log("shell", "signal server failed to bind")
         themedDialog(
-            title = "Could not start the monitor",
-            body = "Tawny could not open a connection on this network. Check this " +
-                "phone is on Wi-Fi, then try again.",
-            primaryLabel = "Try again",
+            title = getString(R.string.relay_failed_title),
+            body = getString(R.string.relay_failed_body),
+            primaryLabel = getString(R.string.common_try_again),
             onPrimary = { onWatcher() },
-            secondaryLabel = "Back",
+            secondaryLabel = getString(R.string.common_back),
             onSecondary = { backToSessionsOrWelcome() }
         )
     }
 
     private fun withSignalServer(onReady: (Int) -> Unit) {
         signalServer?.let { onReady(it.boundPort); return }
-        showBusy("Starting the monitor")
+        showBusy(getString(R.string.busy_starting_monitor))
         io.execute {
             val port = ensureSignalServer()
             runOnUiThread { if (!isFinishing && !isDestroyed) onReady(port) }
@@ -2233,7 +2273,7 @@ class MainActivity : AppCompatActivity() {
     private fun saveRecentSession() {
         val key = prefs.getString("channelKey", null) ?: return
         val role = prefs.getString("role", null) ?: return
-        val petName = prefs.getString("channelName", "your pet") ?: "your pet"
+        val petName = prefs.getString("channelName", getString(R.string.default_pet_name)) ?: getString(R.string.default_pet_name)
         val signalUrl = prefs.getString("signalUrl", null)
         val token = if (role == "station") prefs.getString("myToken", null)
                     else prefs.getString("pairToken", null)
@@ -2280,7 +2320,7 @@ class MainActivity : AppCompatActivity() {
     private fun restoreSession(session: org.json.JSONObject) {
         val key = session.optString("channelKey")
         val role = session.optString("role")
-        val petName = session.optString("petName", "your pet")
+        val petName = session.optString("petName", getString(R.string.default_pet_name))
         val signalUrl = session.optString("signalUrl").takeIf { it.isNotBlank() }
         val token = session.optString("token").takeIf { it.isNotBlank() }
         prefs.edit().apply {
@@ -2303,11 +2343,11 @@ class MainActivity : AppCompatActivity() {
         if (ts == 0L) return ""
         val d = System.currentTimeMillis() - ts
         return when {
-            d < 60_000L -> "just now"
-            d < 3_600_000L -> "${d / 60_000L}m ago"
-            d < 86_400_000L -> "${d / 3_600_000L}h ago"
-            d < 172_800_000L -> "yesterday"
-            else -> "${d / 86_400_000L}d ago"
+            d < 60_000L -> getString(R.string.time_just_now)
+            d < 3_600_000L -> getString(R.string.time_m_ago, (d / 60_000L).toInt())
+            d < 86_400_000L -> getString(R.string.time_h_ago, (d / 3_600_000L).toInt())
+            d < 172_800_000L -> getString(R.string.time_yesterday)
+            else -> getString(R.string.time_d_ago, (d / 86_400_000L).toInt())
         }
     }
 
@@ -2364,7 +2404,7 @@ class MainActivity : AppCompatActivity() {
         }
         col.addView(playScene)
         col.addView(TextView(this).apply {
-            text = "Pick up where you left off"
+            text = getString(R.string.sessions_subtitle)
             setTextColor(Hue.DIM)
             textSize = Type.SUB
             typeface = uiFont
@@ -2376,8 +2416,8 @@ class MainActivity : AppCompatActivity() {
         sessions.forEach { session ->
             val key = session.optString("channelKey")
             val role = session.optString("role")
-            val petName = session.optString("petName", "your pet")
-            val roleLabel = if (role == "station") "Monitor" else "Viewer"
+            val petName = session.optString("petName", getString(R.string.default_pet_name))
+            val roleLabel = if (role == "station") getString(R.string.sessions_role_monitor) else getString(R.string.sessions_role_viewer)
             val timeStr = relativeTime(session.optLong("timestamp", 0L))
 
             // Container: delete strip behind + card in front for swipe-left
@@ -2393,7 +2433,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = FrameLayout.LayoutParams(MP, MP)
                 setPadding(0, 0, dp(20), 0)
                 addView(TextView(this@MainActivity).apply {
-                    text = "Delete"
+                    text = getString(R.string.sessions_delete)
                     setTextColor(Hue.ON_ACCENT)
                     textSize = Type.SUB
                     typeface = uiFontSemi
@@ -2476,38 +2516,38 @@ class MainActivity : AppCompatActivity() {
             deleteStrip.setOnClickListener {
                 haptic()
                 themedDialog(
-                    title = "Remove session?",
-                    body = "\"$petName\" will be removed from your recent sessions.",
-                    primaryLabel = "Remove",
+                    title = getString(R.string.sessions_remove_title),
+                    body = getString(R.string.sessions_remove_body, petName),
+                    primaryLabel = getString(R.string.common_remove),
                     onPrimary = { deleteRecentSession(key, role); showSessionsHome() },
-                    secondaryLabel = "Cancel"
+                    secondaryLabel = getString(R.string.common_cancel)
                 )
             }
             card.setOnLongClickListener {
                 haptic()
                 themedDialog(
                     title = petName,
-                    body = "What would you like to do?",
-                    primaryLabel = "Edit name",
+                    body = getString(R.string.sessions_menu_body),
+                    primaryLabel = getString(R.string.sessions_edit_name),
                     onPrimary = {
                         askName(
-                            title = "Rename session",
-                            body = "The pet\u2019s name, or the room the monitor is in.",
+                            title = getString(R.string.sessions_rename_title),
+                            body = getString(R.string.sessions_rename_body),
                             initial = petName,
-                            primaryLabel = "Save",
+                            primaryLabel = getString(R.string.common_save),
                         ) { n ->
                             updateRecentSessionName(key, n)
                             showSessionsHome()
                         }
                     },
-                    secondaryLabel = "Delete session",
+                    secondaryLabel = getString(R.string.sessions_delete_session),
                     onSecondary = {
                         themedDialog(
-                            title = "Remove session?",
-                            body = "\"$petName\" will be removed from your recent sessions.",
-                            primaryLabel = "Remove",
+                            title = getString(R.string.sessions_remove_title),
+                            body = getString(R.string.sessions_remove_body, petName),
+                            primaryLabel = getString(R.string.common_remove),
                             onPrimary = { deleteRecentSession(key, role); showSessionsHome() },
-                            secondaryLabel = "Cancel"
+                            secondaryLabel = getString(R.string.common_cancel)
                         )
                     }
                 )
@@ -2553,7 +2593,7 @@ class MainActivity : AppCompatActivity() {
 
         col.addView(gap(12))
         // Was pill() reimplemented by hand, at a different size and padding.
-        col.addView(ghost("+ Set up a new session") { showRole() })
+        col.addView(ghost(getString(R.string.sessions_new)) { showRole() })
 
         // The only two places money is ever mentioned, both below the fold of
         // the thing the user came here to do. Deliberately not on welcome, role
@@ -2561,19 +2601,20 @@ class MainActivity : AppCompatActivity() {
         // is the exact complaint the whole category earns (docs/DIRECTION.md,
         // part 2). Nothing here unlocks anything — see [showAbout].
         col.addView(metaPanel(
-            metaRow("heart", "Support Tawny", Hue.BERRY, "↗", reveal = "ko-fi.com") {
+            metaRow("heart", getString(R.string.meta_support), Hue.BERRY, "↗", reveal = "ko-fi.com") {
                 openExternal(SUPPORT_URL)
             },
-            metaRow("bolt", "Tip in Bitcoin", Hue.SKY, "›") {
+            metaRow("bolt", getString(R.string.meta_tip_bitcoin), Hue.SKY, "›") {
                 lnFromAbout = false; showLightningTip()
             },
             motionRow { showSessionsHome() },
-            metaRow("info", "About Tawny", Hue.TEXT, "›") { showAbout() },
+            metaRow("info", getString(R.string.meta_about), Hue.TEXT, "›") { showAbout() },
         ))
 
         scroll.addView(col)
         root.addView(scroll)
         root.addView(themeToggleView())
+        root.addView(languageToggleView())
     }
 
     // ---------------------------------------------------------- about
@@ -2620,7 +2661,7 @@ class MainActivity : AppCompatActivity() {
             // A phone with no browser at all, or one where the intent is
             // blocked. Leave the user something they can act on.
             copyToClipboard("Tawny link", url)
-            toast("No browser to open $url — copied instead")
+            toast(getString(R.string.no_browser_copied, url))
         }
     }
 
@@ -2656,8 +2697,8 @@ class MainActivity : AppCompatActivity() {
         col.addView(backLink { afterSession() })
         col.addView(
             heading(
-                "About Tawny",
-                "Version ${BuildConfig.VERSION_NAME} · build ${BuildConfig.VERSION_CODE}"
+                getString(R.string.meta_about),
+                getString(R.string.about_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toString())
             )
         )
 
@@ -2673,36 +2714,24 @@ class MainActivity : AppCompatActivity() {
         }
 
         col.addView(aboutBody(
-            "Tawny turns two spare phones into a pet camera. Leave one with " +
-                "your cat or dog — on a charger, pointed at their favourite " +
-                "spot — and keep the other with you to look in, listen, and " +
-                "say hello."
+            getString(R.string.about_intro)
         ))
 
-        col.addView(eyebrow("Your home, your video"))
+        col.addView(eyebrow(getString(R.string.about_eyebrow_home)))
         col.addView(aboutBody(
-            "The picture and sound go straight from one phone to the other, " +
-                "scrambled so that only your two phones can read them. There is " +
-                "no account to make, nothing is ever recorded, and no server in " +
-                "between ever sees your video or the code that pairs your " +
-                "phones. On your own Wi-Fi, none of it leaves the house."
+            getString(R.string.about_home_body)
         ))
 
         // Repeated from the home screen on purpose. Home is where someone who
         // already has a session will look, but a phone that struggles with the
         // drawn pets is exactly the phone whose owner goes hunting through
         // About for something to turn off.
-        col.addView(eyebrow("On this phone"))
+        col.addView(eyebrow(getString(R.string.about_eyebrow_thisphone)))
         col.addView(metaPanel(motionRow { showAbout() }))
 
-        col.addView(eyebrow("Keeping it running"))
+        col.addView(eyebrow(getString(R.string.about_eyebrow_keeping)))
         col.addView(aboutBody(
-            "Tawny is free, and it stays that way — every part of it, for " +
-                "everyone. Looking in from outside the house hops through a " +
-                "small relay I run, and that relay adds up a bandwidth bill " +
-                "every month. If Tawny earns a place in your day, a little " +
-                "toward that bill means a lot. Chipping in unlocks nothing " +
-                "extra — no badge, no hidden features. That part is on purpose."
+            getString(R.string.about_keeping_body)
         ))
         col.addView(metaPanel(
             metaRow("heart", "Support Tawny", Hue.BERRY, "↗", sub = "ko-fi.com/tawnyone") {
@@ -2711,7 +2740,7 @@ class MainActivity : AppCompatActivity() {
             metaRow("bolt", "Tip in Bitcoin", Hue.SKY, "›", sub = LN_ADDRESS) {
                 lnFromAbout = true; showLightningTip()
             },
-            metaRow("mail", "Email us", Hue.TEXT, "↗", sub = SUPPORT_EMAIL) {
+            metaRow("mail", getString(R.string.meta_email_us), Hue.TEXT, "↗", sub = SUPPORT_EMAIL) {
                 try {
                     startActivity(
                         Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$SUPPORT_EMAIL"))
@@ -2722,16 +2751,13 @@ class MainActivity : AppCompatActivity() {
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     )
                 } catch (e: Exception) {
-                    copyToClipboard("Tawny support email", SUPPORT_EMAIL)
-                    toast("No email app — address copied")
+                    copyToClipboard(getString(R.string.about_email_chooser), SUPPORT_EMAIL)
+                    toast(getString(R.string.about_no_email))
                 }
             },
         ))
         col.addView(aboutBody(
-            "That last one is for anything at all — a question, a bug, " +
-                "something that broke. If a connection will not hold, " +
-                "long-press the version number on any screen first and send " +
-                "the little diagnostics log along with your note."
+            getString(R.string.about_contact_body)
         ))
 
         // No "Sound credits" section: every bundled chime — including
@@ -2798,20 +2824,18 @@ class MainActivity : AppCompatActivity() {
         col.addView(bolt)
         col.addView(heading(
             "Lightning tip",
-            "Opens your Lightning wallet. No account, and the sats go straight " +
-                "to Tawny.",
+            getString(R.string.tip_wallet_body),
             center = true,
         ))
 
         if (!noWallet) {
-            col.addView(pill("Open in wallet", Hue.ON_ACCENT, Hue.SKY, Hue.SKY) {
+            col.addView(pill(getString(R.string.tip_open_wallet), Hue.ON_ACCENT, Hue.SKY, Hue.SKY) {
                 bolt.strike(animScale)
                 openLightning()
             })
         } else {
             col.addView(body(
-                "No Lightning wallet on this phone. Copy the address into one, " +
-                    "or scan this from a phone that has one.",
+                getString(R.string.tip_no_wallet_body),
                 maxW = 320,
             ))
         }
@@ -2828,9 +2852,9 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(14), dp(13), dp(14), dp(13))
             layoutParams = lp(topMargin = 18)
         })
-        col.addView(link("Copy address") {
+        col.addView(link(getString(R.string.tip_copy_address)) {
             copyToClipboard("Tawny Lightning address", LN_ADDRESS)
-            toast("Copied $LN_ADDRESS")
+            toast(getString(R.string.tip_copied, LN_ADDRESS))
         })
 
         if (noWallet) {
@@ -2848,12 +2872,11 @@ class MainActivity : AppCompatActivity() {
                 val bmp = try { qrBitmap(LN_URI, 480) } catch (e: Exception) { null }
                 runOnUiThread { if (bmp != null && qr.isAttachedToWindow) qr.setImageBitmap(bmp) }
             }
-            col.addView(link("Open strike.me in a browser") { openExternal(LN_WEB_URL) })
+            col.addView(link(getString(R.string.tip_open_strike)) { openExternal(LN_WEB_URL) })
         }
 
         col.addView(body(
-            "Tipping unlocks nothing — no badge, no features, nothing. It goes " +
-                "towards the relay that lets you watch from outside the house.",
+            getString(R.string.tip_body),
             maxW = 320,
         ))
         col.addView(gap(16))
@@ -2874,7 +2897,7 @@ class MainActivity : AppCompatActivity() {
             showLightningTip(noWallet = true)
         } catch (e: Exception) {
             copyToClipboard("Tawny Lightning address", LN_ADDRESS)
-            toast("Couldn't open a wallet — address copied")
+            toast(getString(R.string.tip_no_wallet_open_failed))
         }
     }
 
@@ -2898,22 +2921,21 @@ class MainActivity : AppCompatActivity() {
                 // Say the two-phone shape before the role screen asks which one
                 // this is: "one stays, one comes with you" is the whole mental
                 // model, and without it the next screen is a quiz.
-                "Keep an eye on your pet from the next room or across town. " +
-                    "You need two phones: one stays with your pet, one comes " +
-                    "with you. No accounts, nothing to set up.",
+                getString(R.string.welcome_blurb),
                 maxW = 300
             )
         )
         col.addView(gap(4))
-        col.addView(primary("Get started") { showRole() })
+        col.addView(primary(getString(R.string.welcome_get_started)) { showRole() })
         // Not "I want to watch a monitor": that asked the user to know which of
         // two roles they were before the app had explained either, and it
         // competed with "Get started" for the same first-time tap. Having a
         // code is a fact you can check by looking at the other phone, so the
         // two routes no longer overlap.
-        col.addView(link("I already have a code to scan") { onHandheld() })
+        col.addView(link(getString(R.string.welcome_have_code)) { onHandheld() })
         mountCentered(col)
         root.addView(themeToggleView())
+        root.addView(languageToggleView())
     }
 
     // -------------------------------------------------------- handheld home
@@ -2929,7 +2951,7 @@ class MainActivity : AppCompatActivity() {
         swipeNav(back = { showWelcome() }, forward = { goLive("viewer") })
         val pawView = PawTrailView(this)
         root.addView(pawView, FrameLayout.LayoutParams(MP, MP))
-        val name = prefs.getString("channelName", "your pet") ?: "your pet"
+        val name = prefs.getString("channelName", getString(R.string.default_pet_name)) ?: getString(R.string.default_pet_name)
         val col = column(scroll = false)
         col.addView(IconView(this, "phone", behind = Hue.BG).apply {
             layoutParams = LinearLayout.LayoutParams(dp(60), dp(60)).also {
@@ -2940,13 +2962,13 @@ class MainActivity : AppCompatActivity() {
         col.addView(wordmark())
         col.addView(
             body(
-                "Connected to $name's monitor. Tap below to check in from anywhere.",
+                getString(R.string.handheld_connected, name),
                 maxW = 300
             )
         )
         col.addView(gap(6))
-        col.addView(primary("Watch $name now") { goLive("viewer") })
-        col.addView(link("Connect to a different monitor") { onHandheld() })
+        col.addView(primary(getString(R.string.handheld_watch_now, name)) { goLive("viewer") })
+        col.addView(link(getString(R.string.handheld_connect_different)) { onHandheld() })
         mountCentered(col)
 
         // Same reasoning as showRole(): keep the trail off the actual content,
@@ -2982,19 +3004,17 @@ class MainActivity : AppCompatActivity() {
         val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
         val col = column(scroll = true)
         col.addView(backLink { backToSessionsOrWelcome() })
-        val head = heading("Set up Tawny", "How will you use this phone?")
+        val head = heading(getString(R.string.role_title), getString(R.string.role_subtitle))
         col.addView(head)
         val monitorCard = roleCard(
-            "The Monitor", "Stays with your pet",
-            "Plug it in and point the camera. It streams live video and " +
-                "sound, and shows a code so others can watch too.",
+            getString(R.string.role_monitor_tag), getString(R.string.role_monitor_line),
+            getString(R.string.role_monitor_blurb),
             "camera", "cat"
         ) { onWatcher() }
         col.addView(monitorCard)
         val viewerCard = roleCard(
-            "The Viewer", "Watch from this phone",
-            "Check in on your pet from here — around the house on Wi-Fi, " +
-                "or from out and about.",
+            getString(R.string.role_viewer_tag), getString(R.string.role_viewer_line),
+            getString(R.string.role_viewer_blurb),
             "phone", "dog"
         ) { onHandheld() }
         col.addView(viewerCard)
@@ -3037,10 +3057,9 @@ class MainActivity : AppCompatActivity() {
         val ip = lanIp()
         if (ip == null && !hasRendezvous) {
             themedDialog(
-                title = "Connect to Wi-Fi",
-                body = "Tawny couldn't find a network connection. " +
-                    "Connect this phone to Wi-Fi and try again.",
-                primaryLabel = "OK", onPrimary = {}
+                title = getString(R.string.wifi_title),
+                body = getString(R.string.wifi_body),
+                primaryLabel = getString(R.string.common_ok), onPrimary = {}
             )
             return
         }
@@ -3089,15 +3108,9 @@ class MainActivity : AppCompatActivity() {
         if (prefs.getBoolean("monitorTipSeen", false)) { then(); return }
         prefs.edit().putBoolean("monitorTipSeen", true).apply()
         themedDialog(
-            title = "Before you leave it watching",
-            body = "This phone has to stay awake to keep streaming, and its screen " +
-                "is what drains it. Three things help more than anything else:\n\n" +
-                "1.  Leave it on a charger.\n\n" +
-                "2.  Turn the screen brightness right down — and turn adaptive " +
-                "brightness off, or the phone will quietly brighten itself back up.\n\n" +
-                "3.  Once a viewer has connected, tap “Dim screen”. Tawny takes " +
-                "the backlight down to almost nothing and keeps streaming.",
-            primaryLabel = "Got it",
+            title = getString(R.string.battery_tip_title),
+            body = getString(R.string.battery_tip_body),
+            primaryLabel = getString(R.string.common_got_it),
             onPrimary = then,
             cancelable = false
         )
@@ -3142,13 +3155,13 @@ class MainActivity : AppCompatActivity() {
             title = title,
             body = body,
             primaryLabel = primaryLabel,
-            onPrimary = { onName(input.text.toString().trim().ifBlank { "your pet" }) },
-            secondaryLabel = "Cancel",
+            onPrimary = { onName(input.text.toString().trim().ifBlank { getString(R.string.default_pet_name) }) },
+            secondaryLabel = getString(R.string.common_cancel),
             content = input,
             onShow = { dialog ->
                 submit = {
                     dialog.dismiss()
-                    onName(input.text.toString().trim().ifBlank { "your pet" })
+                    onName(input.text.toString().trim().ifBlank { getString(R.string.default_pet_name) })
                 }
                 input.setOnEditorActionListener { _, _, _ -> submit(); true }
                 // Open with the keyboard up and the cursor waiting.
@@ -3162,12 +3175,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun promptRoomName(onName: (String) -> Unit) {
         val current = prefs.getString("channelName", "")
-            ?.takeUnless { it == "Pet camera" || it == "your pet" }.orEmpty()
+            ?.takeUnless { it == "Pet camera" || it == getString(R.string.default_pet_name) }.orEmpty()
         askName(
-            title = "What\u2019s your pet\u2019s name?",
+            title = getString(R.string.name_ask_title),
             body = "",
             initial = current,
-            primaryLabel = "Continue",
+            primaryLabel = getString(R.string.common_continue),
             onName = onName,
         )
     }
@@ -3209,15 +3222,14 @@ class MainActivity : AppCompatActivity() {
                 return@disclose
             }
             themedDialog(
-                title = "Connect to your monitor",
-                body = "Scan the monitor's QR code with the camera, or paste its " +
-                    "pairing link instead.",
-                primaryLabel = "Use camera",
+                title = getString(R.string.scan_title),
+                body = getString(R.string.scan_body),
+                primaryLabel = getString(R.string.scan_use_camera),
                 onPrimary = {
                     pendingScan = true
                     askPermissions.launch(arrayOf(android.Manifest.permission.CAMERA))
                 },
-                secondaryLabel = "Paste a link",
+                secondaryLabel = getString(R.string.common_paste_a_link),
                 onSecondary = { promptPairLink() }
             )
         }
@@ -3239,7 +3251,7 @@ class MainActivity : AppCompatActivity() {
         val overlay = column(scroll = false).apply { gravity = Gravity.TOP }
         overlay.addView(backLink(overCamera = true) { stopScanner(); showRole() })
         overlay.addView(TextView(this).apply {
-            text = "Scan your monitor's QR code"
+            text = getString(R.string.scan_overlay_title)
             setTextColor(0xFFFFFFFF.toInt())
             textSize = 21f
             letterSpacing = 0f
@@ -3248,7 +3260,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = lp(topMargin = 4)
         })
         overlay.addView(TextView(this).apply {
-            text = "Hold your pet monitor's QR code in frame."
+            text = getString(R.string.scan_overlay_hint)
             setTextColor(0xFFFFFFFF.toInt())
             textSize = 15f
             typeface = uiFont
@@ -3256,7 +3268,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = lp(topMargin = 6)
         })
         overlay.addView(TextView(this).apply {
-            text = "PASTE A LINK INSTEAD"
+            text = getString(R.string.scan_paste_instead)
             letterSpacing = 0.12f
             textSize = 14f
             typeface = uiFontSemi
@@ -3342,10 +3354,9 @@ class MainActivity : AppCompatActivity() {
         if (scanHandled) return
         val p = parsePairing(raw) ?: run {
             themedDialog(
-                title = "Not a Tawny code",
-                body = "That QR code isn\u2019t a Tawny pairing code. On the monitor phone, " +
-                    "the code to scan is the one on its pairing screen.",
-                primaryLabel = "Keep scanning",
+                title = getString(R.string.scan_not_tawny_title),
+                body = getString(R.string.scan_not_tawny_body),
+                primaryLabel = getString(R.string.scan_keep_scanning),
                 onPrimary = {}
             )
             return
@@ -3638,7 +3649,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun goLiveWith(role: String, signal: String?) {
         val key = prefs.getString("channelKey", null) ?: return showWelcome()
-        val name = prefs.getString("channelName", "your pet") ?: "your pet"
+        val name = prefs.getString("channelName", getString(R.string.default_pet_name)) ?: getString(R.string.default_pet_name)
         val httpPort = ensureAssetServer()
         // Name this session's relay in the page's connect-src instead of opening
         // the whole `ws:` scheme. Set before the WebView is pointed at the asset
@@ -3751,7 +3762,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     startActivity(Intent(Intent.ACTION_VIEW, target))
                 } catch (e: Exception) {
-                    toast("No app can open that link.")
+                    toast(getString(R.string.err_no_app_for_link))
                 }
                 return true
             }
@@ -3770,6 +3781,7 @@ class MainActivity : AppCompatActivity() {
                         // setting, which is the one thing this switch exists to
                         // be independent of — so it has to be told.
                         "motion:${jsStr(if (stillMode()) "off" else "on")}," +
+                        "lang:${jsStr(currentLang())}," +
                         "pairCode:${pairCodeArg?.let { jsStr(it) } ?: "null"}," +
                         "pairExp:$pairCodeExpArg,servers:${serversJson()}})",
                     null
@@ -3784,7 +3796,7 @@ class MainActivity : AppCompatActivity() {
             ) {
                 if (!req.isForMainFrame) return
                 endLive()
-                showError(err.description?.toString() ?: "Could not load the app")
+                showError(err.description?.toString() ?: getString(R.string.err_load_app))
             }
         }
 
@@ -3972,7 +3984,7 @@ class MainActivity : AppCompatActivity() {
         // left-aligned (and 8dp further in than each other) under a centred QR
         // \u2014 three different left edges on a sheet with one idea on it.
         sheet.addView(TextView(this).apply {
-            text = "Scan to watch, or share the link below"
+            text = getString(R.string.pairsheet_scan_or_link)
             setTextColor(Hue.DIM)
             textSize = Type.SUB
             typeface = uiFont
@@ -4025,7 +4037,7 @@ class MainActivity : AppCompatActivity() {
                 val live = pairPayloadNow ?: payload
                 val cm = getSystemService(android.content.ClipboardManager::class.java)
                 cm.setPrimaryClip(android.content.ClipData.newPlainText("Tawny pairing", live))
-                toast("Link copied")
+                toast(getString(R.string.pairsheet_link_copied))
             }
         }
         // Draggable for the same reason the name is: it is a wide row across the
@@ -4464,7 +4476,7 @@ class MainActivity : AppCompatActivity() {
                 if (left <= 0) refreshPairCode()
                 val secs = ((if (left <= 0) PAIR_TTL_MS else left) / 1000).toInt()
                 pairCountdown?.apply {
-                    text = "Code refreshes in %d:%02d".format(secs / 60, secs % 60)
+                    text = getString(R.string.pair_code_refreshes, secs / 60, secs % 60)
                     // Fine print for nine of its ten minutes, and the one line
                     // on the sheet that matters in the last one — a viewer part
                     // way through typing the link in wants to know it is about
@@ -4504,11 +4516,11 @@ class MainActivity : AppCompatActivity() {
     private fun showError(message: String) {
         val role = prefs.getString("role", "viewer") ?: "viewer"
         themedDialog(
-            title = "Something went wrong",
+            title = getString(R.string.err_title),
             body = "$message\n\nTry restarting the app, or check that this phone has a network connection.",
-            primaryLabel = "Retry",
+            primaryLabel = getString(R.string.common_retry),
             onPrimary = { goLive(role) },
-            secondaryLabel = "Start over",
+            secondaryLabel = getString(R.string.err_start_over),
             onSecondary = {
                 // Drop only this session's transient state, not the whole
                 // prefs store — a wholesale clear() used to wipe recentSessions
@@ -4536,7 +4548,7 @@ class MainActivity : AppCompatActivity() {
         if (isFinishing) return
         Diag.log("shell", "showMonitorOffline — handheld gave up reaching the monitor")
         val petName = prefs.getString("channelName", null)
-            ?.takeUnless { it.isBlank() } ?: "your pet"
+            ?.takeUnless { it.isBlank() } ?: getString(R.string.default_pet_name)
         clearScreen()
         swipeNav(back = { showHandheldHome() }, forward = null)
         val col = column(scroll = false)
@@ -4547,7 +4559,7 @@ class MainActivity : AppCompatActivity() {
             }
         })
         col.addView(TextView(this).apply {
-            text = "Monitor isn't on yet"
+            text = getString(R.string.offline_title)
             setTextColor(Hue.TEXT)
             textSize = 24f
             typeface = uiFontSemi
@@ -4556,16 +4568,16 @@ class MainActivity : AppCompatActivity() {
         })
         col.addView(
             body(
-                "Start Tawny on $petName's monitor phone and leave it open,\n" +
-                    "then tap Retry here.",
+                getString(R.string.offline_body, petName),
                 maxW = 300
             )
         )
         col.addView(gap(8))
-        col.addView(primary("Retry") { goLive("viewer") })
-        col.addView(link("Go back") { showHandheldHome() })
+        col.addView(primary(getString(R.string.common_retry)) { goLive("viewer") })
+        col.addView(link(getString(R.string.common_go_back)) { showHandheldHome() })
         mountCentered(col)
         root.addView(themeToggleView())
+        root.addView(languageToggleView())
     }
 
     /**
@@ -4590,7 +4602,7 @@ class MainActivity : AppCompatActivity() {
             }
         })
         col.addView(TextView(this).apply {
-            text = "That monitor is full"
+            text = getString(R.string.full_title)
             setTextColor(Hue.TEXT)
             textSize = 24f
             typeface = uiFontSemi
@@ -4599,10 +4611,11 @@ class MainActivity : AppCompatActivity() {
         })
         col.addView(body(message, maxW = 300))
         col.addView(gap(8))
-        col.addView(primary("Try again") { goLive("viewer") })
-        col.addView(link("Go back") { showHandheldHome() })
+        col.addView(primary(getString(R.string.common_try_again)) { goLive("viewer") })
+        col.addView(link(getString(R.string.common_go_back)) { showHandheldHome() })
         mountCentered(col)
         root.addView(themeToggleView())
+        root.addView(languageToggleView())
     }
 
     // ----------------------------------------------------------- bridge
@@ -4683,7 +4696,7 @@ class MainActivity : AppCompatActivity() {
                         when {
                             obj.optString("reason") == "full" ->
                                 showMonitorFull(
-                                    message ?: "This monitor already has $MAX_VIEWERS phones watching."
+                                    message ?: getString(R.string.full_body, MAX_VIEWERS)
                                 )
                             // The Monitor (or the relay) refused the code this
                             // phone arrived with. Same screen as the scanner's
@@ -4691,7 +4704,7 @@ class MainActivity : AppCompatActivity() {
                             // as one rule wherever it is noticed.
                             obj.optString("reason") == "expired" -> pairingExpired()
                             prefs.getString("role", null) == "viewer" -> showMonitorOffline()
-                            else -> showError(message ?: "Could not start the session")
+                            else -> showError(message ?: getString(R.string.err_could_not_start_session))
                         }
                     }
                 }
@@ -4741,10 +4754,10 @@ class MainActivity : AppCompatActivity() {
                     resolver.openOutputStream(uri).use { out ->
                         (out ?: throw java.io.IOException("no stream")).write(bytes)
                     }
-                    runOnUiThread { toast("Saved to Pictures/Tawny") }
+                    runOnUiThread { toast(getString(R.string.snap_saved_photo)) }
                 } catch (e: Exception) {
                     Log.w("Tawny", "snapshot failed", e)
-                    runOnUiThread { toast("Could not save the snapshot") }
+                    runOnUiThread { toast(getString(R.string.snap_save_photo_failed)) }
                 }
             }
         }
@@ -4780,10 +4793,10 @@ class MainActivity : AppCompatActivity() {
                     resolver.openOutputStream(uri).use { out ->
                         (out ?: throw java.io.IOException("no stream")).write(bytes)
                     }
-                    runOnUiThread { toast("Saved to Movies/Tawny") }
+                    runOnUiThread { toast(getString(R.string.snap_saved_video)) }
                 } catch (e: Exception) {
                     Log.w("Tawny", "video save failed", e)
-                    runOnUiThread { toast("Could not save the video") }
+                    runOnUiThread { toast(getString(R.string.snap_save_video_failed)) }
                 }
             }
         }

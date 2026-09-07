@@ -63,6 +63,13 @@ android {
         buildConfig = true
     }
 
+    lint {
+        // A user-facing string added to values/ without an es/ (etc.) counterpart
+        // must fail the build, not slip out half-translated.
+        error += "MissingTranslation"
+        warning += "ExtraTranslation"
+    }
+
     signingConfigs {
         if (hasSigning) {
             create("release") {

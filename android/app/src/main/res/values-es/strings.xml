@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Español (Latinoamérica). Trato de "tú"; nunca "vosotros". "celular"/"teléfono",
+     no "móvil"; "computadora", no "ordenador". "monitor" y "visor" son los dos roles. -->
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+
+    <!-- ============================ conmutador de idioma =================== -->
+    <string name="a11y_language">Idioma</string>
+    <string name="language_title">Idioma</string>
+    <string name="close">Cerrar</string>
+
+    <!-- ================================ comunes ========================== -->
+    <string name="common_not_now">Ahora no</string>
+    <string name="common_back">Atrás</string>
+    <string name="common_cancel">Cancelar</string>
+    <string name="common_ok">Aceptar</string>
+    <string name="common_continue">Continuar</string>
+    <string name="common_save">Guardar</string>
+    <string name="common_connect">Conectar</string>
+    <string name="common_try_again">Reintentar</string>
+    <string name="common_retry">Reintentar</string>
+    <string name="common_go_back">Volver</string>
+    <string name="common_remove">Quitar</string>
+    <string name="common_clear">Borrar</string>
+    <string name="common_got_it">Entendido</string>
+    <string name="common_paste_a_link">Pegar un enlace</string>
+    <string name="switch_on">Sí</string>
+    <string name="switch_off">No</string>
+    <string name="default_pet_name">tu mascota</string>
+    <string name="pet_monitor">Monitor para mascotas</string>
+
+    <!-- ================================ bienvenida ======================= -->
+    <string name="welcome_blurb">Vigila a tu mascota desde la otra habitación o desde el otro lado de la ciudad. Necesitas dos teléfonos: uno se queda con tu mascota y el otro va contigo. Sin cuentas, nada que configurar.</string>
+    <string name="welcome_get_started">Empezar</string>
+    <string name="welcome_have_code">Ya tengo un código para escanear</string>
+
+    <!-- ============================ elección de rol ===================== -->
+    <string name="role_title">Configurar Tawny</string>
+    <string name="role_subtitle">¿Cómo vas a usar este teléfono?</string>
+    <string name="role_monitor_tag">El monitor</string>
+    <string name="role_monitor_line">Se queda con tu mascota</string>
+    <string name="role_monitor_blurb">Conéctalo a la corriente y apunta la cámara. Transmite video y sonido en vivo, y muestra un código para que otros también puedan ver.</string>
+    <string name="role_viewer_tag">El visor</string>
+    <string name="role_viewer_line">Mira desde este teléfono</string>
+    <string name="role_viewer_blurb">Revisa a tu mascota desde aquí: por la casa con Wi-Fi, o cuando estés fuera.</string>
+
+    <!-- ============================= inicio del visor ================== -->
+    <string name="handheld_connected">Conectado al monitor de <xliff:g id="pet" example="Mochi">%1$s</xliff:g>. Toca abajo para revisar desde cualquier lugar.</string>
+    <string name="handheld_watch_now">Ver a <xliff:g id="pet" example="Mochi">%1$s</xliff:g> ahora</string>
+    <string name="handheld_connect_different">Conectar a otro monitor</string>
+
+    <!-- ============================== permisos ======================== -->
+    <string name="perm_needs_toast">Tawny necesita la cámara y el micrófono para esto.</string>
+    <string name="perm_needed_title">Falta un permiso</string>
+    <string name="perm_needed_body">Tawny no puede transmitir sin la cámara y el micrófono, y Android ya no lo volverá a preguntar desde aquí. Puedes activarlos en los ajustes del sistema de esta app.</string>
+    <string name="perm_open_settings">Abrir ajustes</string>
+    <string name="perm_open_settings_failed">No se pudieron abrir los ajustes.</string>
+    <string name="perm_disclose_cam_title">Cámara y micrófono</string>
+    <string name="perm_disclose_mic_title">Micrófono</string>
+    <string name="perm_disclose_cam_body">Este teléfono usará su cámara y su micrófono para transmitir a tu mascota a tu otro teléfono mientras Tawny esté abierto. El video y el sonido se envían cifrados, directamente entre tus dispositivos, y nunca se graban ni se guardan en ningún lugar.</string>
+    <string name="perm_disclose_mic_body">Tawny usará el micrófono de este teléfono para que puedas hablarle a tu mascota. Tu voz se envía cifrada, directamente al teléfono monitor, y nunca se graba ni se guarda en ningún lugar.</string>
+
+    <!-- ============================ terminar / detener ================ -->
+    <string name="endcall_stop_title">¿Dejar de vigilar?</string>
+    <string name="endcall_end_title">¿Terminar la llamada?</string>
+    <string name="endcall_stop_body">Los visores no podrán conectarse hasta que vuelvas a activar el monitor.</string>
+    <string name="endcall_end_body">Puedes volver a ver desde la pantalla de inicio.</string>
+    <string name="endcall_stop">Detener</string>
+    <string name="endcall_end">Terminar</string>
+    <string name="endcall_keep_going">Seguir</string>
+
+    <!-- ============================== vinculación ==================== -->
+    <string name="pair_link_bad_title">Ese enlace no funcionó</string>
+    <string name="pair_link_bad_body">Parece un enlace de Tawny, pero Tawny no puede leerlo. Pide un código nuevo desde el teléfono monitor.</string>
+    <string name="pair_link_paste_bad_body">No parece un enlace de vinculación de Tawny. Copia el enlace completo (empieza con tawny://pair) e inténtalo de nuevo.</string>
+    <string name="pair_confirm_title">¿Conectar a “<xliff:g id="name">%1$s</xliff:g>”?</string>
+    <string name="pair_where_lan">un monitor en tu Wi-Fi</string>
+    <string name="pair_where_internet">tu monitor por internet</string>
+    <string name="pair_confirm_body">Este código conecta a <xliff:g id="where">%1$s</xliff:g>.\n\n<xliff:g id="detail">%2$s</xliff:g></string>
+    <string name="pair_confirm_replacing">Al conectar, se reemplazará el monitor con el que este teléfono está vinculado ahora.</string>
+    <string name="pair_confirm_own">Conéctate solo si este es tu propio monitor.</string>
+    <string name="pair_expired_title">Ese código caducó</string>
+    <string name="pair_expired_body">Los códigos de vinculación dejan de funcionar diez minutos después de que el teléfono monitor los muestra, así que no sirve una foto vieja de uno.\n\nEn el teléfono monitor, vuelve a su pantalla de vinculación (muestra un código nuevo) y escanea ese.</string>
+    <string name="pair_scan_again">Escanear de nuevo</string>
+    <string name="pair_paste_title">Pega el enlace de vinculación</string>
+    <string name="pair_paste_body">En el teléfono monitor, toca “Mostrar como enlace” y envíatelo.</string>
+
+    <!-- ============================= cámara ocupada ================= -->
+    <string name="cam_busy_title">La cámara está ocupada</string>
+    <string name="cam_busy_body">Tawny no pudo abrir la cámara de este teléfono; puede que otra app la esté usando. Cierra esa app e inténtalo de nuevo, o pega el enlace de vinculación del monitor.</string>
+
+    <!-- ========================= sesiones recientes ================ -->
+    <string name="sessions_subtitle">Retoma donde lo dejaste</string>
+    <string name="sessions_role_monitor">Monitor</string>
+    <string name="sessions_role_viewer">Visor</string>
+    <string name="sessions_delete">Eliminar</string>
+    <string name="sessions_remove_title">¿Quitar la sesión?</string>
+    <string name="sessions_remove_body">“<xliff:g id="pet">%1$s</xliff:g>” se quitará de tus sesiones recientes.</string>
+    <string name="sessions_menu_body">¿Qué quieres hacer?</string>
+    <string name="sessions_edit_name">Cambiar el nombre</string>
+    <string name="sessions_rename_title">Renombrar la sesión</string>
+    <string name="sessions_rename_body">El nombre de la mascota, o la habitación donde está el monitor.</string>
+    <string name="sessions_delete_session">Eliminar la sesión</string>
+    <string name="sessions_new">+ Configurar una sesión nueva</string>
+    <string name="time_just_now">hace un momento</string>
+    <string name="time_m_ago">hace <xliff:g id="n">%1$d</xliff:g> min</string>
+    <string name="time_h_ago">hace <xliff:g id="n">%1$d</xliff:g> h</string>
+    <string name="time_yesterday">ayer</string>
+    <string name="time_d_ago">hace <xliff:g id="n">%1$d</xliff:g> d</string>
+
+    <!-- ========================= apoyo / filas meta =============== -->
+    <string name="meta_support">Apoya a Tawny</string>
+    <string name="meta_tip_bitcoin">Dar propina en Bitcoin</string>
+    <string name="meta_about">Acerca de Tawny</string>
+    <string name="meta_email_us">Escríbenos</string>
+
+    <!-- =========================== fila de animaciones =========== -->
+    <string name="motion_title">Animaciones</string>
+    <string name="motion_still">Las mascotas se quedan quietas; más ligero en teléfonos viejos</string>
+    <string name="motion_on">Las mascotas se mueven un poco</string>
+
+    <!-- ============================= diagnóstico ================= -->
+    <string name="diag_title">Diagnóstico</string>
+    <string name="diag_subtitle">Las últimas sesiones, tal como las vio la app.</string>
+    <string name="diag_none">(todavía no hay nada registrado)</string>
+    <string name="diag_send_to_tawny">Enviar a Tawny</string>
+    <string name="diag_send_body">Envía el registro de arriba más el modelo de este teléfono y la versión de Android; nada más. Sin cuenta, sin ubicación.</string>
+    <string name="diag_send_another_way">Enviar de otra forma</string>
+    <string name="diag_send_report">Enviar informe</string>
+    <string name="diag_copy">Copiar al portapapeles</string>
+    <string name="diag_copied">Copiado</string>
+    <string name="diag_clear">Borrar el registro</string>
+    <string name="diag_clear_title">¿Borrar el registro?</string>
+    <string name="diag_clear_body">El historial registrado se elimina de este teléfono.</string>
+    <string name="diag_keep">Conservarlo</string>
+    <string name="diag_share_subject">Diagnóstico de Tawny v<xliff:g id="version">%1$s</xliff:g></string>
+    <string name="diag_share_chooser">Enviar el diagnóstico de Tawny</string>
+    <string name="diag_sending">Enviando…</string>
+    <string name="diag_sent_thanks">Enviado. ¡Gracias!</string>
+    <string name="diag_send_failed">No se pudo contactar a Tawny; elige otra forma</string>
+
+    <!-- ========================= servidores (avanzado) ========== -->
+    <string name="servers_meta_using_own">Servidores: usando los tuyos</string>
+    <string name="servers_meta_default">Servidores (avanzado)</string>
+    <string name="servers_title">Servidores</string>
+    <string name="servers_subtitle">Para ejecutar Tawny en tu propia infraestructura.</string>
+    <string name="servers_body">En tu propia red Wi-Fi no se usa nada de esto: el teléfono monitor lleva la sesión por sí mismo y nada sale de la casa. Esto aplica para ver desde otro lugar, lo que necesita un pequeño servicio siempre encendido que presente a los dos teléfonos y, cuando ninguno se puede alcanzar directamente, un relé TURN que reenvíe los datos (que siguen cifrados). Los pasos de despliegue están en rendezvous/README.md.\n\nDeja un campo vacío para usar el de Tawny. Si no se puede alcanzar tu relé, la app recurre al de Tawny en vez de fallar: una dirección equivocada aquí cuesta unos segundos, no una app que no funciona.</string>
+    <string name="servers_tailscale_title">La forma más fácil de usar los tuyos</string>
+    <string name="servers_tailscale_body">Instala Tailscale en una máquina siempre encendida que sea tuya (un servidor casero, una Pi, una laptop vieja) y en ella:\n\nnpm install &amp;&amp; node server.js\ntailscale serve --bg 8099\n\nEso te da una dirección wss:// privada (tumáquina.tu-tailnet.ts.net) a la que solo pueden llegar tus propios dispositivos: un certificado real, sin abrir puertos, nada expuesto a internet. Pégala en Rendezvous, más abajo.\n\nLos dos teléfonos tienen que estar en ese mismo tailnet para alcanzarla, lo que normalmente significa que ya pueden alcanzarse entre sí directamente, igual que dos teléfonos en un mismo Wi-Fi. Así que deja STUN y TURN vacíos; agrégalos solo si una llamada aún no conecta.</string>
+    <string name="servers_stunturn_title">STUN / TURN: normalmente no hace falta</string>
+    <string name="servers_stunturn_body">Es algo aparte de Rendezvous: esto solo importa si los dos teléfonos no pueden alcanzarse directamente una vez presentados. Si comparten una red privada (el mismo Wi-Fi, o el mismo tailnet de Tailscale) ya se cumple, y ambos campos de abajo pueden quedar vacíos.</string>
+    <string name="servers_stun_label">STUN (separados por comas)</string>
+    <string name="servers_turn_label">TURN (separados por comas)</string>
+    <string name="servers_turn_user_label">Usuario de TURN</string>
+    <string name="servers_turn_pass_label">Contraseña de TURN</string>
+    <string name="servers_turn_blank_hint">déjalo vacío salvo que hayas puesto TURN arriba</string>
+    <string name="servers_err_rendezvous">Debe empezar con wss:// (o ws:// en tu propia red local).</string>
+    <string name="servers_err_stun">Debe empezar con stun: o stuns:; revisa <xliff:g id="value">%1$s</xliff:g>.</string>
+    <string name="servers_err_turn">Debe empezar con turn: o turns:; revisa <xliff:g id="value">%1$s</xliff:g>.</string>
+    <string name="servers_err_turn_user">Obligatorio: este servidor TURN necesita un usuario.</string>
+    <string name="servers_err_turn_pass">Obligatorio: este servidor TURN necesita una contraseña.</string>
+    <string name="servers_err_turn_orphan">Agrega una dirección TURN para usar estas credenciales, o bórralas.</string>
+    <string name="servers_check_fields_title">Revisa los campos marcados</string>
+    <string name="servers_saved">Guardado</string>
+    <string name="servers_saved_warning_title">Guardado (con una advertencia)</string>
+    <string name="servers_saved_ws_body">ws:// no está cifrado. Sirve para un relé en tu propia red, pero por internet cualquiera en el camino puede leer la señalización. (Tu video y tu sonido siguen cifrados igual.)\n\nSurte efecto en la próxima sesión.</string>
+    <string name="servers_saved_yours_body">Ahora usando tus servidores. Los de Tawny quedan como respaldo automático si los tuyos no responden.\n\nSurte efecto en la próxima sesión.</string>
+    <string name="servers_saved_tawny_body">De vuelta a los servidores de Tawny.\n\nSurte efecto en la próxima sesión.</string>
+    <string name="servers_use_tawny">Usar los servidores de Tawny</string>
+    <string name="servers_back_title">¿Volver a los servidores de Tawny?</string>
+    <string name="servers_back_body">Tus direcciones se borran de este teléfono.</string>
+    <string name="servers_keep_them">Conservarlas</string>
+    <string name="servers_back_toast">De vuelta a los servidores de Tawny</string>
+    <string name="servers_using_yours_toast">Ahora usando tu rendezvous. El de Tawny queda como respaldo.</string>
+    <string name="servers_using_tawny_toast">Usando el rendezvous de Tawny</string>
+    <string name="servers_none_lan_only"> — ninguno en esta versión (solo red local).</string>
+
+    <!-- ============================= pantalla Acerca de ========== -->
+    <string name="about_version">Versión <xliff:g id="name">%1$s</xliff:g> · compilación <xliff:g id="code">%2$s</xliff:g></string>
+    <string name="about_intro">Tawny convierte dos teléfonos que ya no usas en una cámara para mascotas. Deja uno con tu gato o tu perro (en un cargador, apuntando a su lugar favorito) y quédate con el otro para mirar, escuchar y saludar.</string>
+    <string name="about_eyebrow_home">Tu casa, tu video</string>
+    <string name="about_home_body">La imagen y el sonido van directo de un teléfono al otro, cifrados para que solo tus dos teléfonos puedan leerlos. No hay cuenta que crear, nunca se graba nada, y ningún servidor intermedio ve tu video ni el código que vincula tus teléfonos. En tu propia red Wi-Fi, nada sale de la casa.</string>
+    <string name="about_eyebrow_thisphone">En este teléfono</string>
+    <string name="about_eyebrow_keeping">Mantenerlo en marcha</string>
+    <string name="about_keeping_body">Tawny es gratis, y así se queda: toda la app, para todos. Para monitorear desde fuera de casa, Tawny usa un pequeño relé que yo mantengo, y ese relé acumula una factura de datos cada mes. Si Tawny se gana un lugar en tu día, un poco para esa factura significa mucho. Aportar no desbloquea nada extra: sin insignias, sin funciones ocultas. Eso es a propósito.</string>
+    <string name="about_contact_body">Ese último correo es para cualquier cosa: una pregunta, un error, algo que se rompió. Si una conexión no aguanta, primero mantén pulsado el número de versión en cualquier pantalla y envía el pequeño registro de diagnóstico junto con tu mensaje.</string>
+    <string name="about_sound_credits">Créditos de sonido</string>
+    <string name="about_no_email">No hay app de correo; se copió la dirección</string>
+    <string name="about_email_chooser">Correo de soporte de Tawny</string>
+
+    <!-- ============================ propina Lightning =========== -->
+    <string name="tip_title">Propina Lightning</string>
+    <string name="tip_copy_address">Copiar dirección</string>
+    <string name="tip_copied">Copiado: <xliff:g id="address">%1$s</xliff:g></string>
+    <string name="tip_open_strike">Abrir strike.me en el navegador</string>
+    <string name="tip_body">Dar propina no desbloquea nada: sin insignias, sin funciones, nada. Va para el relé que te deja ver desde fuera de la casa.</string>
+    <string name="tip_open_wallet">Abrir en la billetera</string>
+    <string name="tip_wallet_body">Abre tu billetera Lightning. Sin cuenta, y los sats van directo a Tawny.</string>
+    <string name="tip_no_wallet_body">No hay billetera Lightning en este teléfono. Copia la dirección en una, o escanea esto desde un teléfono que tenga una.</string>
+    <string name="tip_no_wallet_open_failed">No se pudo abrir una billetera; se copió la dirección</string>
+
+    <!-- ============================== varios / enlaces ========== -->
+    <string name="no_browser_copied">No hay navegador para abrir <xliff:g id="url">%1$s</xliff:g>; se copió</string>
+    <string name="err_no_app_for_link">Ninguna app puede abrir ese enlace.</string>
+
+    <!-- =============================== Wi-Fi ==================== -->
+    <string name="wifi_title">Conéctate a Wi-Fi</string>
+    <string name="wifi_body">Tawny no encontró conexión de red. Conecta este teléfono a Wi-Fi e inténtalo de nuevo.</string>
+
+    <!-- ===================== consejo de batería del monitor ==== -->
+    <string name="battery_tip_title">Antes de dejarlo vigilando</string>
+    <string name="battery_tip_body">Este teléfono tiene que quedarse despierto para seguir transmitiendo, y lo que lo agota es la pantalla. Tres cosas ayudan más que ninguna otra:\n\n1.  Déjalo en un cargador.\n\n2.  Baja el brillo de la pantalla al mínimo y apaga el brillo automático, o el teléfono volverá a subirlo por su cuenta.\n\n3.  Cuando un visor se haya conectado, toca “Atenuar pantalla”. Tawny baja la luz de fondo casi a cero y sigue transmitiendo.</string>
+
+    <!-- ========================= nombre de la mascota ========== -->
+    <string name="name_ask_title">¿Cómo se llama tu mascota?</string>
+
+    <!-- ============================== escáner ================== -->
+    <string name="scan_title">Conéctate a tu monitor</string>
+    <string name="scan_body">Escanea el código QR del monitor con la cámara, o pega su enlace de vinculación.</string>
+    <string name="scan_use_camera">Usar la cámara</string>
+    <string name="scan_overlay_title">Escanea el código QR de tu monitor</string>
+    <string name="scan_overlay_hint">Mantén el código QR de tu monitor dentro del recuadro.</string>
+    <string name="scan_paste_instead">PEGAR UN ENLACE</string>
+    <string name="scan_not_tawny_title">No es un código de Tawny</string>
+    <string name="scan_not_tawny_body">Ese código QR no es un código de vinculación de Tawny. En el teléfono monitor, el código para escanear es el de su pantalla de vinculación.</string>
+    <string name="scan_keep_scanning">Seguir escaneando</string>
+
+    <!-- ================= estado del monitor / hoja de vinculación === -->
+    <string name="pairsheet_status_waiting">Esperando a que se conecte un teléfono</string>
+    <string name="pairsheet_status_one">1 teléfono viendo · pueden unirse <xliff:g id="n">%1$d</xliff:g> más</string>
+    <string name="pairsheet_status_some"><xliff:g id="now">%1$d</xliff:g> teléfonos viendo · pueden unirse <xliff:g id="free">%2$d</xliff:g> más</string>
+    <string name="pairsheet_status_max"><xliff:g id="now">%1$d</xliff:g> teléfonos viendo · es el máximo</string>
+    <string name="pairchip_show_code">Mostrar el código de vinculación</string>
+    <string name="pairchip_add_phone">Agregar otro teléfono</string>
+    <string name="pairsheet_scan_or_link">Escanea para ver, o comparte el enlace de abajo</string>
+    <string name="pairsheet_show_as_link">Mostrar como enlace</string>
+    <string name="pairsheet_rename">Renombrar</string>
+    <string name="pairsheet_link_copied">Enlace copiado</string>
+    <string name="pair_code_refreshes">El código se renueva en <xliff:g id="mm">%1$d</xliff:g>:<xliff:g id="ss">%2$02d</xliff:g></string>
+
+    <!-- ========================= cargando / conectando ========= -->
+    <string name="busy_starting_monitor">Iniciando el monitor</string>
+    <string name="live_connecting">Conectando</string>
+
+    <!-- =========================== falló el relé =============== -->
+    <string name="relay_failed_title">No se pudo iniciar el monitor</string>
+    <string name="relay_failed_body">Tawny no pudo abrir una conexión en esta red. Comprueba que este teléfono esté en Wi-Fi e inténtalo de nuevo.</string>
+
+    <!-- =============================== errores ================= -->
+    <string name="err_title">Algo salió mal</string>
+    <string name="err_body"><xliff:g id="message">%1$s</xliff:g>\n\nIntenta reiniciar la app, o comprueba que este teléfono tenga conexión de red.</string>
+    <string name="err_start_over">Empezar de nuevo</string>
+    <string name="err_could_not_start_session">No se pudo iniciar la sesión</string>
+    <string name="err_load_app">No se pudo cargar la app</string>
+
+    <!-- =========================== monitor apagado ============= -->
+    <string name="offline_title">El monitor aún no está encendido</string>
+    <string name="offline_body">Abre Tawny en el teléfono monitor de <xliff:g id="pet">%1$s</xliff:g> y déjalo abierto,\nluego toca Reintentar aquí.</string>
+
+    <!-- ============================ monitor lleno ============== -->
+    <string name="full_title">Ese monitor está lleno</string>
+    <string name="full_body">Este monitor ya tiene <xliff:g id="max">%1$d</xliff:g> teléfonos viendo.</string>
+
+    <!-- ============================== capturas ================ -->
+    <string name="snap_saved_photo">Guardado en Imágenes/Tawny</string>
+    <string name="snap_save_photo_failed">No se pudo guardar la foto</string>
+    <string name="snap_saved_video">Guardado en Videos/Tawny</string>
+    <string name="snap_save_video_failed">No se pudo guardar el video</string>
+
+    <!-- =============================== a11y ================== -->
+    <string name="a11y_theme_toggle">Cambiar entre tema claro y oscuro</string>
+    <string name="a11y_app_version">Versión de la app; mantén pulsado para el diagnóstico</string>
+    <string name="a11y_back">Atrás</string>
+    <string name="a11y_animations">Animaciones</string>
+</resources>

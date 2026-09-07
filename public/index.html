@@ -293,7 +293,7 @@
          talk-back; empty on the Handheld. -->
     <div id="peer-audio" hidden></div>
 
-    <div id="loader" class="loader" role="status" aria-label="Connecting" hidden>
+    <div id="loader" class="loader" role="status" aria-label="Connecting" data-i18n-aria="w_aria_connecting" hidden>
       <i></i><i></i><i></i><i></i><i></i>
     </div>
 
@@ -302,11 +302,11 @@
     <div id="rail" class="rail">
       <div class="rail-left">
         <span id="dot" class="dot"></span>
-        <span id="statusline">Connecting</span>
+        <span id="statusline" data-i18n="w_status_connecting">Connecting</span>
       </div>
-      <div id="meter" class="meter" role="img" aria-label="Sound level at the far end"></div>
+      <div id="meter" class="meter" role="img" aria-label="Sound level at the far end" data-i18n-aria="w_aria_sound_level"></div>
       <div class="rail-right">
-        <span id="peercount" class="tag-count" hidden aria-label="Phones watching">
+        <span id="peercount" class="tag-count" hidden aria-label="Phones watching" data-i18n-aria="w_aria_phones_watching">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.6"/><line x1="10.5" y1="18.4" x2="13.5" y2="18.4"/></svg><b></b>
         </span>
         <span id="peerlabel" class="tag-device" hidden></span>
@@ -334,7 +334,7 @@
       <span id="stage-note-body"></span>
     </div>
 
-    <div id="talkflag" class="talkflag" hidden>Listening to you</div>
+    <div id="talkflag" class="talkflag" data-i18n="w_listening_to_you" hidden>Listening to you</div>
 
     <!-- Lens selector — shown when the monitor has multiple cameras -->
     <div id="lens-bar" class="lens-bar" hidden></div>
@@ -345,19 +345,19 @@
          hold without hunting for it — see the .talk-fab note in style.css
          for why this moved out of the control row. Viewer only; CSS keys
          its visibility off #live[data-role]. -->
-    <button id="btn-talk" class="talk-fab" type="button" aria-label="Hold to talk">
+    <button id="btn-talk" class="talk-fab" type="button" aria-label="Hold to talk" data-i18n-aria="w_hold_to_talk">
       <svg class="talk-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0"/><path d="M12 17v4M9 21h6"/></svg>
-      <span class="talk-state">Hold to talk</span>
+      <span class="talk-state" data-i18n="w_hold_to_talk">Hold to talk</span>
     </button>
 
     <div id="sas" class="sas" hidden>
       <!-- Replaced from app.js before this card is ever shown: the Monitor is
            asking about one named phone, a Handheld about its own connection. -->
-      <p id="sas-note">Check this code matches the one on the other phone:</p>
+      <p id="sas-note" data-i18n="w_sas_note_default">Check this code matches the one on the other phone:</p>
       <strong id="sas-code" class="sas-code"></strong>
       <div class="sas-actions">
-        <button id="sas-ok" type="button" class="wide primary">Looks right</button>
-        <button id="sas-no" type="button" class="wide ghost">Disconnect</button>
+        <button id="sas-ok" type="button" class="wide primary" data-i18n="w_sas_looks_right">Looks right</button>
+        <button id="sas-no" type="button" class="wide ghost" data-i18n="w_sas_disconnect">Disconnect</button>
       </div>
     </div>
   </div>
@@ -365,55 +365,55 @@
   <nav id="controls-viewer" class="controls" hidden>
     <button id="btn-chime" class="ctl" type="button">
       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 3H4l2-3Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></span>
-      <span>Chime</span>
+      <span data-i18n="w_ctl_chime">Chime</span>
     </button>
     <button id="btn-torch" class="ctl" type="button" aria-pressed="false">
       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5.6h8l-1.3 3.8H9.3L8 5.6Z"/><path d="M9.3 9.4h5.4v10.2a1.8 1.8 0 0 1-1.8 1.8h-1.8a1.8 1.8 0 0 1-1.8-1.8V9.4Z"/><path d="M9.7 13.4h4.6"/><g class="beam"><path d="M12 3.4V1.6"/><path d="M6.9 4.5 5.7 3"/><path d="m17.1 4.5 1.2-1.5"/></g></svg></span>
-      <span>Light</span>
+      <span data-i18n="w_ctl_light">Light</span>
     </button>
     <button id="btn-cam" class="ctl" type="button">
       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10.5 5-2.5v8l-5-2.5"/></svg></span>
-      <span>My camera</span>
+      <span data-i18n="w_ctl_my_camera">My camera</span>
     </button>
     <button id="btn-snap" class="ctl" type="button">
       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2h7L18 8h2a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
-      <span>Snapshot</span>
+      <span data-i18n="w_ctl_snapshot">Snapshot</span>
     </button>
     <button id="btn-video" class="ctl" type="button" aria-pressed="false">
       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><circle class="rec-dot" cx="12" cy="12" r="6.5" fill="currentColor" stroke="none"/></svg></span>
-      <span>Record</span>
+      <span data-i18n="w_ctl_record">Record</span>
     </button>
     <button id="btn-leave" class="ctl danger" type="button">
       <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path transform="rotate(135 12 12)" d="M12 9c-2.4 0-4.7.37-6.86 1.05-.9.28-1.53 1.09-1.62 2.02l-.15 1.52a1.5 1.5 0 0 0 1.02 1.57l2.53.84a1.5 1.5 0 0 0 1.9-.98l.5-1.6c1.98-.6 4.42-.6 6.4 0l.5 1.6a1.5 1.5 0 0 0 1.9.98l2.53-.84a1.5 1.5 0 0 0 1.02-1.57l-.15-1.52c-.09-.93-.72-1.74-1.62-2.02A23.2 23.2 0 0 0 12 9Z"/></svg></span>
-      <span>Hang up</span>
+      <span data-i18n="w_ctl_hang_up">Hang up</span>
     </button>
   </nav>
 
   <nav id="controls-station" class="controls" hidden>
     <button id="btn-flip" class="ctl" type="button">
       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13.5" r="3"/><path d="M9 4h6"/><path d="M15.5 12.5a3.5 3.5 0 0 0-6-2M8.5 14.5a3.5 3.5 0 0 0 6 2"/></svg></span>
-      <span>Flip camera</span>
+      <span data-i18n="w_ctl_flip_camera">Flip camera</span>
     </button>
     <button id="btn-mute" class="ctl" type="button">
       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0"/><path d="M12 17v4M9 21h6"/><line class="slash" x1="4" y1="3.5" x2="20" y2="20.5"/></svg></span>
-      <span>Mute mic</span>
+      <span data-i18n="w_ctl_mute_mic">Mute mic</span>
     </button>
     <button id="btn-dim" class="ctl" type="button">
       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13A8 8 0 1 1 11 4a6 6 0 0 0 9 9Z"/></svg></span>
-      <span>Dim screen</span>
+      <span data-i18n="w_ctl_dim_screen">Dim screen</span>
     </button>
     <button id="btn-stop" class="ctl danger" type="button">
       <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path transform="rotate(135 12 12)" d="M12 9c-2.4 0-4.7.37-6.86 1.05-.9.28-1.53 1.09-1.62 2.02l-.15 1.52a1.5 1.5 0 0 0 1.02 1.57l2.53.84a1.5 1.5 0 0 0 1.9-.98l.5-1.6c1.98-.6 4.42-.6 6.4 0l.5 1.6a1.5 1.5 0 0 0 1.9.98l2.53-.84a1.5 1.5 0 0 0 1.02-1.57l-.15-1.52c-.09-.93-.72-1.74-1.62-2.02A23.2 23.2 0 0 0 12 9Z"/></svg></span>
-      <span>End call</span>
+      <span data-i18n="w_ctl_end_call">End call</span>
     </button>
   </nav>
 
   <div id="chimes" class="chimes" hidden>
-    <button type="button" data-sound="bark">Dog toy</button>
-    <button type="button" data-sound="pspsps">Psp psp psp</button>
-    <button type="button" data-sound="meow">Meow</button>
-    <button type="button" data-sound="goodboy">Good boy</button>
-    <button type="button" data-sound="bell">Bell</button>
+    <button type="button" data-sound="bark" data-i18n="w_chime_bark">Dog toy</button>
+    <button type="button" data-sound="pspsps" data-i18n="w_chime_pspsps">Psp psp psp</button>
+    <button type="button" data-sound="meow" data-i18n="w_chime_meow">Meow</button>
+    <button type="button" data-sound="goodboy" data-i18n="w_chime_goodboy">Good boy</button>
+    <button type="button" data-sound="bell" data-i18n="w_chime_bell">Bell</button>
   </div>
 </main>
 
@@ -486,6 +486,7 @@
 
 <div id="toast" class="toast" hidden></div>
 
+<script src="i18n.js"></script>
 <script src="app.js" type="module"></script>
 </body>
 </html>

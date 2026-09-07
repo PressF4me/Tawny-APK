@@ -1,4 +1,273 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">Tawny</string>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="app_name" translatable="false">Tawny</string>
+
+    <!-- ============================ language switcher ======================= -->
+    <string name="a11y_language">Language</string>
+    <string name="language_title">Language</string>
+    <string name="close">Close</string>
+
+    <!-- ================================ common ============================= -->
+    <string name="common_not_now">Not now</string>
+    <string name="common_back">Back</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_ok">OK</string>
+    <string name="common_continue">Continue</string>
+    <string name="common_save">Save</string>
+    <string name="common_connect">Connect</string>
+    <string name="common_try_again">Try again</string>
+    <string name="common_retry">Retry</string>
+    <string name="common_go_back">Go back</string>
+    <string name="common_remove">Remove</string>
+    <string name="common_clear">Clear</string>
+    <string name="common_got_it">Got it</string>
+    <string name="common_paste_a_link">Paste a link</string>
+    <string name="switch_on">On</string>
+    <string name="switch_off">Off</string>
+    <string name="default_pet_name">your pet</string>
+    <string name="pet_monitor">Pet Monitor</string>
+
+    <!-- ================================ welcome ============================ -->
+    <string name="welcome_blurb">Keep an eye on your pet from the next room or across town. You need two phones: one stays with your pet, one comes with you. No accounts, nothing to set up.</string>
+    <string name="welcome_get_started">Get started</string>
+    <string name="welcome_have_code">I already have a code to scan</string>
+
+    <!-- ============================== role picker ========================== -->
+    <string name="role_title">Set up Tawny</string>
+    <string name="role_subtitle">How will you use this phone?</string>
+    <string name="role_monitor_tag">The Monitor</string>
+    <string name="role_monitor_line">Stays with your pet</string>
+    <string name="role_monitor_blurb">Plug it in and point the camera. It streams live video and sound, and shows a code so others can watch too.</string>
+    <string name="role_viewer_tag">The Viewer</string>
+    <string name="role_viewer_line">Watch from this phone</string>
+    <string name="role_viewer_blurb">Check in on your pet from here — around the house on Wi-Fi, or from out and about.</string>
+
+    <!-- ============================= handheld home ======================== -->
+    <string name="handheld_connected">Connected to <xliff:g id="pet" example="Mochi">%1$s</xliff:g>\'s monitor. Tap below to check in from anywhere.</string>
+    <string name="handheld_watch_now">Watch <xliff:g id="pet" example="Mochi">%1$s</xliff:g> now</string>
+    <string name="handheld_connect_different">Connect to a different monitor</string>
+
+    <!-- ============================== permissions ========================= -->
+    <string name="perm_needs_toast">Tawny needs the camera and microphone for this.</string>
+    <string name="perm_needed_title">Permission needed</string>
+    <string name="perm_needed_body">Tawny can’t stream without the camera and microphone, and Android won’t ask again from here. You can switch them on in this app’s system settings.</string>
+    <string name="perm_open_settings">Open settings</string>
+    <string name="perm_open_settings_failed">Could not open settings.</string>
+    <string name="perm_disclose_cam_title">Camera &amp; microphone</string>
+    <string name="perm_disclose_mic_title">Microphone</string>
+    <string name="perm_disclose_cam_body">This phone will use its camera and microphone to stream your pet to your other phone while Tawny is open. The video and sound are sent encrypted, directly between your devices, and are never recorded or stored anywhere.</string>
+    <string name="perm_disclose_mic_body">Tawny will use this phone’s microphone so you can talk back to your pet. Your voice is sent encrypted, directly to the monitor phone, and is never recorded or stored anywhere.</string>
+
+    <!-- ============================ end call / stop ====================== -->
+    <string name="endcall_stop_title">Stop watching?</string>
+    <string name="endcall_end_title">End the call?</string>
+    <string name="endcall_stop_body">Viewers won’t be able to check in until you start monitoring again.</string>
+    <string name="endcall_end_body">You can watch again from the home screen.</string>
+    <string name="endcall_stop">Stop</string>
+    <string name="endcall_end">End call</string>
+    <string name="endcall_keep_going">Keep going</string>
+
+    <!-- ============================== pairing ============================ -->
+    <string name="pair_link_bad_title">That link didn’t work</string>
+    <string name="pair_link_bad_body">It looks like a Tawny link but Tawny can’t read it. Ask for a fresh code from the monitor phone.</string>
+    <string name="pair_link_paste_bad_body">It doesn’t look like a Tawny pairing link. Copy the whole thing — it starts with tawny://pair — and try again.</string>
+    <string name="pair_confirm_title">Connect to “<xliff:g id="name">%1$s</xliff:g>”?</string>
+    <string name="pair_where_lan">a monitor on your Wi-Fi</string>
+    <string name="pair_where_internet">your monitor over the internet</string>
+    <string name="pair_confirm_body">This code connects to <xliff:g id="where">%1$s</xliff:g>.\n\n<xliff:g id="detail">%2$s</xliff:g></string>
+    <string name="pair_confirm_replacing">Connecting will replace the monitor this phone is paired with now.</string>
+    <string name="pair_confirm_own">Only connect if this is your own monitor.</string>
+    <string name="pair_expired_title">That code has expired</string>
+    <string name="pair_expired_body">Pairing codes stop working ten minutes after the monitor phone shows them, so an old photo of one cannot be used later.\n\nOn the monitor phone, go back to its pairing screen — it shows a fresh code — and scan that one.</string>
+    <string name="pair_scan_again">Scan again</string>
+    <string name="pair_paste_title">Paste the pairing link</string>
+    <string name="pair_paste_body">On the monitor phone, tap “Show as link” and send it to yourself.</string>
+
+    <!-- ============================= camera busy ======================== -->
+    <string name="cam_busy_title">The camera is busy</string>
+    <string name="cam_busy_body">Tawny couldn’t open this phone’s camera — another app may be using it. Close that app and try again, or paste the monitor’s pairing link instead.</string>
+
+    <!-- ============================ sessions home ======================= -->
+    <string name="sessions_subtitle">Pick up where you left off</string>
+    <string name="sessions_role_monitor">Monitor</string>
+    <string name="sessions_role_viewer">Viewer</string>
+    <string name="sessions_delete">Delete</string>
+    <string name="sessions_remove_title">Remove session?</string>
+    <string name="sessions_remove_body">“<xliff:g id="pet">%1$s</xliff:g>” will be removed from your recent sessions.</string>
+    <string name="sessions_menu_body">What would you like to do?</string>
+    <string name="sessions_edit_name">Edit name</string>
+    <string name="sessions_rename_title">Rename session</string>
+    <string name="sessions_rename_body">The pet’s name, or the room the monitor is in.</string>
+    <string name="sessions_delete_session">Delete session</string>
+    <string name="sessions_new">+ Set up a new session</string>
+    <string name="time_just_now">just now</string>
+    <string name="time_m_ago"><xliff:g id="n">%1$d</xliff:g>m ago</string>
+    <string name="time_h_ago"><xliff:g id="n">%1$d</xliff:g>h ago</string>
+    <string name="time_yesterday">yesterday</string>
+    <string name="time_d_ago"><xliff:g id="n">%1$d</xliff:g>d ago</string>
+
+    <!-- ========================= support / meta rows =================== -->
+    <string name="meta_support">Support Tawny</string>
+    <string name="meta_tip_bitcoin">Tip in Bitcoin</string>
+    <string name="meta_about">About Tawny</string>
+    <string name="meta_email_us">Email us</string>
+
+    <!-- ============================ animations row ===================== -->
+    <string name="motion_title">Animations</string>
+    <string name="motion_still">The pets hold still — lighter on older phones</string>
+    <string name="motion_on">The pets potter about</string>
+
+    <!-- ============================= diagnostics ====================== -->
+    <string name="diag_title">Diagnostics</string>
+    <string name="diag_subtitle">The last few sessions, as the app saw them.</string>
+    <string name="diag_none">(nothing recorded yet)</string>
+    <string name="diag_send_to_tawny">Send to Tawny</string>
+    <string name="diag_send_body">Sends the log above plus this phone’s model and Android version — nothing else. No account, no location.</string>
+    <string name="diag_send_another_way">Send another way</string>
+    <string name="diag_send_report">Send report</string>
+    <string name="diag_copy">Copy to clipboard</string>
+    <string name="diag_copied">Copied</string>
+    <string name="diag_clear">Clear log</string>
+    <string name="diag_clear_title">Clear the log?</string>
+    <string name="diag_clear_body">The recorded history is deleted from this phone.</string>
+    <string name="diag_keep">Keep it</string>
+    <string name="diag_share_subject">Tawny diagnostics v<xliff:g id="version">%1$s</xliff:g></string>
+    <string name="diag_share_chooser">Send Tawny diagnostics</string>
+    <string name="diag_sending">Sending…</string>
+    <string name="diag_sent_thanks">Sent — thank you</string>
+    <string name="diag_send_failed">Couldn’t reach Tawny — pick another way</string>
+
+    <!-- ============================ servers (advanced) ================ -->
+    <string name="servers_meta_using_own">Servers — using your own</string>
+    <string name="servers_meta_default">Servers (advanced)</string>
+    <string name="servers_title">Servers</string>
+    <string name="servers_subtitle">For running Tawny on your own infrastructure.</string>
+    <string name="servers_body">On your own Wi-Fi none of this is used: the monitor phone carries the session itself and nothing leaves the house. These apply to watching from somewhere else, which needs a small always-on service to introduce the two phones — and, when neither can be reached directly, a TURN relay to forward the (still encrypted) media. Deploy steps are in rendezvous/README.md.\n\nLeave a field empty to use Tawny’s own. If your relay cannot be reached, the app falls back to Tawny’s rather than failing — a wrong address here costs a few seconds, not a working app.</string>
+    <string name="servers_tailscale_title">The easiest way to run your own</string>
+    <string name="servers_tailscale_body">Install Tailscale on an always-on machine you own — a home server, a Pi, an old laptop — and on it:\n\nnpm install &amp;&amp; node server.js\ntailscale serve --bg 8099\n\nThat gives you a private wss:// address (yourmachine.your-tailnet.ts.net) that only your own devices can reach — a real certificate, no port-forwarding, nothing exposed to the internet. Paste it into Rendezvous below.\n\nBoth phones need to be on that same tailnet to reach it — which usually means they can already reach each other directly too, the same way two phones on one Wi-Fi can. So leave STUN and TURN further down empty; add them only if a call still won’t connect.</string>
+    <string name="servers_stunturn_title">STUN / TURN — usually not needed</string>
+    <string name="servers_stunturn_body">A separate concern from Rendezvous above: these only matter if the two phones can’t already reach each other directly once introduced. If they share a private network — the same Wi-Fi, or the same Tailscale tailnet — that’s already true, and both fields below can stay empty.</string>
+    <string name="servers_stun_label">STUN (comma separated)</string>
+    <string name="servers_turn_label">TURN (comma separated)</string>
+    <string name="servers_turn_user_label">TURN username</string>
+    <string name="servers_turn_pass_label">TURN password</string>
+    <string name="servers_turn_blank_hint">blank unless TURN is set above</string>
+    <string name="servers_err_rendezvous">Must start with wss:// (or ws:// on your own LAN).</string>
+    <string name="servers_err_stun">Must start with stun: or stuns: — check <xliff:g id="value">%1$s</xliff:g>.</string>
+    <string name="servers_err_turn">Must start with turn: or turns: — check <xliff:g id="value">%1$s</xliff:g>.</string>
+    <string name="servers_err_turn_user">Required — this TURN server needs a username.</string>
+    <string name="servers_err_turn_pass">Required — this TURN server needs a password.</string>
+    <string name="servers_err_turn_orphan">Add a TURN address to use these credentials, or clear them.</string>
+    <string name="servers_check_fields_title">Check the highlighted fields</string>
+    <string name="servers_saved">Saved</string>
+    <string name="servers_saved_warning_title">Saved — one warning</string>
+    <string name="servers_saved_ws_body">ws:// is not encrypted. It is fine for a relay on your own network, but over the internet anyone on the path can read the signalling. (Your video and sound stay encrypted either way.)\n\nTakes effect on the next session.</string>
+    <string name="servers_saved_yours_body">Using your servers now. Tawny’s stay as the automatic fallback if yours doesn’t answer.\n\nTakes effect on the next session.</string>
+    <string name="servers_saved_tawny_body">Back to Tawny’s own servers.\n\nTakes effect on the next session.</string>
+    <string name="servers_use_tawny">Use Tawny’s servers</string>
+    <string name="servers_back_title">Back to Tawny’s servers?</string>
+    <string name="servers_back_body">Your addresses are cleared from this phone.</string>
+    <string name="servers_keep_them">Keep them</string>
+    <string name="servers_back_toast">Back to Tawny’s servers</string>
+    <string name="servers_using_yours_toast">Now using your rendezvous. Tawny’s stays as the fallback.</string>
+    <string name="servers_using_tawny_toast">Using Tawny’s rendezvous</string>
+    <string name="servers_none_lan_only"> — none in this build (LAN only).</string>
+
+    <!-- ============================= about screen ==================== -->
+    <string name="about_version">Version <xliff:g id="name">%1$s</xliff:g> · build <xliff:g id="code">%2$s</xliff:g></string>
+    <string name="about_intro">Tawny turns two spare phones into a pet camera. Leave one with your cat or dog — on a charger, pointed at their favourite spot — and keep the other with you to look in, listen, and say hello.</string>
+    <string name="about_eyebrow_home">Your home, your video</string>
+    <string name="about_home_body">The picture and sound go straight from one phone to the other, scrambled so that only your two phones can read them. There is no account to make, nothing is ever recorded, and no server in between ever sees your video or the code that pairs your phones. On your own Wi-Fi, none of it leaves the house.</string>
+    <string name="about_eyebrow_thisphone">On this phone</string>
+    <string name="about_eyebrow_keeping">Keeping it running</string>
+    <string name="about_keeping_body">Tawny is free, and it stays that way — every part of it, for everyone. Looking in from outside the house hops through a small relay I run, and that relay adds up a bandwidth bill every month. If Tawny earns a place in your day, a little toward that bill means a lot. Chipping in unlocks nothing extra — no badge, no hidden features. That part is on purpose.</string>
+    <string name="about_contact_body">That last one is for anything at all — a question, a bug, something that broke. If a connection will not hold, long-press the version number on any screen first and send the little diagnostics log along with your note.</string>
+    <string name="about_sound_credits">Sound credits</string>
+    <string name="about_no_email">No email app — address copied</string>
+    <string name="about_email_chooser">Tawny support email</string>
+
+    <!-- ============================ lightning tip =================== -->
+    <string name="tip_title">Lightning tip</string>
+    <string name="tip_copy_address">Copy address</string>
+    <string name="tip_copied">Copied <xliff:g id="address">%1$s</xliff:g></string>
+    <string name="tip_open_strike">Open strike.me in a browser</string>
+    <string name="tip_body">Tipping unlocks nothing — no badge, no features, nothing. It goes towards the relay that lets you watch from outside the house.</string>
+    <string name="tip_open_wallet">Open in wallet</string>
+    <string name="tip_wallet_body">Opens your Lightning wallet. No account, and the sats go straight to Tawny.</string>
+    <string name="tip_no_wallet_body">No Lightning wallet on this phone. Copy the address into one, or scan this from a phone that has one.</string>
+    <string name="tip_no_wallet_open_failed">Couldn’t open a wallet — address copied</string>
+
+    <!-- ============================== misc / links ================= -->
+    <string name="no_browser_copied">No browser to open <xliff:g id="url">%1$s</xliff:g> — copied instead</string>
+    <string name="err_no_app_for_link">No app can open that link.</string>
+
+    <!-- =============================== wi-fi ======================= -->
+    <string name="wifi_title">Connect to Wi-Fi</string>
+    <string name="wifi_body">Tawny couldn’t find a network connection. Connect this phone to Wi-Fi and try again.</string>
+
+    <!-- ========================= monitor battery tip ============== -->
+    <string name="battery_tip_title">Before you leave it watching</string>
+    <string name="battery_tip_body">This phone has to stay awake to keep streaming, and its screen is what drains it. Three things help more than anything else:\n\n1.  Leave it on a charger.\n\n2.  Turn the screen brightness right down — and turn adaptive brightness off, or the phone will quietly brighten itself back up.\n\n3.  Once a viewer has connected, tap “Dim screen”. Tawny takes the backlight down to almost nothing and keeps streaming.</string>
+
+    <!-- ============================= pet name ==================== -->
+    <string name="name_ask_title">What’s your pet’s name?</string>
+
+    <!-- ============================== scanner =================== -->
+    <string name="scan_title">Connect to your monitor</string>
+    <string name="scan_body">Scan the monitor’s QR code with the camera, or paste its pairing link instead.</string>
+    <string name="scan_use_camera">Use camera</string>
+    <string name="scan_overlay_title">Scan your monitor’s QR code</string>
+    <string name="scan_overlay_hint">Hold your pet monitor’s QR code in frame.</string>
+    <string name="scan_paste_instead">PASTE A LINK INSTEAD</string>
+    <string name="scan_not_tawny_title">Not a Tawny code</string>
+    <string name="scan_not_tawny_body">That QR code isn’t a Tawny pairing code. On the monitor phone, the code to scan is the one on its pairing screen.</string>
+    <string name="scan_keep_scanning">Keep scanning</string>
+
+    <!-- ==================== monitor status / pairing sheet ======= -->
+    <string name="pairsheet_status_waiting">Waiting for a phone to connect</string>
+    <string name="pairsheet_status_one">1 phone watching · <xliff:g id="n">%1$d</xliff:g> more can join</string>
+    <string name="pairsheet_status_some"><xliff:g id="now">%1$d</xliff:g> phones watching · <xliff:g id="free">%2$d</xliff:g> more can join</string>
+    <string name="pairsheet_status_max"><xliff:g id="now">%1$d</xliff:g> phones watching · that is the maximum</string>
+    <string name="pairchip_show_code">Show the pairing code</string>
+    <string name="pairchip_add_phone">Add another phone</string>
+    <string name="pairsheet_scan_or_link">Scan to watch, or share the link below</string>
+    <string name="pairsheet_show_as_link">Show as link</string>
+    <string name="pairsheet_rename">Rename</string>
+    <string name="pairsheet_link_copied">Link copied</string>
+    <string name="pair_code_refreshes">Code refreshes in <xliff:g id="mm">%1$d</xliff:g>:<xliff:g id="ss">%2$02d</xliff:g></string>
+
+    <!-- ========================= busy / connecting =============== -->
+    <string name="busy_starting_monitor">Starting the monitor</string>
+    <string name="live_connecting">Connecting</string>
+
+    <!-- =========================== relay failed ================= -->
+    <string name="relay_failed_title">Could not start the monitor</string>
+    <string name="relay_failed_body">Tawny could not open a connection on this network. Check this phone is on Wi-Fi, then try again.</string>
+
+    <!-- =============================== errors =================== -->
+    <string name="err_title">Something went wrong</string>
+    <string name="err_body"><xliff:g id="message">%1$s</xliff:g>\n\nTry restarting the app, or check that this phone has a network connection.</string>
+    <string name="err_start_over">Start over</string>
+    <string name="err_could_not_start_session">Could not start the session</string>
+    <string name="err_load_app">Could not load the app</string>
+
+    <!-- =========================== monitor offline ============== -->
+    <string name="offline_title">Monitor isn’t on yet</string>
+    <string name="offline_body">Start Tawny on <xliff:g id="pet">%1$s</xliff:g>\'s monitor phone and leave it open,\nthen tap Retry here.</string>
+
+    <!-- ============================ monitor full ================ -->
+    <string name="full_title">That monitor is full</string>
+    <string name="full_body">This monitor already has <xliff:g id="max">%1$d</xliff:g> phones watching.</string>
+
+    <!-- ============================== snapshots ================ -->
+    <string name="snap_saved_photo">Saved to Pictures/Tawny</string>
+    <string name="snap_save_photo_failed">Could not save the snapshot</string>
+    <string name="snap_saved_video">Saved to Movies/Tawny</string>
+    <string name="snap_save_video_failed">Could not save the video</string>
+
+    <!-- =============================== a11y ==================== -->
+    <string name="a11y_theme_toggle">Toggle light / dark theme</string>
+    <string name="a11y_app_version">App version — long-press for diagnostics</string>
+    <string name="a11y_back">Back</string>
+    <string name="a11y_animations">Animations</string>
 </resources>
