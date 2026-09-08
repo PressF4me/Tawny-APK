@@ -65,7 +65,10 @@ Five fields, all optional, all `SharedPreferences` (`srvRendezvous`, `srvStun`,
 comma-separated `stun:`/`stuns:` URLs, comma-separated `turn:`/`turns:` URLs,
 and a TURN username and password. Empty means "use Tawny's", which is also the
 reset. Addresses are checked against their scheme before they are saved, and a
-value that fails the check later is ignored rather than dialled.
+value that fails the check later is ignored rather than dialled. If you're
+running the Tawny Docker container as your remote setup, leave this screen
+completely blank — the container reaches the phone over your LAN and needs no
+configuration here.
 
 **The built-in relay is preferred against, never replaced.** If the custom
 rendezvous does not answer — two failed dials, or a host that accepts the socket
