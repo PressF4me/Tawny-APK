@@ -75,16 +75,20 @@ SECURITY.md              threat model, hardening, residual risk
 
 ## Self-hosting the web client
 
-`server.js` (Node 18+) serves `public/` and the signalling relay:
+`server.js` (Node 18+) serves `public/` and the signalling relay. For a quick
+local run:
 
 ```sh
 npm install && node server.js       # http://localhost:8099
 ```
 
 Browsers only release the camera/mic on `https://` (or `localhost`), so put it
-behind TLS — a reverse proxy, or `tailscale serve --bg 8099`. Environment:
-`PORT`, `HOST`, `TAWNY_TOKEN`, `ALLOWED_HOSTS`, `STUN_URLS`, `RENDEZVOUS_URL`,
-`TURN_MODE`, `TAWNY_TURN_URLS`, `TAWNY_TURN_SECRET`. See `docker-compose.yml`.
+behind TLS. Environment: `PORT`, `HOST`, `ALLOWED_HOSTS`, `STUN_URLS`,
+`RENDEZVOUS_URL`, `TURN_MODE`, `TAWNY_TURN_URLS`, `TAWNY_TURN_SECRET`.
+
+For a real deployment — container, automatic HTTPS, and an optional bundled TURN
+relay — use the sibling **`../Tawny Docker/`** folder and its
+[`README.md`](../Tawny%20Docker/README.md).
 
 No CDN, no web fonts fetched at runtime, no analytics — the app works on a
 network with no internet at all.

@@ -151,7 +151,8 @@ on `window` so the page can show honest status when iOS suspends it. All of it i
 feature-detected, so `public/app.js` behaves identically in a normal browser.
 
 If you edit the web app, there is nothing to rebuild — the shell loads it from
-your server, so `docker compose up -d --build` is the whole deploy.
+your server, so `docker compose up -d --build` (from `../Tawny Docker/`) is the
+whole deploy.
 
 ---
 

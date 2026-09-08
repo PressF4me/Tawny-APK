@@ -1,5 +1,9 @@
 # Tawny rendezvous
 
+**For phone-to-phone remote pairing** when the Monitor and the Viewer are on
+different networks; see `../Tawny Docker/` instead if you want a browser Viewer
+over your own Tailscale.
+
 The one always-on piece Tawny needs for **remote** (off-Wi-Fi) monitoring. It is
 a signaling *introducer* only — it never sees a video frame and never sees the
 channel key. Devices only ever dial **out** to it over `wss:443`, so no inbound

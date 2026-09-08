@@ -5,7 +5,10 @@
 // side from a secret the server never receives. See SECURITY.md.
 
 import http from 'node:http';
+import net from 'node:net';
 import { readFile } from 'node:fs/promises';
+import { readFileSync, existsSync } from 'node:fs';
+import { execFile } from 'node:child_process';
 import { join, extname, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash, createHmac } from 'node:crypto';
@@ -14,17 +17,76 @@ import { PRIVACY_HTML, PRIVACY_HEADERS } from './rendezvous/privacy.js';
 
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
-const STUN = list(process.env.STUN_URLS);
+// One plain HTTP listener, and that is all.
+//
+// A browser grants getUserMedia on a secure origin only, so talk-back needs
+// https — but this process does not terminate it. `tailscale serve` does, with
+// a Let's Encrypt certificate for <node>.<tailnet>.ts.net, and proxies to this
+// listener on loopback. That is the only TLS in this deployment.
+//
+// It used to be otherwise: the container generated a certificate authority in
+// its volume, signed its own LAN address, and asked the operator to import the
+// CA on every device they wanted to watch from. That is gone. Nobody should
+// have to manage certificates to watch their cat, and a CA the operator
+// installs is a far bigger thing to hand someone than the problem it solved.
+// Public STUN by default. A container that is never told anything at all should
+// still gather server-reflexive candidates, which is what makes a plain
+// `docker run` work across two different networks. STUN_URLS=off disables it
+// for an air-gapped LAN deployment.
+const STUN = process.env.STUN_URLS === 'off'
+  ? []
+  : list(process.env.STUN_URLS || 'stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478');
 const ALLOWED_HOSTS = list(process.env.ALLOWED_HOSTS).map((h) => h.toLowerCase());
 const TRUST_PROXY = process.env.TRUST_PROXY !== 'off';
 
 // Remote relay (all optional). RENDEZVOUS_URL is only echoed for a browser
-// client that fetches /config.json from this origin. TURN is coturn with
-// use-auth-secret (static-auth-secret === TAWNY_TURN_SECRET).
+// client that fetches /config.json from this origin; left empty, /config.json
+// echoes back the origin the request actually arrived on, so a client always
+// gets an address it has already proved it can reach. TURN is coturn with
+// use-auth-secret (static-auth-secret === TURN_SECRET).
 const RENDEZVOUS_URL = process.env.RENDEZVOUS_URL || '';
 const TURN_MODE = process.env.TURN_MODE || 'auto';
+
+// TURN. Two flavours, tried in this order by turnCreds():
+//
+//  1. An explicit relay        — TAWNY_TURN_URLS + TAWNY_TURN_SECRET.
+//  2. The relay in this image  — TURN_PORT, with the URL host derived per
+//     request from the Host header, and the secret generated at container start
+//     (docker/entrypoint.sh writes TURN_SECRET_FILE, which coturn reads too).
+//     Nothing for the operator to set, and nothing shared between deployments.
+//
+// There is deliberately no hosted-TURN option. The supported topology does not
+// need a relay at all — see DESIGN.md: the Tailscale subnet route puts every
+// Viewer, near or far, in the phone's own /24, and ICE pairs there directly.
+// coturn stays in the image as an unattended safety net for the network that
+// blocks direct UDP between two hosts on it, and for the phone that fell back
+// to the cloud rendezvous. It is not a thing to sign up for.
 const TURN_URLS = list(process.env.TAWNY_TURN_URLS);
-const TURN_SECRET = process.env.TAWNY_TURN_SECRET || '';
+const TURN_PORT = Number(process.env.TURN_PORT || 3478);
+// The one address that genuinely cannot be inferred: the public name/IP of a
+// box behind NAT, when the client reached this server through some other route
+// (a tunnel, a reverse proxy on another host). Everything else comes from Host.
+const PUBLIC_HOST = (process.env.TAWNY_PUBLIC_HOST || '').trim().toLowerCase();
+const TURN_EMBEDDED = process.env.TURN_EMBEDDED === 'on';
+const TURN_SECRET_FILE = process.env.TURN_SECRET_FILE || '';
+const TURN_SECRET = (() => {
+  if (process.env.TAWNY_TURN_SECRET) return process.env.TAWNY_TURN_SECRET;
+  if (!TURN_SECRET_FILE) return '';
+  // Written by the entrypoint before node starts. Read once: it never rotates
+  // within the life of a container, and a missing file simply means "no TURN".
+  try { return readFileSync(TURN_SECRET_FILE, 'utf8').trim(); } catch { return ''; }
+})();
+
+// --------------------------------------------------------------- /setup
+//
+// docker/entrypoint.sh exports these once, at container start; a missing
+// value (no Tailscale configured at all) is the normal case for the plain
+// LAN topology, not an error — see setupStatus() below.
+const TAWNY_TS_SOCKET = process.env.TAWNY_TS_SOCKET || '';
+const TAWNY_LAN_IP = process.env.TAWNY_LAN_IP || '';
+const TAWNY_LAN_CIDR = process.env.TAWNY_LAN_CIDR || '';
+const TAWNY_TS_ROUTES = process.env.TAWNY_TS_ROUTES || '';
+const TAWNY_SETUP_STATE = process.env.TAWNY_SETUP_STATE || '';
 
 const MAX_PER_ROOM = 4;      // one Watcher + up to three Handhelds
 const MAX_STATIONS = 1;
@@ -85,14 +147,29 @@ const MIME = {
 const CONNECT_SRC_TOKEN = '__TAWNY_CONNECT_SRC__';
 const CONNECT_SRC = (() => {
   const out = ["'self'"];
-  const host = RENDEZVOUS_URL
-    ? RENDEZVOUS_URL.replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '')
-        .split('/')[0].split('?')[0]
-    : '';
-  // A host with whitespace or a semicolon would truncate the policy. If it does
-  // not look like a hostname[:port], it does not go in.
-  if (/^[A-Za-z0-9.-]+(:\d{1,5})?$/.test(host)) out.push(`wss://${host}`, `https://${host}`);
-  return out.join(' ');
+  // A host with whitespace or a semicolon would truncate the policy. If a value
+  // does not look like a hostname[:port], it does not go in.
+  const HOST_RE = /^[A-Za-z0-9.-]+(:\d{1,5})?$/;
+  const bareHost = (u) => u.replace(/^[a-z]+:(\/\/)?/i, '').split(/[/?]/)[0];
+
+  const rv = RENDEZVOUS_URL ? bareHost(RENDEZVOUS_URL) : '';
+  if (HOST_RE.test(rv)) out.push(`wss://${rv}`, `https://${rv}`);
+
+  // STUN/TURN hosts, listed scheme-and-host so `stun:`/`turn:`/`turns:` match.
+  //
+  // Belt and braces only: `connect-src` does NOT in fact gate ICE server URLs
+  // in Chromium. Measured 2026-09 — the Android WebView's CSP (LocalWeb.kt
+  // connectSrc()) names no stun:/turn: source at all, and that WebView still
+  // gathered a server-reflexive candidate, so STUN ran with nothing in the
+  // policy permitting it. A CSP violation was never why media failed to flow;
+  // these entries cost nothing and are kept in case a future engine tightens
+  // this, but do not go looking here when ICE fails.
+  for (const u of [...STUN, ...TURN_URLS]) {
+    const h = bareHost(u);
+    if (!HOST_RE.test(h)) continue;
+    out.push(`stun://${h}`, `turn://${h}`, `turns://${h}`);
+  }
+  return [...new Set(out)].join(' ');
 })();
 
 const CSP = [
@@ -123,10 +200,34 @@ function secureHeaders(extra = {}) {
 
 // ------------------------------------------------------------------ util
 
+/**
+ * May this peer's `X-Forwarded-*` headers be believed?
+ *
+ * Loopback alone was too narrow. The reverse proxy in docker-compose.yml is a
+ * separate container, so it reaches this one across a bridge network and
+ * arrives as 172.x — never 127.0.0.1 — and every forwarded header was silently
+ * dropped, which meant a TLS deployment served itself `ws://` URLs for its own
+ * `https://` origin. Private ranges are the right boundary here: nothing on
+ * them can be a client from the internet, because a public deployment reaches
+ * this process only through the proxy that is itself on one.
+ *
+ * TRUST_PROXY=off for the unusual case of exposing this port to a network
+ * where an untrusted host could reach it directly.
+ */
+function fromTrustedProxy(req) {
+  if (!TRUST_PROXY) return false;
+  const raw = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  if (raw === '127.0.0.1' || raw === '::1') return true;
+  if (/^10\./.test(raw)) return true;
+  if (/^192\.168\./.test(raw)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(raw)) return true;
+  if (/^f[cd]/i.test(raw)) return true;                   // fc00::/7 ULA
+  return false;
+}
+
 function clientIP(req) {
   const raw = req.socket.remoteAddress || '';
-  const loopback = raw === '127.0.0.1' || raw === '::1' || raw === '::ffff:127.0.0.1';
-  if (TRUST_PROXY && loopback) {
+  if (fromTrustedProxy(req)) {
     const xff = req.headers['x-forwarded-for'];
     if (xff) return String(xff).split(',')[0].trim();
   }
@@ -139,6 +240,78 @@ function hostAllowed(req) {
   if (!ALLOWED_HOSTS.length) return true;
   const bare = host.replace(/:\d+$/, '');
   return ALLOWED_HOSTS.includes(host) || ALLOWED_HOSTS.includes(bare);
+}
+
+/**
+ * The address the client actually reached this server on.
+ *
+ * Zero-config rests on this. The operator knows their own URL; the container
+ * does not, and every way of guessing it from inside (hostname, the first
+ * non-loopback interface) is wrong in the common cases — behind a reverse
+ * proxy, on a tailnet, in bridge networking. The Host header, by contrast, is
+ * the one address the client has already proved it can resolve and reach.
+ *
+ * `X-Forwarded-Host`/`-Proto` are honoured only from a loopback peer, i.e. a
+ * proxy on this host (the same rule clientIP() uses); a remote client cannot
+ * forge them. hostAllowed() has already vetted the result against
+ * ALLOWED_HOSTS when the operator set one.
+ */
+function reqOrigin(req) {
+  const proxied = fromTrustedProxy(req);
+  const fwdHost = proxied ? req.headers['x-forwarded-host'] : null;
+  const fwdProto = proxied ? req.headers['x-forwarded-proto'] : null;
+  let host = String(fwdHost || req.headers.host || '').split(',')[0].trim();
+  // hostAllowed() vets the Host header; a forwarded name has not been through
+  // it, so when the operator pinned a list, hold the forwarded value to it too
+  // rather than echoing an arbitrary name back as this deployment's address.
+  if (fwdHost && ALLOWED_HOSTS.length) {
+    const bare = host.toLowerCase().replace(/:\d+$/, '');
+    if (!ALLOWED_HOSTS.includes(bare) && !ALLOWED_HOSTS.includes(host.toLowerCase())) {
+      host = String(req.headers.host || '').split(',')[0].trim();
+    }
+  }
+  const proto = String(fwdProto || (req.socket.encrypted ? 'https' : 'http'))
+    .split(',')[0].trim();
+  return { host, proto: proto === 'https' ? 'https' : 'http' };
+}
+
+/** Just the hostname the client used — no port — for building a TURN URL. */
+function reqHostname(req) {
+  const { host } = reqOrigin(req);
+  // IPv6 literals arrive bracketed; keep the brackets, drop only a :port.
+  const m = /^\[[^\]]+\]/.exec(host);
+  return (m ? m[0] : host.replace(/:\d+$/, '')).toLowerCase();
+}
+
+/**
+ * TURN servers for a paired client.
+ *
+ * A relay we can name: the operator's explicit URL, or the one inside this
+ * image addressed at whatever hostname the client used to get here — which is
+ * the point, since that address is known to work from where the client sits.
+ */
+async function turnCreds(req) {
+  const ttl = 3600;
+  if (!TURN_SECRET) return null;
+
+  let urls = TURN_URLS;
+  if (!urls.length && TURN_EMBEDDED) {
+    // PUBLIC_HOST wins when set — the case where the client reached us through
+    // something that is not the address the relay listens on. Otherwise the
+    // Host header, which is right for LAN, tailnet and a plain public host.
+    const h = PUBLIC_HOST || reqHostname(req);
+    if (!/^[a-z0-9.\-\[\]:]+$/.test(h)) return null;
+    // Both transports: UDP is what actually relays media, TCP is the fallback
+    // for a network that blocks UDP outright (some corporate wifi, some hotels).
+    urls = [`turn:${h}:${TURN_PORT}`, `turn:${h}:${TURN_PORT}?transport=tcp`];
+  }
+  if (!urls.length) return null;
+
+  // RFC 5766 REST: username is an expiry timestamp, credential is
+  // HMAC-SHA1(secret, username) base64 — what coturn --use-auth-secret expects.
+  const username = String(Math.floor(Date.now() / 1000) + ttl);
+  const credential = createHmac('sha1', TURN_SECRET).update(username).digest('base64');
+  return { iceServers: [{ urls, username, credential }], ttl };
 }
 
 // Blocks cross-site WebSocket hijacking: a page on evil.example cannot open a
@@ -170,9 +343,151 @@ function noteFail(ip) {
   fails.set(ip, rec);
 }
 
+// ------------------------------------------------------------------ /setup
+//
+// Everything a Docker/Portainer operator currently has to infer from `docker
+// logs` or probe.sh, composed into one JSON document. Every shell-out here
+// is wrapped so a missing `tailscale` binary or an unconfigured socket
+// degrades to "not on a tailnet" — this must never 500 and never throw.
+
+/** Runs a command, never throwing and never rejecting. */
+function run(cmd, args, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    try {
+      execFile(cmd, args, { timeout: timeoutMs, windowsHide: true }, (err, stdout) => {
+        if (err) return resolve({ ok: false, stdout: '', error: err.message });
+        resolve({ ok: true, stdout: stdout || '', error: null });
+      });
+    } catch (e) {
+      resolve({ ok: false, stdout: '', error: String(e && e.message || e) });
+    }
+  });
+}
+
+/** A short-lived TCP probe — is something listening on host:port? */
+function tcpAlive(host, port, timeoutMs = 500) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      try { sock.destroy(); } catch {}
+      resolve(ok);
+    };
+    let sock;
+    try {
+      sock = net.connect({ host, port });
+    } catch {
+      return resolve(false);
+    }
+    sock.setTimeout(timeoutMs);
+    sock.once('connect', () => finish(true));
+    sock.once('timeout', () => finish(false));
+    sock.once('error', () => finish(false));
+  });
+}
+
+/** The startup-time record from docker/entrypoint.sh's step() helper. */
+function readStartupState() {
+  if (!TAWNY_SETUP_STATE) return [];
+  try {
+    const arr = JSON.parse(readFileSync(TAWNY_SETUP_STATE, 'utf8'));
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+/**
+ * Live Tailscale state, queried against the socket entrypoint.sh exported —
+ * the container's own tailscaled (or, on the host-socket path, the host's).
+ * probe.sh runs the same AdvertiseRoutes/AllowedIPs comparison against the
+ * *host's* tailscale, which is a false negative under the TS_AUTHKEY path;
+ * this runs it against the socket that is actually true for this container.
+ */
+async function tailscaleInfo() {
+  if (!TAWNY_TS_SOCKET) {
+    return {
+      configured: false,
+      reason: 'no TS_AUTHKEY and no host tailscaled socket mounted — this deployment is LAN-only'
+    };
+  }
+
+  const [statusRes, prefsRes] = await Promise.all([
+    run('tailscale', [`--socket=${TAWNY_TS_SOCKET}`, 'status', '--json']),
+    run('tailscale', [`--socket=${TAWNY_TS_SOCKET}`, 'debug', 'prefs'])
+  ]);
+
+  let self = null;
+  let peers = [];
+  if (statusRes.ok) {
+    try {
+      const j = JSON.parse(statusRes.stdout);
+      self = j.Self || null;
+      peers = Object.values(j.Peer || {}).map((p) => ({
+        name: p.HostName || (p.DNSName || '').replace(/\.$/, '') || '',
+        online: !!p.Online
+      }));
+    } catch { /* malformed/empty output — leave self/peers empty */ }
+  }
+
+  let advertised = [];
+  if (prefsRes.ok) {
+    try {
+      const j = JSON.parse(prefsRes.stdout);
+      if (Array.isArray(j.AdvertiseRoutes)) advertised = j.AdvertiseRoutes;
+    } catch { /* debug prefs isn't guaranteed JSON on every tailscale build */ }
+  }
+
+  const allowedIPs = Array.isArray(self && self.AllowedIPs) ? self.AllowedIPs : [];
+  const approvedRoutes = advertised.filter((r) => allowedIPs.includes(r));
+  const pendingRoutes = advertised.filter((r) => !allowedIPs.includes(r));
+
+  return {
+    configured: true,
+    reachable: statusRes.ok,
+    dnsName: self ? String(self.DNSName || '').replace(/\.$/, '') : '',
+    online: !!(self && self.Online),
+    peers,
+    advertisedRoutes: advertised,
+    approvedRoutes,
+    pendingRoutes,
+    statusError: statusRes.ok ? null : statusRes.error,
+    prefsError: prefsRes.ok ? null : prefsRes.error
+  };
+}
+
+async function coturnInfo() {
+  const secretExists = !!TURN_SECRET_FILE && existsSync(TURN_SECRET_FILE);
+  const listening = TURN_EMBEDDED ? await tcpAlive('127.0.0.1', TURN_PORT) : false;
+  return { embedded: TURN_EMBEDDED, port: TURN_PORT, secretExists, listening };
+}
+
+function lanInfo() {
+  // The container's own default bridge is 172.17.0.0/16; a real home LAN can
+  // legitimately sit in 172.16/12 too, but 172.17.x is the address Docker
+  // hands out when nothing has told it to use host networking — the
+  // multi-NIC/VLAN failure mode this exists to catch. TS_ROUTES is the fix.
+  const looksLikeDockerBridge = /^172\.1[6-9]\./.test(TAWNY_LAN_IP);
+  return { ip: TAWNY_LAN_IP || null, cidr: TAWNY_LAN_CIDR || null, looksLikeDockerBridge };
+}
+
+async function setupStatus() {
+  const [startup, tailscale, coturn] = await Promise.all([
+    Promise.resolve(readStartupState()),
+    tailscaleInfo().catch((e) => ({ configured: false, reason: String(e && e.message || e) })),
+    coturnInfo().catch(() => ({ embedded: false, port: null, secretExists: false, listening: false }))
+  ]);
+  return {
+    generatedAt: new Date().toISOString(),
+    startup,
+    tailscale,
+    lan: lanInfo(),
+    coturn
+  };
+}
+
 // ------------------------------------------------------------------ http
 
-const server = http.createServer(async (req, res) => {
+const handler = async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, secureHeaders({ allow: 'GET, HEAD' }));
     return res.end();
@@ -185,12 +500,41 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
 
   if (url.pathname === '/config.json') {
+    // With no RENDEZVOUS_URL set, hand back the origin this request came in on.
+    // A phone that scanned a QR for `https://box.example` is then told to sign
+    // with `wss://box.example` — an address it has just demonstrably reached —
+    // instead of whatever the operator did or did not type into a .env file.
+    const { host, proto } = reqOrigin(req);
+    const rendezvous = RENDEZVOUS_URL ||
+      (host ? `${proto === 'https' ? 'wss' : 'ws'}://${host}` : '');
     return json(res, 200, {
-      stun: STUN, turnMode: TURN_MODE, rendezvous: RENDEZVOUS_URL, authRequired: false
+      stun: STUN, turnMode: TURN_MODE, rendezvous, authRequired: false
     });
   }
   if (url.pathname === '/healthz') {
     return json(res, 200, { ok: true, channels: rooms.size, clients: wss.clients.size });
+  }
+  // Truthful startup/Tailscale/coturn state for an operator who cannot yet
+  // reach the ts.net URL — see docker/entrypoint.sh (step()) and setupStatus()
+  // above. Reachable over plain HTTP on purpose: hostAllowed() above already
+  // gates it the same as every other route, and it is never handed to
+  // `tailscale funnel` (see Tawny Docker/DESIGN.md).
+  if (url.pathname === '/setup.json') {
+    const status = await setupStatus();
+    return json(res, 200, status);
+  }
+  if (url.pathname === '/setup') {
+    try {
+      const body = await readFile(join(PUBLIC, 'setup.html'));
+      res.writeHead(200, secureHeaders({
+        'content-type': MIME['.html'],
+        'content-length': body.length,
+        'cache-control': 'no-cache'
+      }));
+      return res.end(req.method === 'HEAD' ? undefined : body);
+    } catch {
+      return json(res, 404, { error: 'not found' });
+    }
   }
   // Parity with the rendezvous Worker, so a self-hoster has the same URL to
   // point at. It carries its own headers rather than secureHeaders(): the page
@@ -204,17 +548,19 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/turn') {
     const room = String(url.searchParams.get('room') || '');
     if (!ROOM_RE.test(room)) return json(res, 400, { error: 'bad room' });
-    if (!TURN_URLS.length || !TURN_SECRET) return json(res, 404, { error: 'no turn configured' });
+    const haveTurn = TURN_SECRET && (TURN_URLS.length || TURN_EMBEDDED);
+    if (!haveTurn) return json(res, 404, { error: 'no turn configured' });
     // Must present a ticket valid for this room — no free credential farming.
+    // Checked before minting anything, so an unpaired caller cannot get a
+    // credential for a relay it was never let into a channel on.
     const rec = tickets.get(room);
     if (!ticketLive(rec) ||
         sha256hex(url.searchParams.get('t') || '') !== rec.hashT) {
       return json(res, 403, { error: 'not paired' });
     }
-    const ttl = 3600;
-    const username = String(Math.floor(Date.now() / 1000) + ttl);
-    const credential = createHmac('sha1', TURN_SECRET).update(username).digest('base64');
-    return json(res, 200, { iceServers: [{ urls: TURN_URLS, username, credential }], ttl });
+    const creds = await turnCreds(req);
+    if (!creds) return json(res, 404, { error: 'no turn configured' });
+    return json(res, 200, creds);
   }
 
   let rel;
@@ -250,7 +596,7 @@ const server = http.createServer(async (req, res) => {
   } catch {
     json(res, 404, { error: 'not found' });
   }
-});
+};
 
 function json(res, code, obj) {
   const body = Buffer.from(JSON.stringify(obj));
@@ -301,7 +647,104 @@ const RELAY = new Set([
   'cameras', 'meta', 'camera-control', 'torch', 'battery'
 ]);
 
-server.on('upgrade', (req, socket, head) => {
+// ------------------------------------------------------- the LAN bridge
+//
+// Why this exists, in one paragraph.
+//
+// The Monitor is the Android app. On a home network it hosts its own signalling
+// relay on `ws://<phone-ip>:8820` and advertises it in the pairing QR as `h=`.
+// A browser Viewer cannot dial that: it has to be served over https to be given
+// a microphone for talk-back, and an https page may not open a cleartext ws://
+// — mixed content, no exception for private addresses. Nor can the phone come
+// to us instead: the shipped app (v0.3.1) can only reach a rendezvous over
+// wss://, its WebView trusts system CAs only, and no home LAN address can hold
+// a publicly-trusted certificate.
+//
+// So this process stands in the middle. The browser opens
+// `wss://<node>.<tailnet>.ts.net/lan/<phone-ip>/<port>/ws?…` — same origin, so
+// the page's own CSP allows it and Tailscale's TLS covers the whole path the
+// browser can see — and we hand the handshake through to the phone over the LAN
+// in cleartext, byte for byte. Nothing is re-framed, nothing is parsed: the
+// relay's HMAC challenge, the room ids and the SDP all pass through untouched,
+// and this process learns no more than a switch does.
+//
+// This works from anywhere, not just from the sofa, because the container is on
+// the phone's LAN by definition — it is the box in the house. The Viewer's
+// distance from the phone is Tailscale's problem, not the bridge's.
+//
+// Media never comes near this process. It is peer-to-peer between the browser
+// and the phone, on 192.168.1.0/24 — which the remote Viewer is also in, via
+// the subnet route this container advertises. See DESIGN.md.
+//
+// Only private space is dialable. A bridge that would open a socket to any host
+// the query string named is a server-side request forgery hole, so the target
+// must be an address that can only be a device on the operator's own network.
+const LAN_BRIDGE_RE = /^\/lan\/(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,5})\/ws$/;
+const MAX_BRIDGES = 16;
+let bridges = 0;
+
+function isLanTarget(ip) {
+  const o = ip.split('.').map(Number);
+  if (o.length !== 4 || o.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  if (o[0] === 10) return true;                                   // 10/8
+  if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true;      // 172.16/12
+  if (o[0] === 192 && o[1] === 168) return true;                  // 192.168/16
+  if (o[0] === 169 && o[1] === 254) return true;                  // link-local
+  if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true;     // 100.64/10 — a tailnet phone
+  return false;
+}
+
+function lanBridge(req, socket, head, ip, port, search) {
+  const fail = (code, why) => {
+    try { socket.write(`HTTP/1.1 ${code} ${why}\r\nConnection: close\r\n\r\n`); } catch {}
+    socket.destroy();
+  };
+  if (bridges >= MAX_BRIDGES) return fail(503, 'Service Unavailable');
+  const key = String(req.headers['sec-websocket-key'] || '');
+  if (!/^[A-Za-z0-9+/]{22}==$/.test(key)) return fail(400, 'Bad Request');
+  const ver = String(req.headers['sec-websocket-version'] || '13');
+  if (!/^\d{1,3}$/.test(ver)) return fail(400, 'Bad Request');
+
+  bridges += 1;
+  let done = false;
+  const close = () => {
+    if (done) return;
+    done = true;
+    bridges -= 1;
+    try { up.destroy(); } catch {}
+    try { socket.destroy(); } catch {}
+  };
+
+  const up = net.connect({ host: ip, port });
+  up.setTimeout(6000);
+  up.on('timeout', () => { if (!done) fail(504, 'Gateway Timeout'); close(); });
+  up.on('error', () => { if (!done) fail(502, 'Bad Gateway'); close(); });
+  socket.on('error', close);
+  up.on('close', close);
+  socket.on('close', close);
+
+  up.on('connect', () => {
+    up.setTimeout(0);
+    // Built by hand rather than forwarded. The client's Origin, Cookie and
+    // Sec-WebSocket-Extensions have no business on the LAN leg — the relay on
+    // the phone checks none of them, and permessage-deflate negotiated end to
+    // end through an opaque byte pipe is the one thing that could not survive
+    // this. Sec-WebSocket-Key is passed through so the 101 the phone sends back
+    // carries an Accept the browser will verify against its own key.
+    up.write(
+      `GET /ws${search} HTTP/1.1\r\n` +
+      `Host: ${ip}:${port}\r\n` +
+      'Connection: Upgrade\r\nUpgrade: websocket\r\n' +
+      `Sec-WebSocket-Version: ${ver}\r\nSec-WebSocket-Key: ${key}\r\n\r\n`
+    );
+    if (head && head.length) up.write(head);
+    up.pipe(socket);
+    socket.pipe(up);
+    log(`~ bridge -> ${ip}:${port} (${bridges})`);
+  });
+}
+
+const onUpgrade = (req, socket, head) => {
   const ip = clientIP(req);
   const deny = (code, why) => {
     socket.write(`HTTP/1.1 ${code} ${why}\r\nConnection: close\r\n\r\n`);
@@ -310,6 +753,19 @@ server.on('upgrade', (req, socket, head) => {
 
   let url;
   try { url = new URL(req.url, 'http://localhost'); } catch { return socket.destroy(); }
+
+  const lan = LAN_BRIDGE_RE.exec(url.pathname);
+  if (lan) {
+    if (!hostAllowed(req)) return deny(421, 'Misdirected Request');
+    if (!originAllowed(req)) { noteFail(ip); return deny(403, 'Forbidden'); }
+    if (lockedOut(ip)) return deny(429, 'Too Many Requests');
+    const port = Number(lan[2]);
+    if (!isLanTarget(lan[1]) || !(port >= 1024 && port <= 65535)) {
+      return deny(403, 'Forbidden');
+    }
+    return lanBridge(req, socket, head, lan[1], port, url.search);
+  }
+
   if (!/(^|\/)ws$/.test(url.pathname)) return socket.destroy();
   if (!hostAllowed(req)) return deny(421, 'Misdirected Request');
   if (!originAllowed(req)) { noteFail(ip); return deny(403, 'Forbidden'); }
@@ -321,7 +777,7 @@ server.on('upgrade', (req, socket, head) => {
   if (!ROOM_RE.test(room)) return deny(400, 'Bad Request');
 
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req, { room, ip, url }));
-});
+};
 
 // A device must send {type:'hello'} first and pass admission before it is joined
 // to the room or told about anyone. A Handheld's hello carries the pairing
@@ -482,17 +938,42 @@ function log(line) {
   console.log(`${new Date().toISOString()} ${line}`);
 }
 
+// ------------------------------------------------------------- listener
+//
+// One, plain HTTP. `tailscale serve` sits in front of it and is what a browser
+// actually talks to — https://<node>.<tailnet>.ts.net, Let's Encrypt, no
+// warning and nothing for anyone to import. The X-Forwarded-* headers it sets
+// are how /config.json still hands a client the address it really arrived on;
+// see reqOrigin().
+
+const servers = [];
+const httpServer = http.createServer(handler);
+httpServer.on('upgrade', onUpgrade);
+servers.push({ s: httpServer, port: PORT, scheme: 'http' });
+
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     clearInterval(heartbeat);
     for (const ws of wss.clients) ws.close(1001, 'server shutting down');
-    server.close(() => process.exit(0));
+    let left = servers.length;
+    for (const { s } of servers) s.close(() => { if (--left === 0) process.exit(0); });
     setTimeout(() => process.exit(0), 2000).unref();
   });
 }
 
-server.listen(PORT, HOST, () => {
-  log(`tawny listening on http://${HOST}:${PORT}`);
-  log(`allowed hosts: ${ALLOWED_HOSTS.length ? ALLOWED_HOSTS.join(', ') : 'any'}`);
-  log(`stun: ${STUN.length ? STUN.join(', ') : 'none (LAN / tailnet only)'}`);
-});
+let pending = servers.length;
+for (const { s, port, scheme } of servers) {
+  s.listen(port, HOST, () => {
+    log(`tawny listening on ${scheme}://${HOST}:${port}`);
+    if (--pending) return;
+    log(`allowed hosts: ${ALLOWED_HOSTS.length ? ALLOWED_HOSTS.join(', ') : 'any (set ALLOWED_HOSTS to pin)'}`);
+    log(`stun: ${STUN.length ? STUN.join(', ') : 'none (LAN / tailnet only)'}`);
+    log(`rendezvous: ${RENDEZVOUS_URL || 'derived from each request Host header'}`);
+    log(`lan bridge: /lan/<private-ipv4>/<port>/ws -> the app's own relay`);
+    log(`turn: ${
+      TURN_URLS.length ? `${TURN_URLS.join(', ')}${TURN_SECRET ? '' : ' (NO SECRET — /turn will 404)'}`
+        : TURN_EMBEDDED && TURN_SECRET ? `embedded coturn on :${TURN_PORT}, host from each request${PUBLIC_HOST ? ` (pinned to ${PUBLIC_HOST})` : ''}`
+        : 'none — peer-to-peer only'
+    }`);
+  });
+}

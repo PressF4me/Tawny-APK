@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fbf4f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#191410" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<title>Tawny — Setup Status</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<style>
+  /* Setup-status specific bits only — everything else (palette, .wide,
+     .appbar, .screen-body, .hint, .warn, .note) comes from style.css so this
+     page reads as the rest of the app, not a bolted-on admin panel. */
+
+  .setup-wrap { display: flex; flex-direction: column; gap: 14px; padding-bottom: 24px; }
+
+  .setup-lede { margin: 0; color: var(--dim); font-size: 14px; line-height: 1.55; }
+
+  .setup-refresh {
+    display: flex; align-items: center; gap: 7px;
+    color: var(--dim); font-size: 11.5px; letter-spacing: .06em;
+  }
+  .setup-refresh .dot { width: 7px; height: 7px; }
+
+  /* -------------------------------------------------------- hero (all-green) */
+  .setup-hero {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px;
+    background: color-mix(in srgb, var(--berry) 10%, var(--panel));
+    border: 1px solid color-mix(in srgb, var(--berry) 35%, var(--line));
+    border-radius: var(--r-card);
+  }
+  .setup-hero.show { display: flex; }
+  .setup-hero h2 {
+    margin: 0; font-size: 15px; font-weight: 600; color: var(--berry);
+    letter-spacing: .03em;
+  }
+  .setup-hero code.pair-url { font-size: 15px; }
+
+  /* ------------------------------------------------------------- checklist */
+  .check-list { display: flex; flex-direction: column; gap: 10px; }
+
+  .check {
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    gap: 2px 12px;
+    padding: 14px 15px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+  }
+
+  .check-icon {
+    grid-row: 1 / span 3;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    flex: none;
+  }
+  .check-icon svg { width: 14px; height: 14px; stroke: currentColor; fill: none;
+    stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+  .check.is-ok .check-icon   { background: color-mix(in srgb, var(--berry) 18%, transparent); color: var(--berry); }
+  .check.is-warn .check-icon { background: color-mix(in srgb, var(--alert) 20%, transparent); color: var(--alert); }
+  .check.is-bad .check-icon  { background: color-mix(in srgb, var(--live) 18%, transparent); color: var(--live); }
+  .check.is-off .check-icon  { background: var(--raise); color: var(--dim); }
+
+  .check-title {
+    font-size: 14.5px; font-weight: 600; color: var(--fg);
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  }
+  .check-title small {
+    font-weight: 500; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim);
+  }
+  .check-detail { margin: 3px 0 0; font-size: 13px; line-height: 1.5; color: var(--dim); }
+  .check-remedy {
+    margin: 8px 0 0;
+    padding: 9px 11px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    border-radius: var(--r-chip);
+    background: var(--raise);
+    color: var(--fg);
+  }
+  .check.is-bad .check-remedy {
+    background: color-mix(in srgb, var(--live) 12%, var(--panel));
+    border: 1px solid color-mix(in srgb, var(--live) 35%, var(--line));
+  }
+  .check.is-warn .check-remedy {
+    background: color-mix(in srgb, var(--alert) 14%, var(--panel));
+    border: 1px solid color-mix(in srgb, var(--alert) 40%, var(--line));
+  }
+
+  .check-log {
+    margin: 8px 0 0;
+    padding: 9px 11px;
+    max-height: 160px;
+    overflow: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--dim);
+    background: var(--stage);
+    color: #d6c9b8;
+    border-radius: var(--r-chip);
+  }
+
+  .peer-list { margin: 8px 0 0; display: flex; flex-direction: column; gap: 4px; }
+  .peer-row {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 12.5px; color: var(--fg);
+  }
+  .peer-row .dot { width: 6px; height: 6px; }
+
+  .copy-row { display: flex; align-items: stretch; gap: 8px; margin-top: 9px; }
+  .copy-row code.pair-url { flex: 1; }
+  .copy-btn {
+    flex: none;
+    padding: 0 16px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    background: var(--raise);
+    border: 1px solid var(--line);
+    border-radius: var(--r-ctl);
+    color: var(--fg);
+    transition: border-color .15s ease, color .15s ease;
+  }
+  .copy-btn:hover { border-color: var(--berry); color: var(--berry); }
+  .copy-btn.done { border-color: var(--berry); color: var(--berry); }
+  .setup-hero .copy-btn { background: var(--panel); }
+
+  .setup-foot { margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<main class="screen app" tabindex="-1">
+  <header class="appbar">
+    <img class="appbar-mark" src="icon.svg" alt="" width="30" height="30">
+    <div class="appbar-titles">
+      <h1>Setup status</h1>
+      <p class="appbar-sub">What's working, what isn't, and what to do about it</p>
+    </div>
+    <span class="appbar-slot"></span>
+  </header>
+
+  <div class="screen-body">
+    <div class="wrap setup-wrap">
+      <p class="setup-lede">This page reads the container's own state — refreshed every
+        few seconds, no restart needed. It is the truth even when the ts.net address
+        below isn't working yet, because it's served over the plain LAN port too.</p>
+
+      <div id="hero" class="setup-hero">
+        <h2>Everything's working</h2>
+        <p class="hint">Use this address to watch from anywhere on your tailnet:</p>
+        <div class="copy-row">
+          <code id="hero-url" class="pair-url"></code>
+          <button class="copy-btn" data-copy-target="hero-url" type="button">Copy</button>
+        </div>
+      </div>
+
+      <div class="setup-refresh">
+        <span id="refresh-dot" class="dot"></span>
+        <span id="refresh-label">Checking…</span>
+      </div>
+
+      <div id="checks" class="check-list"></div>
+
+      <p id="fetch-error" class="warn" hidden>Couldn't reach <code>/setup.json</code> —
+        the container's web server may be down. This page will keep trying.</p>
+
+      <footer class="fine setup-foot">
+        <code>/setup.json</code> carries the same information as JSON, for scripting
+        or Portainer's own health checks.
+      </footer>
+    </div>
+  </div>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="setup.js"></script>
+</body>
+</html>
