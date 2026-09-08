@@ -7,7 +7,7 @@
 import http from 'node:http';
 import net from 'node:net';
 import { readFile } from 'node:fs/promises';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { join, extname, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -83,6 +83,10 @@ const TURN_SECRET = (() => {
 // value (no Tailscale configured at all) is the normal case for the plain
 // LAN topology, not an error — see setupStatus() below.
 const TAWNY_TS_SOCKET = process.env.TAWNY_TS_SOCKET || '';
+// Where the host's own tailscaled would be, if the operator mounted it. When
+// it is there, this machine is already on a tailnet and asking for an auth key
+// is asking for something nobody needs.
+const TS_HOST_SOCKET = process.env.TS_HOST_SOCKET || '/var/run/tailscale/tailscaled.sock';
 const TAWNY_LAN_IP = process.env.TAWNY_LAN_IP || '';
 const TAWNY_LAN_CIDR = process.env.TAWNY_LAN_CIDR || '';
 const TAWNY_TS_ROUTES = process.env.TAWNY_TS_ROUTES || '';
@@ -354,12 +358,14 @@ function noteFail(ip) {
 function run(cmd, args, timeoutMs = 2500) {
   return new Promise((resolve) => {
     try {
-      execFile(cmd, args, { timeout: timeoutMs, windowsHide: true }, (err, stdout) => {
-        if (err) return resolve({ ok: false, stdout: '', error: err.message });
-        resolve({ ok: true, stdout: stdout || '', error: null });
+      execFile(cmd, args, { timeout: timeoutMs, windowsHide: true }, (err, stdout, stderr) => {
+        // `tailscale up` says why it refused a key on stderr, so a caller that
+        // wants to show the operator the real reason needs it kept.
+        if (err) return resolve({ ok: false, stdout: '', stderr: stderr || '', error: err.message });
+        resolve({ ok: true, stdout: stdout || '', stderr: stderr || '', error: null });
       });
     } catch (e) {
-      resolve({ ok: false, stdout: '', error: String(e && e.message || e) });
+      resolve({ ok: false, stdout: '', stderr: '', error: String(e && e.message || e) });
     }
   });
 }
@@ -407,6 +413,8 @@ async function tailscaleInfo() {
   if (!TAWNY_TS_SOCKET) {
     return {
       configured: false,
+      mode: 'none',
+      hostSocketAvailable: existsSync(TS_HOST_SOCKET),
       reason: 'no TS_AUTHKEY and no host tailscaled socket mounted — this deployment is LAN-only'
     };
   }
@@ -418,9 +426,11 @@ async function tailscaleInfo() {
 
   let self = null;
   let peers = [];
+  let backendState = '';
   if (statusRes.ok) {
     try {
       const j = JSON.parse(statusRes.stdout);
+      backendState = String(j.BackendState || '');
       self = j.Self || null;
       peers = Object.values(j.Peer || {}).map((p) => ({
         name: p.HostName || (p.DNSName || '').replace(/\.$/, '') || '',
@@ -443,7 +453,15 @@ async function tailscaleInfo() {
 
   return {
     configured: true,
+    // 'host'  — driving the machine's own tailscaled; no key was ever needed.
+    // 'own'   — this container's tailscaled; a key joins it.
+    mode: TAWNY_TS_SOCKET === TS_HOST_SOCKET ? 'host' : 'own',
+    hostSocketAvailable: existsSync(TS_HOST_SOCKET),
     reachable: statusRes.ok,
+    // The daemon runs from boot whether or not a key was ever supplied, so
+    // "there is a socket" no longer means "joined". Only BackendState does.
+    backendState,
+    loggedIn: backendState === 'Running',
     dnsName: self ? String(self.DNSName || '').replace(/\.$/, '') : '',
     online: !!(self && self.Online),
     peers,
@@ -485,10 +503,162 @@ async function setupStatus() {
   };
 }
 
+// Both /setup.json and the "/" redirect read this. Without a cache, every
+// visit to the app would shell out to tailscale twice and open a TCP probe
+// just to decide whether to redirect — and the setup page polls besides.
+let setupCache = { at: 0, value: null };
+async function setupStatusCached(maxAgeMs = 3000) {
+  const now = Date.now();
+  if (setupCache.value && now - setupCache.at < maxAgeMs) return setupCache.value;
+  const value = await setupStatus();
+  setupCache = { at: now, value };
+  return value;
+}
+
+// "This deployment is deliberately LAN-only — stop showing me setup." That is
+// a fact about the deployment, not a preference of whoever's browser happened
+// to dismiss it, so it lives in the data volume and applies to every device.
+const SKIP_FILE = process.env.TAWNY_SKIP_FILE || '/data/setup-skipped';
+
+function setupSkipped() {
+  try { return existsSync(SKIP_FILE); } catch { return false; }
+}
+
+// Tailscale's own key prefix. Checked before the key reaches a command line so
+// a typo produces a sentence rather than a 30-second timeout against nothing.
+const AUTHKEY_RE = /^tskey-[A-Za-z0-9._~-]{8,256}$/;
+
+/**
+ * Only a machine on the operator's own network may complete first-run setup.
+ * Under `network_mode: host` that is already everyone who can reach the port,
+ * so this is a backstop against an unexpected exposure rather than the primary
+ * control — the primary control is that joining is refused once joined.
+ */
+function fromLocalNetwork(req) {
+  const raw = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  if (raw === '127.0.0.1' || raw === '::1') return true;
+  if (/^f[cd]/i.test(raw)) return true;
+  return isLanTarget(raw);
+}
+
+function readJsonBody(req, limit = 8192) {
+  return new Promise((resolve) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) { req.destroy(); return resolve(null); }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); }
+      catch { resolve(null); }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
+/** Append to the same file docker/entrypoint.sh writes, in the same shape. */
+function recordStep(step, ok, detail) {
+  if (!TAWNY_SETUP_STATE) return;
+  try {
+    let arr = [];
+    try {
+      const parsed = JSON.parse(readFileSync(TAWNY_SETUP_STATE, 'utf8'));
+      if (Array.isArray(parsed)) arr = parsed;
+    } catch { /* first write, or a truncated file — start clean */ }
+    arr.push({ step, ok, detail, at: new Date().toISOString() });
+    writeFileSync(TAWNY_SETUP_STATE, JSON.stringify(arr));
+  } catch { /* state file is a convenience; never fail a request over it */ }
+}
+
+/**
+ * Join the tailnet with a key pasted into /setup, so the common first run
+ * needs no file editing and no restart. The daemon is already running
+ * (docker/entrypoint.sh starts it with or without a key); this is the `up`.
+ */
+async function joinTailnet(key) {
+  const routes = TAWNY_TS_ROUTES;
+  const args = [
+    `--socket=${TAWNY_TS_SOCKET}`, 'up',
+    `--authkey=${key}`,
+    `--hostname=${process.env.TAWNY_TS_HOSTNAME || 'tawny'}`,
+    '--accept-dns=false', '--accept-routes=false'
+  ];
+  if (routes && routes !== 'off') args.push(`--advertise-routes=${routes}`);
+
+  // Long timeout: this contacts Tailscale's control plane over the internet.
+  const up = await run('tailscale', args, 90000);
+  if (!up.ok) {
+    const detail = (up.stderr || up.error || '').trim().slice(0, 2000);
+    recordStep('tailscale_up', false, detail);
+    return { ok: false, error: detail || 'tailscale up failed' };
+  }
+  recordStep('tailscale_up', true, 'joined the tailnet from the setup page');
+
+  if (process.env.TS_SERVE !== 'off') {
+    const srv = await run('tailscale',
+      [`--socket=${TAWNY_TS_SOCKET}`, 'serve', '--bg', `http://127.0.0.1:${PORT}`], 30000);
+    if (srv.ok) recordStep('tailscale_serve', true, 'published over tailscale serve');
+    else recordStep('tailscale_serve', false, (srv.stderr || srv.error || '').trim().slice(0, 2000));
+  }
+  return { ok: true };
+}
+
+/**
+ * Did anything fail, as things stand *now*?
+ *
+ * The state file is an append-only log, so a step can appear several times —
+ * a rejected auth key followed by a good one leaves both records behind.
+ * Asking "did any record ever fail" therefore condemns a working deployment
+ * for a failure it has already recovered from, forever. Only the last record
+ * for each step describes the present.
+ */
+function anyStepFailing(startup, ts) {
+  const latest = new Map();
+  for (const s of startup || []) if (s && s.step) latest.set(s.step, s);
+
+  for (const [name, s] of latest) {
+    if (s.ok !== false) continue;
+    // coturn is a fallback for networks that block direct connections. Its
+    // absence degrades nothing that most homes will ever notice, so it does
+    // not hold the setup open.
+    if (name === 'coturn') continue;
+    // Live state beats the log. A container using the host's daemon never runs
+    // `tailscale up` at all, so a stale failure from an earlier configuration
+    // can sit in the log for ever with nothing to supersede it — while the
+    // node is, right now, plainly joined.
+    if ((name === 'tailscale_up' || name === 'tailscale_routes') && ts && ts.loggedIn) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Is this deployment finished? Deliberately strict: an unapproved subnet route
+ * counts as unfinished, because that is precisely the state where the app
+ * appears to work on the LAN and then fails for the person watching from the
+ * office. Mirrors the same test in public/setup.js.
+ */
+function setupReady(s) {
+  const ts = s.tailscale || {};
+  const lan = s.lan || {};
+  if (anyStepFailing(s.startup, ts)) return false;
+  if (!lan.cidr || lan.looksLikeDockerBridge) return false;
+  if (!ts.configured || !ts.reachable || !ts.loggedIn || !ts.dnsName) return false;
+  return !(ts.pendingRoutes || []).length;
+}
+
 // ------------------------------------------------------------------ http
 
 const handler = async (req, res) => {
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
+  // The app is otherwise read-only over HTTP — signalling is the WebSocket,
+  // not POSTs. /setup/join is the one exception: it takes an auth key so a
+  // first run needs no file editing, and it guards itself (own network only,
+  // and refused once the node is joined).
+  const setupPost = req.method === 'POST' && req.url &&
+    ['/setup/join', '/setup/skip'].includes(req.url.split('?')[0]);
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !setupPost) {
     res.writeHead(405, secureHeaders({ allow: 'GET, HEAD' }));
     return res.end();
   }
@@ -520,8 +690,56 @@ const handler = async (req, res) => {
   // gates it the same as every other route, and it is never handed to
   // `tailscale funnel` (see Tawny Docker/DESIGN.md).
   if (url.pathname === '/setup.json') {
-    const status = await setupStatus();
+    const status = await setupStatusCached();
     return json(res, 200, status);
+  }
+  // "Use it on this Wi-Fi only." Recorded for the whole deployment rather than
+  // in the cookie jar of whichever browser happened to dismiss it — otherwise
+  // every new phone in the house meets the setup flow again and has to
+  // dismiss it for itself. /setup stays reachable directly, always.
+  if (url.pathname === '/setup/skip') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'POST only' });
+    if (!fromLocalNetwork(req)) {
+      return json(res, 403, { error: 'Only from your own network.' });
+    }
+    try {
+      writeFileSync(SKIP_FILE, new Date().toISOString());
+      return json(res, 200, { ok: true });
+    } catch (e) {
+      // No writable volume — the caller falls back to its own cookie, which
+      // at least stops nagging the person who asked.
+      return json(res, 200, { ok: false, error: String(e && e.message || e) });
+    }
+  }
+  // Paste an auth key into the setup page instead of editing a file. Refused
+  // once the node is joined, so this is a first-run window and not a standing
+  // "move this container to another tailnet" button.
+  if (url.pathname === '/setup/join') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'POST only' });
+    if (!fromLocalNetwork(req)) {
+      return json(res, 403, { error: 'Setup can only be completed from your own network.' });
+    }
+    if (!TAWNY_TS_SOCKET) {
+      return json(res, 503, {
+        error: 'Tailscale is not available in this container, so a key cannot be applied here. Set TS_AUTHKEY and restart.'
+      });
+    }
+    const before = await setupStatusCached(0);
+    if (before.tailscale.loggedIn) {
+      return json(res, 409, {
+        error: 'This container is already on a tailnet. Run `tailscale logout` in it if you meant to move it.'
+      });
+    }
+    const body = await readJsonBody(req);
+    const key = String((body && body.authkey) || '').trim();
+    if (!AUTHKEY_RE.test(key)) {
+      return json(res, 400, {
+        error: 'That does not look like a Tailscale auth key. They begin with tskey- and come from the auth keys page.'
+      });
+    }
+    const result = await joinTailnet(key);
+    setupCache = { at: 0, value: null };
+    return json(res, result.ok ? 200 : 502, result);
   }
   if (url.pathname === '/setup') {
     try {
@@ -534,6 +752,23 @@ const handler = async (req, res) => {
       return res.end(req.method === 'HEAD' ? undefined : body);
     } catch {
       return json(res, 404, { error: 'not found' });
+    }
+  }
+  // An unfinished deployment opens the setup flow instead of the app. The
+  // operator's first visit is the one that needs the instructions, and the
+  // failure this avoids is silent: the app loads fine on the LAN, so nothing
+  // suggests anything is wrong until someone tries to watch from elsewhere.
+  //
+  // Escapable, and permanently: the setup page offers a link that sets this
+  // cookie, so a deliberately LAN-only deployment is not nagged forever.
+  if ((req.method === 'GET' || req.method === 'HEAD') &&
+      (url.pathname === '/' || url.pathname === '/index.html') &&
+      !setupSkipped() &&
+      !/(?:^|;\s*)tawny_setup_done=1(?:;|$)/.test(req.headers.cookie || '')) {
+    const status = await setupStatusCached();
+    if (!setupReady(status)) {
+      res.writeHead(302, secureHeaders({ location: '/setup', 'cache-control': 'no-store' }));
+      return res.end();
     }
   }
   // Parity with the rendezvous Worker, so a self-hoster has the same URL to

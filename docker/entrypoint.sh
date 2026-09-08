@@ -138,7 +138,12 @@ export TAWNY_TS_ROUTES="$TS_ROUTES"
 ts_sock=""
 tsd_pid=''
 
-if [ -n "$TS_AUTHKEY" ] && command -v tailscaled >/dev/null 2>&1; then
+# The daemon starts whether or not there is a key, so that an operator who has
+# not got one yet can paste it into /setup and be joined without ever editing a
+# file or restarting anything. A logged-out tailscaled is idle and harmless;
+# `up` is what joins, and that can happen now or in five minutes from a browser.
+if command -v tailscaled >/dev/null 2>&1 &&
+	{ [ -n "$TS_AUTHKEY" ] || [ ! -S "$TS_HOST_SOCKET" ]; }; then
 	ts_sock="$RUN_DIR/tailscaled.sock"
 	mkdir -p "$TS_STATE_DIR"
 	log "starting our own tailscaled (userspace networking), state in $TS_STATE_DIR"
@@ -153,19 +158,26 @@ if [ -n "$TS_AUTHKEY" ] && command -v tailscaled >/dev/null 2>&1; then
 	# that reads exactly like a broken mount.
 	i=0
 	while [ ! -S "$ts_sock" ] && [ "$i" -lt 30 ]; do i=$((i + 1)); sleep 1; done
-	set -- --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" \
-		--accept-dns=false --accept-routes=false
-	if [ -n "$TS_ROUTES" ] && [ "$TS_ROUTES" != off ]; then
-		set -- "$@" --advertise-routes="$TS_ROUTES"
-	fi
-	if tailscale --socket="$ts_sock" up "$@" >"$RUN_DIR/ts-up.log" 2>&1; then
-		log "joined the tailnet as $TS_HOSTNAME"
-		step tailscale_up 1 "joined the tailnet as $TS_HOSTNAME"
+
+	if [ -n "$TS_AUTHKEY" ]; then
+		set -- --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" \
+			--accept-dns=false --accept-routes=false
+		if [ -n "$TS_ROUTES" ] && [ "$TS_ROUTES" != off ]; then
+			set -- "$@" --advertise-routes="$TS_ROUTES"
+		fi
+		if tailscale --socket="$ts_sock" up "$@" >"$RUN_DIR/ts-up.log" 2>&1; then
+			log "joined the tailnet as $TS_HOSTNAME"
+			step tailscale_up 1 "joined the tailnet as $TS_HOSTNAME"
+		else
+			# The socket deliberately stays exported: the daemon is up, so
+			# /setup can show what went wrong and take a corrected key without
+			# the operator having to restart the container.
+			log "tailscale up FAILED — remote viewing will not work:" >&2
+			sed 's/^/tawny:   /' "$RUN_DIR/ts-up.log" >&2 || true
+			step tailscale_up 0 "$(tail -n 20 "$RUN_DIR/ts-up.log" 2>/dev/null || true)"
+		fi
 	else
-		log "tailscale up FAILED — remote viewing will not work:" >&2
-		sed 's/^/tawny:   /' "$RUN_DIR/ts-up.log" >&2 || true
-		step tailscale_up 0 "$(tail -n 20 "$RUN_DIR/ts-up.log" 2>/dev/null || true)"
-		ts_sock=""
+		log "no auth key yet — paste one at http://${LAN_IP:-<this box>}:$PORT/setup"
 	fi
 elif [ -S "$TS_HOST_SOCKET" ] && command -v tailscale >/dev/null 2>&1; then
 	ts_sock="$TS_HOST_SOCKET"
@@ -196,7 +208,23 @@ if [ -n "$ts_sock" ]; then
 	export TAWNY_TS_SOCKET="$ts_sock"
 fi
 
+# The daemon can now be running but logged out (no key yet). Advertising a
+# route or publishing a `serve` both need a login, so ask before doing either —
+# otherwise a first boot with no key records a serve "failure" that is really
+# just "not joined yet", which is exactly the misleading state /setup exists to
+# prevent.
+ts_state=''
 if [ -n "$ts_sock" ]; then
+	ts_state="$(tailscale --socket="$ts_sock" status --json 2>/dev/null | node -e '
+	  let s = "";
+	  process.stdin.on("data", (d) => (s += d)).on("end", () => {
+	    try { process.stdout.write(String(JSON.parse(s).BackendState || "")); } catch {}
+	  });
+	' 2>/dev/null || true)"
+fi
+export TAWNY_TS_HOSTNAME="$TS_HOSTNAME"
+
+if [ -n "$ts_sock" ] && [ "$ts_state" = Running ]; then
 	if [ -n "$TS_ROUTES" ] && [ "$TS_ROUTES" != off ]; then
 		# Approval shows up as the advertised CIDR appearing in this node's own
 		# AllowedIPs — same check probe.sh does against the host, run here
