@@ -12,8 +12,10 @@ const POLL_MS = 4000;
 const LINK = {
   keys:     'https://login.tailscale.com/admin/settings/keys',
   machines: 'https://login.tailscale.com/admin/machines',
+  dns:      'https://login.tailscale.com/admin/dns',
   download: 'https://tailscale.com/download',
-  subnets:  'https://tailscale.com/kb/1019/subnets'
+  subnets:  'https://tailscale.com/kb/1019/subnets',
+  https:    'https://tailscale.com/kb/1153/enabling-https'
 };
 
 const ICONS = {
@@ -340,13 +342,44 @@ function stepConnect(data) {
   // "nothing, this step did itself".
   if (tailscale.loggedIn) {
     if (serve && serve.ok === false) {
+      // Tailscale prints a specific error when the tailnet has not turned on
+      // the HTTPS/MagicDNS features `tailscale serve` needs. That is a switch
+      // in the admin console, not a leftover setting — and it is off by
+      // default on a brand-new tailnet, so it is the first thing to rule out.
+      const d = String(serve.detail || '');
+      const needsHttps = /magicdns/i.test(d) ||
+        (/https/i.test(d) && /enabl/i.test(d)) ||
+        /admin\/dns|1153|enabling-https/i.test(d);
+
+      if (needsHttps) {
+        return {
+          state: 'bad',
+          title: 'Connect to Tailscale',
+          tag: 'turn on HTTPS in Tailscale',
+          body: [
+            el('p', { class: 'step-say' }, 'Tawny is on your network, but your Tailscale account has not switched on the two features it needs to publish a web address: MagicDNS and HTTPS certificates. Until they are on, the https:// address will not exist and talk-back cannot work.'),
+            el('div', { class: 'step-do' }, 'On the DNS page of your Tailscale admin console:',
+              el('ol', {},
+                el('li', {}, 'Under "MagicDNS", press Enable.'),
+                el('li', {}, 'Under "HTTPS Certificates", press Enable HTTPS. (MagicDNS has to be on first.)'))),
+            goLink(LINK.dns, 'Open Tailscale DNS settings'),
+            el('p', { class: 'step-say' }, 'Then restart the container. This is a one-time setting for your whole account — you will not touch it again.'),
+            why('Why does Tawny need these turned on?',
+              'MagicDNS is what gives every device on your network a name like tawny.your-tailnet.ts.net instead of a bare number. HTTPS certificates let Tailscale put a real, browser-trusted certificate on that name.',
+              'Both together are what "tailscale serve" uses to front Tawny at a secure address. A browser only hands a page the microphone on a secure address, so without them there is no talk-back — and the plain http://…:8099 address is the LAN-only fallback.'),
+            serve.detail ? el('pre', { class: 'step-log' }, serve.detail) : null
+          ]
+        };
+      }
+
       return {
         state: 'bad',
         title: 'Connect to Tailscale',
         tag: 'no web address',
         body: [
           el('p', { class: 'step-say' }, 'You are on the network, but Tailscale could not publish Tawny at a web address — so the https:// address will not load, and talk-back will not work.'),
-          el('p', { class: 'step-do' }, 'A leftover setting from an earlier run is the usual cause. Run tailscale serve reset on this machine and restart the container.'),
+          el('p', { class: 'step-do' }, 'A leftover setting from an earlier run is the usual cause. Run tailscale serve reset on this machine and restart the container. If that does not fix it, check that MagicDNS and HTTPS certificates are enabled on the DNS page of your Tailscale admin console.'),
+          goLink(LINK.dns, 'Open Tailscale DNS settings'),
           serve.detail ? el('pre', { class: 'step-log' }, serve.detail) : null
         ]
       };
@@ -548,6 +581,10 @@ function stepWatch(data) {
           el('li', {}, 'Point it at the phone’s QR code. That is the pairing done.'))),
 
       el('p', { class: 'step-say' }, 'You get video, sound, and hold-to-talk back to the phone. The pairing code lasts ten minutes, so if you leave it too long, the phone will show a fresh one.'),
+
+      why('The address does not open?',
+        'The first time, give it a minute. Tailscale fetches a fresh certificate for the name on the first request, and until it lands the page can fail to load or show a certificate warning.',
+        'The device you open it on also needs Tailscale running and signed in to the same account, with MagicDNS on — that is what makes the …ts.net name resolve. On a phone that is the "Use Tailscale" switch; on a computer it is automatic once Tailscale is connected. If the name still will not resolve anywhere, MagicDNS is probably off for the whole account: turn it on at login.tailscale.com/admin/dns.'),
 
       why('Anything worth doing before I walk away?',
         'Give the pet camera phone a fixed address in your router settings — a DHCP reservation. Its address is baked into each pairing code, so if the router hands it a different one later, the code stops working and you have to scan again.',
