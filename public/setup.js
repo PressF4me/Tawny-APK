@@ -134,6 +134,18 @@ document.addEventListener('click', (e) => {
   tick();
 });
 
+// The setup page used to be a one-way door: reachable by a forced redirect
+// from "/", with nothing on it that led back. Whatever is already working —
+// the LAN, or a tailnet address if one already exists — should stay reachable
+// while the rest gets finished. Unlike the Wi-Fi-only skip link below, this
+// does not touch the container at all: it only tells *this* browser not to
+// bounce back for a day, so the next visit (or another device) still sees
+// setup if it is not actually done.
+document.getElementById('setup-leave').addEventListener('click', () => {
+  document.cookie = 'tawny_setup_done=1; path=/; max-age=86400; samesite=lax';
+  location.href = '/';
+});
+
 // "Use it on this Wi-Fi only." Recorded on the container so it settles the
 // question for every device in the house, not just this browser. The cookie
 // is only a fallback for a deployment with no writable volume.
@@ -445,6 +457,33 @@ function stepConnect(data) {
   };
 }
 
+// Buttons for the two ways an operator can respond to a detected route
+// conflict. Both are one click, no restart — the whole point of catching this
+// live instead of just documenting "don't do that" in a README.
+let routeBusy = false;
+
+function routeActionButton(label, cls, path, body) {
+  const btn = el('button', { class: cls, type: 'button' }, label);
+  btn.addEventListener('click', async () => {
+    routeBusy = true;
+    btn.disabled = true;
+    const was = btn.textContent;
+    btn.textContent = 'Working…';
+    try {
+      await fetch(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body || {})
+      });
+    } catch { /* the poll right after will show whatever actually happened */ }
+    routeBusy = false;
+    btn.disabled = false;
+    btn.textContent = was;
+    tick();
+  });
+  return btn;
+}
+
 function stepRoute(data) {
   const { tailscale } = data;
   if (!tailscale.loggedIn) {
@@ -453,11 +492,50 @@ function stepRoute(data) {
 
   const pending = tailscale.pendingRoutes || [];
   const approved = tailscale.approvedRoutes || [];
+  const conflicts = tailscale.routeConflicts || [];
   const cidr = pending[0] || approved[0] || data.lan.cidr;
 
   const explain = why('What am I approving, exactly?',
     `Your pet camera phone sits on your home network at an address like ${data.lan.ip || '192.168.1.50'}. A device somewhere else has no way to reach an address like that — it is private to your house.`,
     `Approving this route tells Tailscale that this machine can pass traffic through to your home network, so a phone or laptop out in the world can reach the camera directly. Tailscale makes you approve it by hand, once, because it is your network and it will not open it without asking.`);
+
+  // Another device on the tailnet already carries this range (or an
+  // overlapping one) — a NAS, a Pi-hole, an earlier Tawny box. Two subnet
+  // routers for the same network is unsupported: Tailscale silently flips
+  // which one actually carries traffic, which is what "the internet keeps
+  // looping" almost always turns out to be. Tawny declined to advertise (or,
+  // if this shows up after upgrading, is still advertising from before this
+  // check existed) rather than create that on its own.
+  if (conflicts.length) {
+    const who = conflicts.map((c) => `${c.peer} (already carries ${c.peerRoute})`).join(', ');
+    if (approved.length) {
+      return {
+        state: 'bad',
+        title: 'Let your devices reach the camera',
+        tag: 'conflicts with another device',
+        body: [
+          el('p', { class: 'step-say' }, `Tawny is advertising ${approved.join(', ')}, but ${who} already advertises an overlapping range. If your Wi-Fi has been dropping or looping since you set this up, this is almost certainly why.`),
+          el('p', { class: 'step-do' }, 'Stop this device from advertising the route. The other device already covers it, so nothing that works today should stop working.'),
+          routeActionButton('Stop advertising this route', 'wide', '/setup/route/withdraw'),
+          goLink(LINK.subnets, 'Read Tailscale’s notes on overlapping subnets'),
+          explain
+        ]
+      };
+    }
+    return {
+      state: 'now',
+      title: 'Let your devices reach the camera',
+      tag: 'needs your decision',
+      body: [
+        el('p', { class: 'step-say' }, `Tawny did not advertise ${cidr} because ${who} already does. Advertising the same range twice is what makes a tailnet's routing flip back and forth, which looks like your whole internet connection going in a loop — so Tawny is refusing to do that on its own.`),
+        el('p', { class: 'step-say' }, 'If that other device is being retired, or you know it is not actually routing this range in practice, you can advertise anyway:'),
+        routeActionButton('Advertise anyway', 'wide', '/setup/route/advertise', { force: true }),
+        el('p', { class: 'step-say' }, 'Otherwise, leave this alone — Tawny still works over this Wi-Fi, and over the tailnet address on a single device, without it.'),
+        goLink(LINK.subnets, 'Read Tailscale’s notes on overlapping subnets'),
+        explain
+      ]
+    };
+  }
 
   if (!pending.length && approved.length) {
     return {
@@ -680,7 +758,7 @@ function render(data) {
   // four-second poll would otherwise wipe a half-pasted key, or the error
   // message explaining why the last one failed.
   const keyIn = document.getElementById('join-key');
-  if (joinBusy || (keyIn && document.activeElement === keyIn)) return;
+  if (joinBusy || routeBusy || (keyIn && document.activeElement === keyIn)) return;
   const carried = keyIn ? keyIn.value : '';
 
   const defs = [stepMachine(data), stepConnect(data), stepRoute(data), stepDevices(data), stepWatch(data)];

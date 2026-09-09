@@ -134,6 +134,57 @@ TS_SERVE="${TS_SERVE:-on}"
 TS_ROUTES="${TS_ROUTES:-}"
 [ -n "$TS_ROUTES" ] || TS_ROUTES="$LAN_CIDR"
 export TAWNY_TS_ROUTES="$TS_ROUTES"
+# Escape hatch for the operator who has already checked and knows two routers
+# on this range is fine (e.g. Tailscale's own "shadow" routing, or they always
+# stop the old one first). Left off, a detected conflict is reported, not
+# forced — see advertise_route() below.
+TS_ROUTES_FORCE="${TS_ROUTES_FORCE:-}"
+
+# Advertise TS_ROUTES on the given socket — but only after checking that no
+# other peer on the tailnet already carries an overlapping route. Two subnet
+# routers for the same range is an unsupported Tailscale configuration: it
+# does not fail loudly, it silently flips which one actually carries traffic,
+# which from inside the house reads as "the internet goes in a loop" — see
+# docker/route-conflict.js for the full story and 34768c3/4282b48's history of
+# getting this topology right. Skipping the advertisement is always safe:
+# Tawny still works over plain LAN and over the tailnet's own point-to-point
+# link, it just cannot bridge the operator's whole home network for this box.
+advertise_route() {
+	sock="$1"
+	[ -n "$TS_ROUTES" ] && [ "$TS_ROUTES" != off ] || return 0
+
+	conflicts="$(tailscale --socket="$sock" status --json 2>/dev/null |
+		node /app/docker/route-conflict.js "$TS_ROUTES" 2>/dev/null || echo '[]')"
+	case "$conflicts" in
+	'[]' | '')
+		if tailscale --socket="$sock" set --advertise-routes="$TS_ROUTES" \
+			>"$RUN_DIR/ts-set.log" 2>&1; then
+			log "advertising $TS_ROUTES into the tailnet"
+			step tailscale_routes 1 "advertising $TS_ROUTES into the tailnet"
+		else
+			log "could not advertise $TS_ROUTES:" >&2
+			sed 's/^/tawny:   /' "$RUN_DIR/ts-set.log" >&2 || true
+			step tailscale_routes 0 "$(tail -n 20 "$RUN_DIR/ts-set.log" 2>/dev/null || true)"
+		fi
+		;;
+	*)
+		if [ "$TS_ROUTES_FORCE" = 1 ] || [ "$TS_ROUTES_FORCE" = on ]; then
+			log "TS_ROUTES_FORCE is set — advertising $TS_ROUTES despite: $conflicts" >&2
+			if tailscale --socket="$sock" set --advertise-routes="$TS_ROUTES" \
+				>"$RUN_DIR/ts-set.log" 2>&1; then
+				step tailscale_routes 1 "advertising $TS_ROUTES (forced past a conflict: $conflicts)"
+			else
+				step tailscale_routes 0 "$(tail -n 20 "$RUN_DIR/ts-set.log" 2>/dev/null || true)"
+			fi
+		else
+			log "NOT advertising $TS_ROUTES — already carried by another device on your" >&2
+			log "  tailnet ($conflicts). Two routers for the same range is what makes a" >&2
+			log "  tailnet's internet routing loop; see http://${LAN_IP:-<this box>}:$PORT/setup" >&2
+			step route_conflict 0 "$conflicts"
+		fi
+		;;
+	esac
+}
 
 ts_sock=""
 tsd_pid=''
@@ -160,14 +211,19 @@ if command -v tailscaled >/dev/null 2>&1 &&
 	while [ ! -S "$ts_sock" ] && [ "$i" -lt 30 ]; do i=$((i + 1)); sleep 1; done
 
 	if [ -n "$TS_AUTHKEY" ]; then
-		set -- --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" \
-			--accept-dns=false --accept-routes=false
-		if [ -n "$TS_ROUTES" ] && [ "$TS_ROUTES" != off ]; then
-			set -- "$@" --advertise-routes="$TS_ROUTES"
-		fi
-		if tailscale --socket="$ts_sock" up "$@" >"$RUN_DIR/ts-up.log" 2>&1; then
+		# --advertise-routes is deliberately not passed to `up`. A household
+		# that already runs Tailscale for something else — a NAS, a Pi-hole, a
+		# previous Tawny box — very often already has a subnet router for this
+		# same /24, and joining first is what lets us ask "does anyone already
+		# carry this route" *before* announcing it too. See advertise_route()
+		# below and docker/route-conflict.js.
+		if tailscale --socket="$ts_sock" up \
+			--authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" \
+			--accept-dns=false --accept-routes=false \
+			>"$RUN_DIR/ts-up.log" 2>&1; then
 			log "joined the tailnet as $TS_HOSTNAME"
 			step tailscale_up 1 "joined the tailnet as $TS_HOSTNAME"
+			advertise_route "$ts_sock"
 		else
 			# The socket deliberately stays exported: the daemon is up, so
 			# /setup can show what went wrong and take a corrected key without
@@ -182,20 +238,7 @@ if command -v tailscaled >/dev/null 2>&1 &&
 elif [ -S "$TS_HOST_SOCKET" ] && command -v tailscale >/dev/null 2>&1; then
 	ts_sock="$TS_HOST_SOCKET"
 	log "using the host's tailscaled via $TS_HOST_SOCKET"
-	if [ -n "$TS_ROUTES" ] && [ "$TS_ROUTES" != off ]; then
-		# `set` rather than `up`: `up` would re-run the whole login flow and can
-		# drop preferences the operator chose for their own reasons. `set` edits
-		# one preference and leaves the rest of their node alone.
-		if tailscale --socket="$ts_sock" set --advertise-routes="$TS_ROUTES" \
-			>"$RUN_DIR/ts-set.log" 2>&1; then
-			log "advertising $TS_ROUTES into the tailnet"
-			step tailscale_routes 1 "advertising $TS_ROUTES into the tailnet"
-		else
-			log "could not advertise $TS_ROUTES:" >&2
-			sed 's/^/tawny:   /' "$RUN_DIR/ts-set.log" >&2 || true
-			step tailscale_routes 0 "$(tail -n 20 "$RUN_DIR/ts-set.log" 2>/dev/null || true)"
-		fi
-	fi
+	advertise_route "$ts_sock"
 else
 	log "no Tailscale (set TS_AUTHKEY, or mount the host's tailscaled socket)"
 	log "  the app still works on the LAN over plain http://<this box>:$PORT"

@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash, createHmac } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { PRIVACY_HTML, PRIVACY_HEADERS } from './rendezvous/privacy.js';
+import { findRouteConflicts } from './docker/route-conflict.js';
 
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -426,13 +427,15 @@ async function tailscaleInfo() {
 
   let self = null;
   let peers = [];
+  let rawPeers = [];
   let backendState = '';
   if (statusRes.ok) {
     try {
       const j = JSON.parse(statusRes.stdout);
       backendState = String(j.BackendState || '');
       self = j.Self || null;
-      peers = Object.values(j.Peer || {}).map((p) => ({
+      rawPeers = Object.values(j.Peer || {});
+      peers = rawPeers.map((p) => ({
         name: p.HostName || (p.DNSName || '').replace(/\.$/, '') || '',
         online: !!p.Online
       }));
@@ -451,6 +454,15 @@ async function tailscaleInfo() {
   const approvedRoutes = advertised.filter((r) => allowedIPs.includes(r));
   const pendingRoutes = advertised.filter((r) => !allowedIPs.includes(r));
 
+  // Checked live, not only at the moment we decide whether to advertise: a
+  // peer can start carrying the same range at any time, and the operator
+  // deserves to see that as the likely cause of "the internet is looping"
+  // rather than have it sit invisible in a log from container start. Checked
+  // against TAWNY_TS_ROUTES (what we *would* advertise) rather than only
+  // `advertised`, so a conflict we correctly declined to advertise still shows.
+  const wantedRoutes = TAWNY_TS_ROUTES && TAWNY_TS_ROUTES !== 'off' ? [TAWNY_TS_ROUTES] : [];
+  const routeConflicts = findRouteConflicts(rawPeers, wantedRoutes);
+
   return {
     configured: true,
     // 'host'  — driving the machine's own tailscaled; no key was ever needed.
@@ -468,6 +480,7 @@ async function tailscaleInfo() {
     advertisedRoutes: advertised,
     approvedRoutes,
     pendingRoutes,
+    routeConflicts,
     statusError: statusRes.ok ? null : statusRes.error,
     prefsError: prefsRes.ok ? null : prefsRes.error
   };
@@ -578,14 +591,15 @@ function recordStep(step, ok, detail) {
  * (docker/entrypoint.sh starts it with or without a key); this is the `up`.
  */
 async function joinTailnet(key) {
-  const routes = TAWNY_TS_ROUTES;
   const args = [
     `--socket=${TAWNY_TS_SOCKET}`, 'up',
     `--authkey=${key}`,
     `--hostname=${process.env.TAWNY_TS_HOSTNAME || 'tawny'}`,
     '--accept-dns=false', '--accept-routes=false'
   ];
-  if (routes && routes !== 'off') args.push(`--advertise-routes=${routes}`);
+  // --advertise-routes is not passed here — see advertiseRoute() below. Joining
+  // first is what lets us check for a conflicting subnet router before
+  // announcing anything, exactly as docker/entrypoint.sh now does at boot.
 
   // Long timeout: this contacts Tailscale's control plane over the internet.
   const up = await run('tailscale', args, 90000);
@@ -602,7 +616,49 @@ async function joinTailnet(key) {
     if (srv.ok) recordStep('tailscale_serve', true, 'published over tailscale serve');
     else recordStep('tailscale_serve', false, (srv.stderr || srv.error || '').trim().slice(0, 2000));
   }
-  return { ok: true };
+
+  const route = await advertiseRoute();
+  return { ok: true, route };
+}
+
+/**
+ * Advertise TAWNY_TS_ROUTES on the container's own tailscaled socket, unless
+ * another peer already carries an overlapping range — see
+ * docker/route-conflict.js for why that combination is the "internet goes in
+ * a loop" report. `force` is the operator overriding that check from /setup
+ * after seeing the warning, e.g. because the other router is being retired.
+ */
+async function advertiseRoute(force = false) {
+  const routes = TAWNY_TS_ROUTES;
+  if (!routes || routes === 'off') return { advertised: false };
+
+  const status = await run('tailscale', [`--socket=${TAWNY_TS_SOCKET}`, 'status', '--json']);
+  let peers = [];
+  try { peers = Object.values(JSON.parse(status.stdout).Peer || {}); } catch { /* treat as no peers */ }
+  const conflicts = findRouteConflicts(peers, [routes]);
+
+  if (conflicts.length && !force) {
+    recordStep('route_conflict', false, JSON.stringify(conflicts));
+    return { advertised: false, conflicts };
+  }
+
+  const set = await run('tailscale', [`--socket=${TAWNY_TS_SOCKET}`, 'set', `--advertise-routes=${routes}`]);
+  if (!set.ok) {
+    const detail = (set.stderr || set.error || '').trim().slice(0, 2000);
+    recordStep('tailscale_routes', false, detail);
+    return { advertised: false, error: detail };
+  }
+  recordStep('tailscale_routes', true, conflicts.length
+    ? `advertising ${routes} (forced past a conflict: ${JSON.stringify(conflicts)})`
+    : `advertising ${routes} into the tailnet`);
+  return { advertised: true, forced: conflicts.length > 0 };
+}
+
+/** `tailscale set --advertise-routes=` with nothing after the `=` withdraws every route this node was carrying. */
+async function withdrawRoutes() {
+  const r = await run('tailscale', [`--socket=${TAWNY_TS_SOCKET}`, 'set', '--advertise-routes=']);
+  if (r.ok) recordStep('tailscale_routes', true, 'withdrew this device\'s advertised route(s) from the setup page');
+  return r.ok;
 }
 
 /**
@@ -624,6 +680,10 @@ function anyStepFailing(startup, ts) {
     // absence degrades nothing that most homes will ever notice, so it does
     // not hold the setup open.
     if (name === 'coturn') continue;
+    // Declining to advertise a conflicting route is the correct outcome, not
+    // a failure — recorded as ok:false only so it is impossible to miss in
+    // the raw log. anyStepFailing() must not read it as broken.
+    if (name === 'route_conflict') continue;
     // Live state beats the log. A container using the host's daemon never runs
     // `tailscale up` at all, so a stale failure from an earlier configuration
     // can sit in the log for ever with nothing to supersede it — while the
@@ -646,18 +706,23 @@ function setupReady(s) {
   if (anyStepFailing(s.startup, ts)) return false;
   if (!lan.cidr || lan.looksLikeDockerBridge) return false;
   if (!ts.configured || !ts.reachable || !ts.loggedIn || !ts.dnsName) return false;
-  return !(ts.pendingRoutes || []).length;
+  if ((ts.pendingRoutes || []).length) return false;
+  // A route we declined to advertise (or withdrew) because another device
+  // already carries it is the same "works on the LAN, fails from the office"
+  // shape as an unapproved one — it just resolves outside this container.
+  return !((ts.routeConflicts || []).length && !(ts.approvedRoutes || []).length);
 }
 
 // ------------------------------------------------------------------ http
 
 const handler = async (req, res) => {
   // The app is otherwise read-only over HTTP — signalling is the WebSocket,
-  // not POSTs. /setup/join is the one exception: it takes an auth key so a
-  // first run needs no file editing, and it guards itself (own network only,
-  // and refused once the node is joined).
+  // not POSTs. The /setup/* actions below are the exception: each guards
+  // itself (own network only) so the setup page can act without a file edit
+  // and a restart.
   const setupPost = req.method === 'POST' && req.url &&
-    ['/setup/join', '/setup/skip'].includes(req.url.split('?')[0]);
+    ['/setup/join', '/setup/skip', '/setup/route/advertise', '/setup/route/withdraw']
+      .includes(req.url.split('?')[0]);
   if (req.method !== 'GET' && req.method !== 'HEAD' && !setupPost) {
     res.writeHead(405, secureHeaders({ allow: 'GET, HEAD' }));
     return res.end();
@@ -740,6 +805,39 @@ const handler = async (req, res) => {
     const result = await joinTailnet(key);
     setupCache = { at: 0, value: null };
     return json(res, result.ok ? 200 : 502, result);
+  }
+  // The operator's answer to a detected route conflict, once they have read
+  // the warning: try anyway (they know the other router is retired, or they
+  // accept the risk), or give the route up entirely (they hit the loop and
+  // want it to stop *now*, without editing .env and restarting).
+  if (url.pathname === '/setup/route/advertise') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'POST only' });
+    if (!fromLocalNetwork(req)) {
+      return json(res, 403, { error: 'Setup can only be completed from your own network.' });
+    }
+    if (!TAWNY_TS_SOCKET) return json(res, 503, { error: 'No Tailscale socket in this container.' });
+    const before = await setupStatusCached(0);
+    if (!before.tailscale.loggedIn) return json(res, 409, { error: 'Not on a tailnet yet.' });
+    const body = await readJsonBody(req);
+    const result = await advertiseRoute(!!(body && body.force));
+    setupCache = { at: 0, value: null };
+    if (result.conflicts && !result.advertised) {
+      return json(res, 409, {
+        error: 'Another device on your tailnet already carries this range. Advertising it too is what causes a routing loop — pass force to do it anyway.',
+        conflicts: result.conflicts
+      });
+    }
+    return json(res, result.advertised || !result.error ? 200 : 502, result);
+  }
+  if (url.pathname === '/setup/route/withdraw') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'POST only' });
+    if (!fromLocalNetwork(req)) {
+      return json(res, 403, { error: 'Setup can only be completed from your own network.' });
+    }
+    if (!TAWNY_TS_SOCKET) return json(res, 503, { error: 'No Tailscale socket in this container.' });
+    const ok = await withdrawRoutes();
+    setupCache = { at: 0, value: null };
+    return json(res, ok ? 200 : 502, { ok });
   }
   if (url.pathname === '/setup') {
     try {
