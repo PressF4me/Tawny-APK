@@ -611,13 +611,20 @@ function stepRoute(data) {
   // check existed) rather than create that on its own.
   if (conflicts.length) {
     const who = conflicts.map((c) => `${c.peer} (already carries ${c.peerRoute})`).join(', ');
-    if (approved.length) {
+    // What we are putting out right now, approved or not. A PENDING
+    // advertisement collides just as hard as an approved one — it is the same
+    // announcement — so both have to reach the withdraw branch. Checking only
+    // `approved` sent this state to the "already carried, nothing to do" reply
+    // below while the route was still being advertised, and the banner said
+    // "one click left" over a step that called itself finished.
+    const advertising = approved.concat(pending);
+    if (advertising.length) {
       return {
         state: 'bad',
         title: 'Let your devices reach the camera',
         tag: 'conflicts with another device',
         body: [
-          el('p', { class: 'step-say' }, `Tawny is advertising ${approved.join(', ')}, but ${who} already advertises an overlapping range. If your Wi-Fi has been dropping or looping since you set this up, this is almost certainly why.`),
+          el('p', { class: 'step-say' }, `Tawny is advertising ${advertising.join(', ')}, but ${who} already advertises an overlapping range. If your Wi-Fi has been dropping or looping since you set this up, this is almost certainly why.`),
           el('p', { class: 'step-do' }, 'Stop this device from advertising the route. The other device already covers it, so nothing that works today should stop working.'),
           routeActionButton('Stop advertising this route', 'wide', '/setup/route/withdraw'),
           goLink(LINK.subnets, 'Read Tailscale’s notes on overlapping subnets'),
