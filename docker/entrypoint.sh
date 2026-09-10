@@ -322,15 +322,29 @@ ts_health() {
 ts_fail_kind() { # up_log
 	txt="$(cat "$1" 2>/dev/null || true)
 $(ts_health)"
-	# `already exists` / `register request` / `last login error` come straight
-	# from a control-plane registration that failed on the persisted node key —
-	# `status` keeps printing the last one, which is why the daemon health is
-	# folded in here. NoState on its own is too noisy (it shows briefly on any
-	# fresh start) so it is deliberately not a signal.
+	# Order matters, and so does what is NOT a signal here. Getting this wrong
+	# is destructive: `stale` archives the node identity, so a household whose
+	# internet happens to be down at boot would come back needing a fresh auth
+	# key and a fresh route approval. Observed doing exactly that.
+	#
+	#   - "last login error" is NOT a stale signal. It is the wrapper Tailscale
+	#     puts round *every* failed login, DNS outages included — the health
+	#     line for an unreachable control plane reads "You are logged out. The
+	#     last login error was: fetch control key: … failed to resolve …".
+	#   - "register request: http 4" is not one either on its own: a refused
+	#     auth key comes back as a 401 through the same path. It is kept, but
+	#     only after badkey and network have had their say.
+	#   - NoState is too noisy (it shows briefly on any fresh start).
+	#
+	# What is left in the first arm is unambiguous: control has this node key
+	# already and will not re-register it. Nothing else produces those strings.
+	# The up log always contains "timeout waiting for …" once --timeout fires,
+	# which is why network cannot be checked first.
 	case "$txt" in
-		*"already exists"*|*"register request: http 4"*|*"last login error"*|*"wrong nodekey"*|*"duplicate node key"*) echo stale ;;
-		*"invalid key"*|*"bad authkey"*|*"authkey"*|*expired*|*"is not valid"*|*"requires an auth key"*|*unauthorized*|*"not permitted"*) echo badkey ;;
-		*timeout*|*deadline*|*"dial tcp"*|*"no route to host"*|*"lookup "*|*"i/o timeout"*|*"connection refused"*|*"TLS handshake"*) echo network ;;
+		*"already exists"*|*"wrong nodekey"*|*"duplicate node key"*|*"node key has been used"*) echo stale ;;
+		*"invalid key"*|*"bad authkey"*|*"authkey"*|*expired*|*"is not valid"*|*"requires an auth key"*|*unauthorized*|*"not permitted"*|*"http 401"*|*"http 403"*) echo badkey ;;
+		*timeout*|*deadline*|*"dial tcp"*|*"no route to host"*|*"lookup "*|*"failed to resolve"*|*"no dns"*|*"network is unreachable"*|*"i/o timeout"*|*"connection refused"*|*"TLS handshake"*) echo network ;;
+		*"register request: http 4"*) echo stale ;;
 		*) echo unknown ;;
 	esac
 }

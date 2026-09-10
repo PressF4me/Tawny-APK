@@ -402,12 +402,24 @@ function classifyUp(text) {
   // failure whose stderr was empty therefore landed on "that key was refused",
   // which is precisely the misdiagnosis this function exists to end.
   const t = String(text || '').toLowerCase().replace(/--[a-z][\w-]*=\S*/g, ' ');
-  // NoState alone is too noisy (brief on any fresh start). These are the
-  // signals of a persisted node key control refuses; the daemon's health
-  // keeps echoing the last one, so callers fold that into `text`.
-  if (/already exists|register request: http 4|last login error|wrong nodekey|duplicate node key/.test(t)) return 'stale';
-  if (/invalid key|bad authkey|authkey|expired|is not valid|requires an auth key|unauthorized|not permitted/.test(t)) return 'badkey';
-  if (/timeout|deadline|dial tcp|no route to host|lookup |i\/o timeout|connection refused|tls handshake/.test(t)) return 'network';
+  // Order matters, and so does what is NOT a signal. `stale` archives the node
+  // identity, so a household whose internet is down at boot would otherwise
+  // come back needing a fresh auth key and a fresh route approval — observed
+  // doing exactly that once the daemon's health was actually being read.
+  //   - "last login error" is not a stale signal: it is the wrapper Tailscale
+  //     puts round *every* failed login, DNS outages included.
+  //   - "register request: http 4" is not one on its own either — a refused
+  //     auth key returns 401 through the same path — so it is consulted only
+  //     after badkey and network.
+  //   - NoState alone is too noisy (brief on any fresh start).
+  // The first rule is unambiguous: control holds this node key and will not
+  // re-register it. `up`'s output always carries "timeout waiting for …" once
+  // --timeout fires, which is why network cannot be tested first.
+  // Kept in lockstep with ts_fail_kind() in docker/entrypoint.sh.
+  if (/already exists|wrong nodekey|duplicate node key|node key has been used/.test(t)) return 'stale';
+  if (/invalid key|bad authkey|authkey|expired|is not valid|requires an auth key|unauthorized|not permitted|http 401|http 403/.test(t)) return 'badkey';
+  if (/timeout|deadline|dial tcp|no route to host|lookup |failed to resolve|no dns|network is unreachable|i\/o timeout|connection refused|tls handshake/.test(t)) return 'network';
+  if (/register request: http 4/.test(t)) return 'stale';
   return 'unknown';
 }
 
