@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash, createHmac } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { PRIVACY_HTML, PRIVACY_HEADERS } from './rendezvous/privacy.js';
-import { findRouteConflicts } from './docker/route-conflict.js';
+import {
+  findRouteConflicts, findRouteCoverage, mergeRoutes, withoutRoute
+} from './docker/route-conflict.js';
 
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -91,7 +93,19 @@ const TS_HOST_SOCKET = process.env.TS_HOST_SOCKET || '/var/run/tailscale/tailsca
 const TAWNY_LAN_IP = process.env.TAWNY_LAN_IP || '';
 const TAWNY_LAN_CIDR = process.env.TAWNY_LAN_CIDR || '';
 const TAWNY_TS_ROUTES = process.env.TAWNY_TS_ROUTES || '';
+// 'own' | 'host' | 'none' — whose tailscaled the socket above belongs to.
+// docker/entrypoint.sh decides it; the socket comparison below is the fallback
+// for a container started some other way. On the host's daemon every write is
+// additive (see advertiseRoute) and `up` is refused outright: that machine was
+// on a tailnet for its own reasons before Tawny existed.
+const TAWNY_TS_MODE = process.env.TAWNY_TS_MODE ||
+  (TAWNY_TS_SOCKET ? (TAWNY_TS_SOCKET === TS_HOST_SOCKET ? 'host' : 'own') : 'none');
 const TAWNY_SETUP_STATE = process.env.TAWNY_SETUP_STATE || '';
+// Where the operator's answer to "do you want to watch from outside the
+// house?" is kept. TS_ROUTES now defaults to `off`, so without this the
+// feature would be a setting nobody finds; with it, /setup can turn routing on
+// live and the choice outlives the container. See docker/entrypoint.sh.
+const ROUTE_CHOICE_FILE = process.env.TAWNY_ROUTE_CHOICE_FILE || '/data/route-choice';
 
 const MAX_PER_ROOM = 4;      // one Watcher + up to three Handhelds
 const MAX_STATIONS = 1;
@@ -394,6 +408,33 @@ function tcpAlive(host, port, timeoutMs = 500) {
   });
 }
 
+/**
+ * The CIDR Tawny would advertise if asked: an explicit TS_ROUTES when it names
+ * one, otherwise the LAN this container sits on. Used everywhere instead of
+ * TAWNY_TS_ROUTES directly, because with routing off by default that variable
+ * reads 'off' while there is still a perfectly good route to offer.
+ */
+function ourRoute() {
+  if (TAWNY_TS_ROUTES && TAWNY_TS_ROUTES !== 'off') return TAWNY_TS_ROUTES;
+  return TAWNY_LAN_CIDR || '';
+}
+
+/** Is this container actually set to advertise right now? */
+const routesEnabled = () => !!(TAWNY_TS_ROUTES && TAWNY_TS_ROUTES !== 'off');
+
+/** 'advertise' | 'lan-only' | 'unset' — the operator's recorded answer. */
+function routeChoice() {
+  if (routesEnabled()) return 'advertise';   // already on; nothing to ask
+  try {
+    const v = readFileSync(ROUTE_CHOICE_FILE, 'utf8').trim();
+    return v === 'advertise' || v === 'lan-only' ? v : 'unset';
+  } catch { return 'unset'; }
+}
+
+function setRouteChoice(v) {
+  try { writeFileSync(ROUTE_CHOICE_FILE, v); return true; } catch { return false; }
+}
+
 /** The startup-time record from docker/entrypoint.sh's step() helper. */
 function readStartupState() {
   if (!TAWNY_SETUP_STATE) return [];
@@ -451,8 +492,15 @@ async function tailscaleInfo() {
   }
 
   const allowedIPs = Array.isArray(self && self.AllowedIPs) ? self.AllowedIPs : [];
-  const approvedRoutes = advertised.filter((r) => allowedIPs.includes(r));
-  const pendingRoutes = advertised.filter((r) => !allowedIPs.includes(r));
+  // Only the route Tawny asked for is Tawny's business. On the host-socket
+  // path the daemon may advertise several, and one of the operator's own —
+  // pending approval since long before this container existed — used to sit in
+  // pendingRoutes for ever, which held setupReady() false and bounced every
+  // visit to "/" back to /setup with a step nobody could close from here.
+  const mine = ourRoute();
+  const ours = mine ? advertised.filter((r) => r === mine) : advertised;
+  const approvedRoutes = ours.filter((r) => allowedIPs.includes(r));
+  const pendingRoutes = ours.filter((r) => !allowedIPs.includes(r));
 
   // Checked live, not only at the moment we decide whether to advertise: a
   // peer can start carrying the same range at any time, and the operator
@@ -460,14 +508,19 @@ async function tailscaleInfo() {
   // rather than have it sit invisible in a log from container start. Checked
   // against TAWNY_TS_ROUTES (what we *would* advertise) rather than only
   // `advertised`, so a conflict we correctly declined to advertise still shows.
-  const wantedRoutes = TAWNY_TS_ROUTES && TAWNY_TS_ROUTES !== 'off' ? [TAWNY_TS_ROUTES] : [];
+  const wantedRoutes = mine ? [mine] : [];
   const routeConflicts = findRouteConflicts(rawPeers, wantedRoutes);
+  // ...and which of them a peer already carries in full. A conflict says "do
+  // not advertise this twice"; coverage says "the path already exists". They
+  // are usually the same peer, and conflating them is what made a working
+  // deployment report itself unfinished for ever.
+  const routeCoveredBy = findRouteCoverage(rawPeers, wantedRoutes);
 
   return {
     configured: true,
     // 'host'  — driving the machine's own tailscaled; no key was ever needed.
     // 'own'   — this container's tailscaled; a key joins it.
-    mode: TAWNY_TS_SOCKET === TS_HOST_SOCKET ? 'host' : 'own',
+    mode: TAWNY_TS_MODE === 'none' ? 'own' : TAWNY_TS_MODE,
     hostSocketAvailable: existsSync(TS_HOST_SOCKET),
     reachable: statusRes.ok,
     // The daemon runs from boot whether or not a key was ever supplied, so
@@ -481,6 +534,12 @@ async function tailscaleInfo() {
     approvedRoutes,
     pendingRoutes,
     routeConflicts,
+    routeCoveredBy,
+    // Off by default, so /setup has to say so rather than let a deployment
+    // look finished while nothing outside the house can reach it.
+    routesEnabled: routesEnabled(),
+    routeChoice: routeChoice(),
+    lanRoute: mine,
     statusError: statusRes.ok ? null : statusRes.error,
     prefsError: prefsRes.ok ? null : prefsRes.error
   };
@@ -493,11 +552,18 @@ async function coturnInfo() {
 }
 
 function lanInfo() {
-  // The container's own default bridge is 172.17.0.0/16; a real home LAN can
-  // legitimately sit in 172.16/12 too, but 172.17.x is the address Docker
-  // hands out when nothing has told it to use host networking — the
-  // multi-NIC/VLAN failure mode this exists to catch. TS_ROUTES is the fix.
-  const looksLikeDockerBridge = /^172\.1[6-9]\./.test(TAWNY_LAN_IP);
+  // Docker's default bridge is 172.17.0.0/16, but a compose or Portainer stack
+  // gets its own network from the 172.16/12 pool — 172.19, 172.22, 172.28, at
+  // Docker's discretion. Testing only 172.16-19 therefore missed most bridged
+  // deployments, which then advertised a container network into the tailnet as
+  // if it were the house: the phone is not on it, so nothing could ever
+  // connect, and nothing said why.
+  //
+  // The whole of 172.16/12 is legitimate private space, so the mask is the
+  // second signal: every Docker-allocated network is a /16, and a home router
+  // handing out a /16 is not a thing. TS_ROUTES overrides either way.
+  const looksLikeDockerBridge =
+    /^172\.(1[6-9]|2[0-9]|3[01])\./.test(TAWNY_LAN_IP) && /\/16$/.test(TAWNY_LAN_CIDR);
   return { ip: TAWNY_LAN_IP || null, cidr: TAWNY_LAN_CIDR || null, looksLikeDockerBridge };
 }
 
@@ -629,8 +695,10 @@ async function joinTailnet(key) {
  * after seeing the warning, e.g. because the other router is being retired.
  */
 async function advertiseRoute(force = false) {
-  const routes = TAWNY_TS_ROUTES;
-  if (!routes || routes === 'off') return { advertised: false };
+  const routes = ourRoute();
+  if (!routes) {
+    return { advertised: false, error: 'No home network was detected, so there is no route to offer.' };
+  }
 
   const status = await run('tailscale', [`--socket=${TAWNY_TS_SOCKET}`, 'status', '--json']);
   let peers = [];
@@ -642,22 +710,55 @@ async function advertiseRoute(force = false) {
     return { advertised: false, conflicts };
   }
 
-  const set = await run('tailscale', [`--socket=${TAWNY_TS_SOCKET}`, 'set', `--advertise-routes=${routes}`]);
+  // --advertise-routes replaces the list; union ours in rather than writing
+  // over whatever this daemon already carries. See mergeRoutes().
+  const want = mergeRoutes(await advertisedRoutes(), [routes]);
+  const set = await run('tailscale',
+    [`--socket=${TAWNY_TS_SOCKET}`, 'set', `--advertise-routes=${want.join(',')}`]);
   if (!set.ok) {
     const detail = (set.stderr || set.error || '').trim().slice(0, 2000);
     recordStep('tailscale_routes', false, detail);
     return { advertised: false, error: detail };
   }
+  // Remember it, so a restart does not silently drop back to `off`.
+  setRouteChoice('advertise');
   recordStep('tailscale_routes', true, conflicts.length
     ? `advertising ${routes} (forced past a conflict: ${JSON.stringify(conflicts)})`
     : `advertising ${routes} into the tailnet`);
   return { advertised: true, forced: conflicts.length > 0 };
 }
 
-/** `tailscale set --advertise-routes=` with nothing after the `=` withdraws every route this node was carrying. */
+/** What this node advertises right now, straight from its prefs. */
+async function advertisedRoutes() {
+  const prefs = await run('tailscale', [`--socket=${TAWNY_TS_SOCKET}`, 'debug', 'prefs']);
+  if (!prefs.ok) return [];
+  try {
+    const j = JSON.parse(prefs.stdout);
+    return Array.isArray(j.AdvertiseRoutes) ? j.AdvertiseRoutes : [];
+  } catch { return []; }
+}
+
+/**
+ * Take Tawny's route back off this node — and only Tawny's.
+ *
+ * The obvious spelling, `set --advertise-routes=` with nothing after the `=`,
+ * withdraws *every* route the node carries. On the host-socket path that is
+ * the operator's own daemon, so the "Stop advertising this route" button would
+ * have quietly taken their NAS's subnet down with it — while the UI promised
+ * "nothing that works today should stop working".
+ */
 async function withdrawRoutes() {
-  const r = await run('tailscale', [`--socket=${TAWNY_TS_SOCKET}`, 'set', '--advertise-routes=']);
-  if (r.ok) recordStep('tailscale_routes', true, 'withdrew this device\'s advertised route(s) from the setup page');
+  // Doubles as the "no, this Wi-Fi only" answer: recorded either way, so the
+  // question is asked once and never again.
+  setRouteChoice('lan-only');
+  const keep = withoutRoute(await advertisedRoutes(), ourRoute());
+  const r = await run('tailscale',
+    [`--socket=${TAWNY_TS_SOCKET}`, 'set', `--advertise-routes=${keep.join(',')}`]);
+  if (r.ok) {
+    recordStep('tailscale_routes', true, keep.length
+      ? `stopped advertising ${TAWNY_TS_ROUTES}; this device still carries ${keep.join(', ')}`
+      : 'withdrew this device\'s advertised route(s) from the setup page');
+  }
   return r.ok;
 }
 
@@ -707,10 +808,21 @@ function setupReady(s) {
   if (!lan.cidr || lan.looksLikeDockerBridge) return false;
   if (!ts.configured || !ts.reachable || !ts.loggedIn || !ts.dnsName) return false;
   if ((ts.pendingRoutes || []).length) return false;
-  // A route we declined to advertise (or withdrew) because another device
-  // already carries it is the same "works on the LAN, fails from the office"
-  // shape as an unapproved one — it just resolves outside this container.
-  return !((ts.routeConflicts || []).length && !(ts.approvedRoutes || []).length);
+  // Somebody has to carry a route to the phone's LAN — but it does not have to
+  // be us. This used to read any conflict with no route of *our own* as
+  // unfinished, which is exactly backwards: the common case is a NAS or an
+  // earlier box already routing that range, approved, with Tawny correctly
+  // declining to advertise a second time. That deployment works, and marking
+  // it unfinished redirected every visit to /setup for ever with a step the
+  // operator could not close from here.
+  const carried = (ts.approvedRoutes || []).length || (ts.routeCoveredBy || []).length;
+  if ((ts.routeConflicts || []).length && !carried) return false;
+  // Remote access is off until asked for, and "off" is a legitimate finished
+  // state — but only once somebody has actually chosen it. Left as a silent
+  // default it would ship a deployment nobody can watch from outside the
+  // house, which is the thing people install this for. Unanswered = unfinished.
+  if (!carried && ts.routeChoice === 'unset') return false;
+  return true;
 }
 
 // ------------------------------------------------------------------ http
@@ -787,6 +899,16 @@ const handler = async (req, res) => {
     if (!TAWNY_TS_SOCKET) {
       return json(res, 503, {
         error: 'Tailscale is not available in this container, so a key cannot be applied here. Set TS_AUTHKEY and restart.'
+      });
+    }
+    // The host-socket path drives the machine's own tailscaled. `tailscale up`
+    // there would re-authenticate the operator's actual computer — renaming it
+    // to "tawny", possibly onto a different tailnet, and flipping its
+    // accept-routes/accept-dns prefs on the way past. A logged-out host daemon
+    // is theirs to log in, not ours.
+    if (TAWNY_TS_MODE === 'host') {
+      return json(res, 409, {
+        error: 'This container uses the Tailscale already installed on this machine, so a key here would sign that machine in rather than Tawny. Run `tailscale up` on the machine itself, or set TS_AUTHKEY to give Tawny its own separate node.'
       });
     }
     const before = await setupStatusCached(0);

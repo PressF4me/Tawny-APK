@@ -130,9 +130,44 @@ TS_HOSTNAME="${TS_HOSTNAME:-tawny}"
 TS_STATE_DIR="${TS_STATE_DIR:-/data/tailscale}"
 TS_HOST_SOCKET="${TS_HOST_SOCKET:-/var/run/tailscale/tailscaled.sock}"
 TS_SERVE="${TS_SERVE:-on}"
-# Empty means "the subnet this container is on". `off` advertises nothing.
-TS_ROUTES="${TS_ROUTES:-}"
-[ -n "$TS_ROUTES" ] || TS_ROUTES="$LAN_CIDR"
+# Subnet routing is OFF unless somebody asks for it.
+#
+# It used to default to "advertise whatever subnet this container is on", which
+# quietly made every fresh container a subnet router for the whole house. In a
+# household that already runs Tailscale — a NAS, a Pi-hole, an earlier Tawny —
+# that is a second router for one range, and Tailscale responds by flipping
+# between them: reported to us as "the internet goes in a loop". A default
+# should not be able to do that to a network.
+#
+#   off (default) — advertise nothing, unless /setup has been told otherwise
+#   empty / auto  — the subnet this container is on
+#   a CIDR        — exactly that
+#
+# The point of the route is watching from OUTSIDE the house, so turning it off
+# by default removes a real feature. That is why it is a decision /setup makes
+# the operator take rather than a setting they have to discover: the answer is
+# remembered in TAWNY_ROUTE_CHOICE_FILE, so turning it on needs no file editing
+# and survives a restart. server.js writes that file; this reads it.
+TS_ROUTES="${TS_ROUTES:-off}"
+ROUTE_CHOICE_FILE="${TAWNY_ROUTE_CHOICE_FILE:-/data/route-choice}"
+export TAWNY_ROUTE_CHOICE_FILE="$ROUTE_CHOICE_FILE"
+
+route_choice=unset
+if [ -f "$ROUTE_CHOICE_FILE" ]; then
+	route_choice="$(cat "$ROUTE_CHOICE_FILE" 2>/dev/null || echo unset)"
+fi
+case "$TS_ROUTES" in
+'' | auto)
+	# An explicit opt-in through the environment. No question to ask.
+	TS_ROUTES="$LAN_CIDR"
+	;;
+off)
+	if [ "$route_choice" = advertise ]; then
+		TS_ROUTES="$LAN_CIDR"
+		log "remote access was turned on at /setup — advertising ${TS_ROUTES:-none}"
+	fi
+	;;
+esac
 export TAWNY_TS_ROUTES="$TS_ROUTES"
 # Escape hatch for the operator who has already checked and knows two routers
 # on this range is fine (e.g. Tailscale's own "shadow" routing, or they always
@@ -149,15 +184,32 @@ TS_ROUTES_FORCE="${TS_ROUTES_FORCE:-}"
 # getting this topology right. Skipping the advertisement is always safe:
 # Tawny still works over plain LAN and over the tailnet's own point-to-point
 # link, it just cannot bridge the operator's whole home network for this box.
+#
+# `tailscale set --advertise-routes=` REPLACES the node's whole list rather
+# than adding to it. On the host-socket path the daemon belongs to the
+# operator, not to Tawny, and may already carry a route for a second subnet, a
+# VLAN or a container network — writing only our CIDR silently withdrew every
+# one of them, and a route disappearing is invisible until something far away
+# stops working. Ask the daemon what it already advertises and union ours in.
+merged_routes() { # socket -> comma-separated list for --advertise-routes
+	out="$(tailscale --socket="$1" debug prefs 2>/dev/null |
+		node /app/docker/route-conflict.js --merge "$TS_ROUTES" 2>/dev/null || true)"
+	# No prefs (an old CLI, a daemon that has not settled) must not mean
+	# "advertise nothing" — fall back to just ours, which is the old behaviour.
+	[ -n "$out" ] || out="$TS_ROUTES"
+	printf '%s' "$out"
+}
+
 advertise_route() {
 	sock="$1"
 	[ -n "$TS_ROUTES" ] && [ "$TS_ROUTES" != off ] || return 0
 
 	conflicts="$(tailscale --socket="$sock" status --json 2>/dev/null |
 		node /app/docker/route-conflict.js "$TS_ROUTES" 2>/dev/null || echo '[]')"
+	want="$(merged_routes "$sock")"
 	case "$conflicts" in
 	'[]' | '')
-		if tailscale --socket="$sock" set --advertise-routes="$TS_ROUTES" \
+		if tailscale --socket="$sock" set --advertise-routes="$want" \
 			>"$RUN_DIR/ts-set.log" 2>&1; then
 			log "advertising $TS_ROUTES into the tailnet"
 			step tailscale_routes 1 "advertising $TS_ROUTES into the tailnet"
@@ -170,7 +222,7 @@ advertise_route() {
 	*)
 		if [ "$TS_ROUTES_FORCE" = 1 ] || [ "$TS_ROUTES_FORCE" = on ]; then
 			log "TS_ROUTES_FORCE is set — advertising $TS_ROUTES despite: $conflicts" >&2
-			if tailscale --socket="$sock" set --advertise-routes="$TS_ROUTES" \
+			if tailscale --socket="$sock" set --advertise-routes="$want" \
 				>"$RUN_DIR/ts-set.log" 2>&1; then
 				step tailscale_routes 1 "advertising $TS_ROUTES (forced past a conflict: $conflicts)"
 			else
@@ -188,6 +240,12 @@ advertise_route() {
 
 ts_sock=""
 tsd_pid=''
+# 'own'  — our tailscaled, our node, ours to configure however we like.
+# 'host' — the operator's daemon, which was doing something before Tawny
+#          existed and will go on doing it afterwards. Every write to it is
+#          therefore additive or refused, never a replacement: see
+#          merged_routes() above and the `serve` guard below.
+ts_mode=none
 
 # The daemon starts whether or not there is a key, so that an operator who has
 # not got one yet can paste it into /setup and be joined without ever editing a
@@ -196,6 +254,7 @@ tsd_pid=''
 if command -v tailscaled >/dev/null 2>&1 &&
 	{ [ -n "$TS_AUTHKEY" ] || [ ! -S "$TS_HOST_SOCKET" ]; }; then
 	ts_sock="$RUN_DIR/tailscaled.sock"
+	ts_mode=own
 	mkdir -p "$TS_STATE_DIR"
 	log "starting our own tailscaled (userspace networking), state in $TS_STATE_DIR"
 	tailscaled \
@@ -237,11 +296,21 @@ if command -v tailscaled >/dev/null 2>&1 &&
 	fi
 elif [ -S "$TS_HOST_SOCKET" ] && command -v tailscale >/dev/null 2>&1; then
 	ts_sock="$TS_HOST_SOCKET"
-	log "using the host's tailscaled via $TS_HOST_SOCKET"
+	ts_mode=host
+	log "using the host's tailscaled via $TS_HOST_SOCKET (its existing routes and"
+	log "  serve configuration are left alone — Tawny only adds to them)"
 	advertise_route "$ts_sock"
 else
 	log "no Tailscale (set TS_AUTHKEY, or mount the host's tailscaled socket)"
-	log "  the app still works on the LAN over plain http://<this box>:$PORT"
+	# Careful with this claim: /setup answers over plain http, and two phones
+	# on this Wi-Fi still pair directly without the container at all. But a
+	# BROWSER will not run a session on http://<lan-ip> — public/app.js
+	# start() bails on !window.isSecureContext for both roles, because the
+	# Viewer takes a microphone for talk-back too. Only 127.0.0.1 on this
+	# machine is a secure context without TLS.
+	log "  /setup still answers on http://${LAN_IP:-<this box>}:$PORT, and two phones"
+	log "  on this Wi-Fi can still pair with each other directly. A browser needs"
+	log "  the https address, though — it will not start a session on a plain one."
 fi
 
 # Neither path may have produced a usable socket (auth failed, nothing
@@ -250,6 +319,10 @@ fi
 if [ -n "$ts_sock" ]; then
 	export TAWNY_TS_SOCKET="$ts_sock"
 fi
+# server.js has to know whose daemon it is talking to, for the same reason this
+# script does: on the host's it may only add, and /setup must not offer to log
+# the operator's own machine into a different tailnet.
+export TAWNY_TS_MODE="$ts_mode"
 
 # The daemon can now be running but logged out (no key yet). Advertising a
 # route or publishing a `serve` both need a login, so ask before doing either —
@@ -289,7 +362,47 @@ if [ -n "$ts_sock" ] && [ "$ts_state" = Running ]; then
 			log "      Edit route settings -> tick $TS_ROUTES"
 		fi
 	fi
-	if [ "$TS_SERVE" = on ]; then
+	# `serve --bg <url>` publishes at https://<node>/ — and takes that mount
+	# point over from whatever was there before. On our own node that is only
+	# ever our own previous run. On the operator's node it could be the thing
+	# they actually installed Tailscale for, and replacing it without asking is
+	# not ours to do. So on the host path: look first, and step aside if the
+	# node is already serving something that is not us.
+	serve_taken=0
+	if [ "$ts_mode" = host ] && [ "$TS_SERVE" = on ]; then
+		# `serve status --json` looks like:
+		#   {"TCP":{"443":{"HTTPS":true}},
+		#    "Web":{"host:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8099"}}}}}
+		# A populated TCP block is NOT evidence of someone else: the `443/HTTPS`
+		# entry is what terminates TLS for our own Web handler, so treating it
+		# as "taken" would make a restart refuse to re-publish Tawny's own
+		# config. Only a raw TCPForward, or a Web handler proxying somewhere
+		# other than our port, is somebody else's.
+		serve_taken="$(tailscale --socket="$ts_sock" serve status --json 2>/dev/null | node -e '
+		  let s = "";
+		  process.stdin.on("data", (d) => (s += d)).on("end", () => {
+		    let j = null;
+		    try { j = JSON.parse(s); } catch {}
+		    // No output, or a CLI too old for --json: assume free, which is
+		    // exactly what this script did before the check existed.
+		    if (!j) return process.stdout.write("0");
+		    const mine = "http://127.0.0.1:" + process.argv[1];
+		    let other = false;
+		    for (const t of Object.values(j.TCP || {})) if (t && t.TCPForward) other = true;
+		    for (const host of Object.values(j.Web || {}))
+		      for (const h of Object.values((host && host.Handlers) || {}))
+		        if (!h || h.Proxy !== mine) other = true;
+		    process.stdout.write(other ? "1" : "0");
+		  });
+		' "$PORT" 2>/dev/null || echo 0)"
+	fi
+	if [ "$TS_SERVE" = on ] && [ "$serve_taken" = 1 ]; then
+		log "NOT publishing over tailscale serve: this machine already serves" >&2
+		log "  something else at its Tailscale address, and taking that over would" >&2
+		log "  break it. Use TS_AUTHKEY to give Tawny its own node, or free the" >&2
+		log "  address with 'tailscale serve reset' and restart." >&2
+		step tailscale_serve 0 "this machine's Tailscale address already serves something else; Tawny left it alone. Give Tawny its own node with TS_AUTHKEY, or free the address with 'tailscale serve reset'."
+	elif [ "$TS_SERVE" = on ]; then
 		# --bg because this script has a supervision loop of its own below and
 		# `serve` in the foreground would own the process. Serving http (not
 		# https+insecure) because there is no local TLS listener any more:

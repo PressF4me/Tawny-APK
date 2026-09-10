@@ -36,6 +36,15 @@
   --stage:   #0c0d12;   /* live-video ground — always dark */
   --blush:   #fdecef;   /* faint top-of-page glow (light only) */
   --on-accent: #ffffff;  /* text on a --berry fill */
+  /* An accent used as TEXT, not as a fill. --berry on white is 4.0:1 and
+     --live is 3.9:1 — both under AA for the 11-13px labels, tags and links the
+     setup flow is full of, and both are the exact sizes where it shows. These
+     are the same hue carried to a contrast-safe lightness, and they flip with
+     the theme so a dark panel keeps the brighter one. Fills keep --berry /
+     --live: contrast there is the job of --on-accent. */
+  --accent-ink: var(--berry-d);
+  --live-ink:   #b23a22;
+  --on-alert:   #3b2a06;  /* text on an --alert fill; amber wants dark ink in both themes */
 
   --display: "Tawny Display", "Herculanum", "Papyrus", fantasy;
   --text: "Tawny Text", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
@@ -97,6 +106,10 @@
     --on-accent: #191410;
     --blush:   transparent;
     --ctl-line: #4a3b2b;
+    /* On a dark panel the *bright* end of each accent is the readable one, so
+       the light palette's relationship inverts here. See :root. */
+    --accent-ink: var(--berry);
+    --live-ink:   var(--live);
   }
 }
 :root[data-theme="dark"] {
@@ -114,6 +127,8 @@
   --on-accent: #191410;
   --blush:   transparent;
   --ctl-line: #4a3b2b;
+  --accent-ink: var(--berry);
+  --live-ink:   var(--live);
 }
 
 * { box-sizing: border-box; }

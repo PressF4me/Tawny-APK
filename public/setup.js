@@ -14,8 +14,7 @@ const LINK = {
   machines: 'https://login.tailscale.com/admin/machines',
   dns:      'https://login.tailscale.com/admin/dns',
   download: 'https://tailscale.com/download',
-  subnets:  'https://tailscale.com/kb/1019/subnets',
-  https:    'https://tailscale.com/kb/1153/enabling-https'
+  subnets:  'https://tailscale.com/kb/1019/subnets'
 };
 
 const ICONS = {
@@ -59,22 +58,47 @@ function copyRow(text) {
 }
 
 /**
- * One step. state: 'done' | 'now' | 'todo' | 'bad'
- * `now` and `bad` stay open; `done` collapses to its title.
+ * One step. `state` ('done' | 'now' | 'todo' | 'bad') is what the step IS;
+ * `open` is whether it is the one expanded on screen. They used to be the same
+ * thing, which is why there was no way to look at a step you had already
+ * finished — and so nothing for a Back button to go back to.
+ *
+ * The head is a real button: every step can be opened by pressing its row, so
+ * the flow reads forwards and backwards instead of only forwards.
  */
-function stepRow(n, { state, title, tag, body }) {
+function stepRow(n, { state, title, tag, body }, open, idx) {
   const badge = state === 'done'
     ? svg(ICONS.tick, 'step-badge')
     : state === 'bad'
       ? svg(ICONS.cross, 'step-badge')
       : el('span', { class: 'step-badge' }, String(n));
 
-  const head = el('p', { class: 'step-title' }, title, tag ? el('small', {}, tag) : null);
+  const head = el('button', {
+    class: 'step-head', type: 'button',
+    'data-step': String(idx),
+    'aria-expanded': open ? 'true' : 'false'
+  }, badge, el('span', { class: 'step-title' }, title, tag ? el('small', {}, tag) : null));
+
   const kids = (body || []).filter(Boolean);
-  return el('div', { class: `step is-${state}` },
-    badge,
-    el('div', { class: 'step-main' }, head,
-      kids.length ? el('div', { class: 'step-body' }, ...kids) : null));
+  // The body is built only when open. A collapsed step used to keep its form
+  // fields in the DOM, which put an invisible auth-key box in the tab order.
+  return el('div', { class: `step is-${state}${open ? ' is-open' : ''}` },
+    head,
+    open && kids.length ? el('div', { class: 'step-body' }, ...kids) : null);
+}
+
+// Which step is expanded. null means "follow the flow" — the first one that
+// actually needs someone. A number means the operator navigated by hand, with
+// the Back arrow or by pressing a row, and we stop moving it under them.
+let selected = null;
+// The index currently on screen, so Back knows what it is stepping back from.
+let openNow = 0;
+// The last payload rendered, so a navigation press can repaint immediately
+// instead of waiting out the four-second poll.
+let lastData = null;
+
+function repaint() {
+  if (lastData) render(lastData);
 }
 
 /**
@@ -131,17 +155,35 @@ document.addEventListener('click', async (e) => {
 document.addEventListener('click', (e) => {
   if (!e.target.closest('#devices-ack')) return;
   try { localStorage.setItem(DEVICES_ACK, '1'); } catch { /* private window */ }
+  selected = null;
   tick();
 });
 
-// The setup page used to be a one-way door: reachable by a forced redirect
-// from "/", with nothing on it that led back. Whatever is already working —
-// the LAN, or a tailnet address if one already exists — should stay reachable
-// while the rest gets finished. Unlike the Wi-Fi-only skip link below, this
-// does not touch the container at all: it only tells *this* browser not to
-// bounce back for a day, so the next visit (or another device) still sees
-// setup if it is not actually done.
-document.getElementById('setup-leave').addEventListener('click', () => {
+// The appbar arrow goes back one STEP. It used to leave the page entirely —
+// and, on the way out, quietly write the same "setup is finished" cookie the
+// skip link writes, so a press meant as "let me look at that again" marked the
+// whole deployment done for a day and dropped you on the home screen. A back
+// arrow means up one level; leaving is a different intent and now has its own
+// labelled link in the footer.
+document.getElementById('setup-back').addEventListener('click', () => {
+  selected = Math.max(0, openNow - 1);
+  repaint();
+});
+
+// Open a step by pressing its row, so the arrow is not a one-way trip.
+document.addEventListener('click', (e) => {
+  const head = e.target.closest('.step-head');
+  if (!head) return;
+  const i = Number(head.getAttribute('data-step'));
+  if (!Number.isInteger(i)) return;
+  selected = i;
+  repaint();
+});
+
+// "Open Tawny without finishing." Explicit, labelled, and this device only —
+// everything the back arrow used to do without saying so.
+document.getElementById('leave-link').addEventListener('click', (e) => {
+  e.preventDefault();
   document.cookie = 'tawny_setup_done=1; path=/; max-age=86400; samesite=lax';
   location.href = '/';
 });
@@ -193,7 +235,16 @@ function confetti() {
   cv.style.width = window.innerWidth + 'px';
   cv.style.height = window.innerHeight + 'px';
 
-  const colours = ['#d24b6d', '#5b93b8', '#e0a63c', '#a83c58', '#f7f1e8'];
+  // Read the palette rather than hard-coding it: those literals were the
+  // light theme's strawberry and blue, and Tawny's dark theme is brass and
+  // sage — so the one celebratory moment in the whole product was the only
+  // place the brand changed colour.
+  const css = getComputedStyle(document.documentElement);
+  const tone = (name, fallback) => (css.getPropertyValue(name).trim() || fallback);
+  const colours = [
+    tone('--berry', '#d24b6d'), tone('--sky', '#5b93b8'), tone('--alert', '#e0a63c'),
+    tone('--berry-d', '#a83c58'), tone('--glass-fg', '#f7f1e8')
+  ];
   const bits = [];
   for (let i = 0; i < 150; i++) {
     bits.push({
@@ -321,6 +372,8 @@ function joinForm() {
         msg.hidden = false;
         input.value = '';
         joinBusy = false;
+        // The step is finished, so stop pinning it — let the flow move on.
+        selected = null;
         return tick();
       }
       msg.className = 'join-msg is-bad';
@@ -345,9 +398,12 @@ function stepConnect(data) {
   const serve = findStep(data.startup, 'tailscale_serve');
   const short = (tailscale.dnsName || '').split('.')[0];
 
-  const explain = why('What is Tailscale, and why does Tawny want it?',
-    'Tailscale is a free private network. You install it on the devices you own, sign in on each one, and from then on they can reach each other from anywhere — as if they were all sitting on your home Wi-Fi.',
-    'Tawny uses it for two things: it gives this container a real web address with a proper certificate (browsers refuse to hand over a microphone without one, so talk-back depends on it), and it lets you watch from outside the house without opening any ports on your router.');
+  // One disclosure, not two. This step used to carry "What is Tailscale" and
+  // "Other ways to do this step" side by side under an already long card;
+  // three collapsed triangles in a column is its own kind of clutter.
+  const explain = why('What is Tailscale, and are there other ways to do this?',
+    'Tailscale is a free private network. You install it on the devices you own, sign in on each one, and from then on they can reach each other from anywhere — as if they were all sitting on your home Wi-Fi. Tawny uses it to get a real web address with a proper certificate (browsers only hand over a microphone on one, so talk-back depends on it) and to let you watch from outside the house without opening any ports.',
+    'Instead of pasting a key you can set TS_AUTHKEY as a setting and restart — in Portainer under Stacks → Editor → Environment variables, or as TS_AUTHKEY=… in a .env file beside docker-compose.yml. Either way the key is not written to any file. If this machine already runs Tailscale for its own reasons, mount /var/run/tailscale into the container instead and Tawny will use the daemon that is already signed in.');
 
   // Already on a tailnet. How it got there decides what there is to say — and
   // when the machine was already running Tailscale, the honest answer is
@@ -359,6 +415,28 @@ function stepConnect(data) {
       // in the admin console, not a leftover setting — and it is off by
       // default on a brand-new tailnet, so it is the first thing to rule out.
       const d = String(serve.detail || '');
+
+      // Tawny is driving the machine's own tailscaled and that machine was
+      // already serving something at its Tailscale address. Taking the mount
+      // point over is not ours to do, so the entrypoint stepped aside — and
+      // the fix is a separate node, not a reset of whatever is there.
+      if (/already serves something else/i.test(d)) {
+        return {
+          state: 'bad',
+          title: 'Connect to Tailscale',
+          tag: 'address already in use',
+          body: [
+            el('p', { class: 'step-say' }, 'This machine is on your Tailscale network, but its Tailscale web address is already serving something else. Tawny left that alone rather than replacing it.'),
+            el('div', { class: 'step-do' }, 'Pick one:',
+              el('ol', {},
+                el('li', {}, 'Give Tawny its own address — set TS_AUTHKEY to a Tailscale auth key and restart the container. It joins as a separate device with a name of its own, and nothing on this machine changes.'),
+                el('li', {}, 'Or free the address: run tailscale serve reset on this machine, if you know what it was serving is no longer needed, and restart the container.'))),
+            goLink(LINK.keys, 'Get an auth key'),
+            explain
+          ]
+        };
+      }
+
       const needsHttps = /magicdns/i.test(d) ||
         (/https/i.test(d) && /enabl/i.test(d)) ||
         /admin\/dns|1153|enabling-https/i.test(d);
@@ -405,6 +483,29 @@ function stepConnect(data) {
     };
   }
 
+  // Tawny is pointed at the machine's own tailscaled and that daemon is
+  // logged out. An auth key pasted here would run `tailscale up` against the
+  // operator's actual computer — renaming it, possibly moving it to another
+  // tailnet, and turning off its accept-routes preference on the way past. So
+  // the server refuses it, and this says so instead of offering a form that
+  // cannot work.
+  if (tailscale.mode === 'host' && tailscale.configured && tailscale.reachable) {
+    return {
+      state: 'bad',
+      title: 'Connect to Tailscale',
+      tag: 'sign this machine in',
+      body: [
+        el('p', { class: 'step-say' }, 'Tawny is using the Tailscale already installed on this machine, but that machine is not signed in to a network yet. A key pasted here would sign in the machine itself, not Tawny, so Tawny will not do it for you.'),
+        el('div', { class: 'step-do' }, 'Pick one:',
+          el('ol', {},
+            el('li', {}, 'Run tailscale up on this machine and follow the link it prints.'),
+            el('li', {}, 'Or give Tawny its own device instead: set TS_AUTHKEY to an auth key and restart the container. Nothing on this machine changes.'))),
+        goLink(LINK.keys, 'Get an auth key'),
+        explain
+      ]
+    };
+  }
+
   // A daemon is running inside the container, logged out. This is the only
   // situation where an auth key is worth asking anyone for.
   if (tailscale.configured && tailscale.reachable) {
@@ -420,19 +521,14 @@ function stepConnect(data) {
 
         retry && up.detail ? el('pre', { class: 'step-log' }, up.detail) : null,
 
-        el('div', { class: 'step-do' }, 'Get a key:',
+        el('div', { class: 'step-do' }, 'On the auth keys page:',
           el('ol', {},
-            el('li', {}, 'Open the auth keys page. A free account covers a household.'),
-            el('li', {}, 'Press Generate auth key.'),
-            el('li', {}, 'Turn Reusable ON. Leave Ephemeral OFF — an ephemeral key makes Tawny disappear from your network every time it restarts.'),
+            el('li', {}, 'Press Generate auth key. A free account covers a household.'),
+            el('li', {}, 'Turn Reusable ON, leave Ephemeral OFF — an ephemeral key makes Tawny vanish from your network on every restart.'),
             el('li', {}, 'Copy it, and paste it below.'))),
         goLink(LINK.keys, 'Get an auth key'),
 
         joinForm(),
-
-        why('Other ways to do this step',
-          'If this machine already runs Tailscale for its own reasons, you do not need a key at all: mount /var/run/tailscale into the container and Tawny will drive the daemon that is already signed in.',
-          'You can also set TS_AUTHKEY as a setting instead of pasting it. In Portainer: Stacks → your stack → Editor → the Environment variables box. With Compose: TS_AUTHKEY=… in a .env file beside docker-compose.yml. With docker run: -e TS_AUTHKEY=…. Pasting above does exactly the same thing, and either way the key is not written to any file — Tailscale keeps its own state in the container’s data volume.'),
 
         explain
       ]
@@ -479,6 +575,7 @@ function routeActionButton(label, cls, path, body) {
     routeBusy = false;
     btn.disabled = false;
     btn.textContent = was;
+    selected = null;
     tick();
   });
   return btn;
@@ -493,11 +590,17 @@ function stepRoute(data) {
   const pending = tailscale.pendingRoutes || [];
   const approved = tailscale.approvedRoutes || [];
   const conflicts = tailscale.routeConflicts || [];
+  // Peers whose approved route already covers ours in full. Not the same as a
+  // conflict: this is the path existing, carried by somebody else.
+  const covered = tailscale.routeCoveredBy || [];
   const cidr = pending[0] || approved[0] || data.lan.cidr;
 
-  const explain = why('What am I approving, exactly?',
-    `Your pet camera phone sits on your home network at an address like ${data.lan.ip || '192.168.1.50'}. A device somewhere else has no way to reach an address like that — it is private to your house.`,
-    `Approving this route tells Tailscale that this machine can pass traffic through to your home network, so a phone or laptop out in the world can reach the camera directly. Tailscale makes you approve it by hand, once, because it is your network and it will not open it without asking.`);
+  // One disclosure for this step, same rule as stepConnect: "Where do I click"
+  // and "What am I approving" were two triangles stacked under one short card,
+  // and the answer to the second is the reason the first exists.
+  const explain = why('What am I approving, and where?',
+    `Your pet camera phone sits on your home network at an address like ${data.lan.ip || '192.168.1.50'}, which is private to your house — a device somewhere else has no way to reach it. Approving this route tells Tailscale that this machine may pass traffic through to your home network, so a phone or laptop out in the world reaches the camera directly. Tailscale makes you do it by hand, once, because it is your network and it will not open it without asking.`,
+    'On the machines page you get one row per device. The row for this container carries a "Subnets" badge — that badge is the thing you are approving. Tailscale documents the whole mechanism at tailscale.com/kb/1019/subnets.');
 
   // Another device on the tailnet already carries this range (or an
   // overlapping one) — a NAS, a Pi-hole, an earlier Tawny box. Two subnet
@@ -522,12 +625,31 @@ function stepRoute(data) {
         ]
       };
     }
+    // The ordinary, healthy case: another device already carries the whole
+    // range, approved. The path to the phone exists, Tawny correctly declined
+    // to be a second router for it, and there is nothing for anyone to do.
+    // This used to be presented as a decision the operator had to make, and
+    // counted as unfinished for ever if they did not make it.
+    if (covered.length) {
+      const by = covered.map((c) => c.peer).join(', ');
+      return {
+        state: 'done',
+        title: 'Let your devices reach the camera',
+        tag: `carried by ${covered[0].peer}`,
+        body: [
+          el('p', { class: 'step-say' }, `${by} already routes ${covered[0].peerRoute} into your Tailscale network, and that covers ${cidr} — so your devices can already reach the camera from outside the house. Nothing to do here.`),
+          el('p', { class: 'step-say' }, 'Tawny is deliberately not advertising the same range a second time. Two routers for one network is what makes a tailnet flip between them, which looks like your whole internet connection stalling.'),
+          explain
+        ]
+      };
+    }
+
     return {
       state: 'now',
       title: 'Let your devices reach the camera',
       tag: 'needs your decision',
       body: [
-        el('p', { class: 'step-say' }, `Tawny did not advertise ${cidr} because ${who} already does. Advertising the same range twice is what makes a tailnet's routing flip back and forth, which looks like your whole internet connection going in a loop — so Tawny is refusing to do that on its own.`),
+        el('p', { class: 'step-say' }, `Tawny did not advertise ${cidr} because ${who} already advertises part of that range — but not all of it, so some of your home network would still be unreachable. Advertising the same range twice is what makes a tailnet's routing flip back and forth, which looks like your whole internet connection going in a loop, so Tawny will not do it on its own.`),
         el('p', { class: 'step-say' }, 'If that other device is being retired, or you know it is not actually routing this range in practice, you can advertise anyway:'),
         routeActionButton('Advertise anyway', 'wide', '/setup/route/advertise', { force: true }),
         el('p', { class: 'step-say' }, 'Otherwise, leave this alone — Tawny still works over this Wi-Fi, and over the tailnet address on a single device, without it.'),
@@ -546,14 +668,51 @@ function stepRoute(data) {
     };
   }
 
+  // Routing is off by default — deliberately, because a container that
+  // advertises a subnet the moment it starts is how a house ends up with two
+  // routers for one network. But off means you cannot watch from outside,
+  // which is what most people are here for. So this is asked out loud, once,
+  // and the answer is remembered on the container. Not a setting to discover
+  // in a .env file, and not a silent default either way.
+  if (!tailscale.routesEnabled && tailscale.routeChoice === 'unset') {
+    return {
+      state: 'now',
+      title: 'Let your devices reach the camera',
+      tag: 'your choice',
+      body: [
+        el('p', { class: 'step-say' }, 'Do you want to watch from ', el('b', {}, 'outside the house'), ' — from work, or on mobile data? Tawny needs your permission to pass traffic through to your home network first. It is off until you say so.'),
+        el('p', { class: 'step-say' }, `This is off by default on purpose: if something else on your network already does this job, switching it on here would give you two devices routing ${cidr || 'the same range'}, which makes a tailnet flip between them and looks like your internet stalling. Tawny checks for that before it does anything.`),
+        routeActionButton('Turn on remote access', 'wide primary', '/setup/route/advertise'),
+        el('p', { class: 'step-say' }, 'Only ever watching from home? Then you do not need it:'),
+        routeActionButton('No — this Wi-Fi only', 'wide', '/setup/route/withdraw'),
+        explain
+      ]
+    };
+  }
+
+  if (!tailscale.routesEnabled) {
+    // Answered "this Wi-Fi only". Settled, and reversible from right here.
+    return {
+      state: 'done',
+      title: 'Let your devices reach the camera',
+      tag: 'this Wi-Fi only',
+      body: [
+        el('p', { class: 'step-say' }, 'Remote access is off, so Tawny works from devices on this Wi-Fi. Nothing is advertised to the rest of your Tailscale network.'),
+        routeActionButton('Turn on remote access after all', 'wide', '/setup/route/advertise'),
+        explain
+      ]
+    };
+  }
+
   if (!pending.length && !approved.length) {
     return {
-      state: 'todo',
+      state: 'bad',
       title: 'Let your devices reach the camera',
-      tag: 'nothing to approve',
+      tag: 'could not offer the route',
       body: [
-        el('p', { class: 'step-say' }, 'Tawny is not offering a route to your home network, so you will only be able to watch from a device on this same Wi-Fi.'),
-        el('p', { class: 'step-do' }, 'If you want to watch from outside the house, remove TS_ROUTES=off from your .env (or set it to your home network) and restart the container.'),
+        el('p', { class: 'step-say' }, 'Remote access is switched on, but Tawny is not offering a route to your home network — so you will only be able to watch from a device on this same Wi-Fi.'),
+        el('p', { class: 'step-do' }, `Try switching it on again. If it keeps failing, set TS_ROUTES to your home network (for example ${data.lan.cidr || '192.168.1.0/24'}) in your .env and restart the container.`),
+        routeActionButton('Try again', 'wide', '/setup/route/advertise'),
         explain
       ]
     };
@@ -572,9 +731,6 @@ function stepRoute(data) {
           el('li', {}, `Tick ${cidr} and save.`))),
       goLink(LINK.machines, 'Open Tailscale machines'),
       copyRow(cidr),
-      why('Where do I click?',
-        'The machine list shows one row per device. The row for this container has a "Subnets" badge on it — that badge is what you are approving.',
-        'If you would rather read Tailscale’s own explanation of subnet routes first, their documentation covers it at tailscale.com/kb/1019/subnets.'),
       explain
     ]
   };
@@ -642,31 +798,28 @@ function stepWatch(data) {
     return { state: 'todo', title: 'Start watching', tag: 'once the steps above are done' };
   }
 
-  const url = `https://${tailscale.dnsName}/`;
+  // The address is NOT repeated here. renderVerdict() puts it at the top of
+  // the page the moment the setup is finished, and two identical full-width
+  // "Open Tawny" buttons a screen apart is the clutter this layout is supposed
+  // to prevent — the eye has to decide which one is the real one.
   return {
     state: 'now',
     title: 'Start watching',
     tag: 'you’re ready',
     body: [
-      el('p', { class: 'step-say' }, el('b', {}, 'This is the address to open'), ' — on your laptop, your phone, anywhere with Tailscale signed in:'),
-      openLink(url),
-      el('p', { class: 'step-say' }, 'Always use this https:// address, not the plain one with a port number on the end. Browsers only hand over a microphone on a secure address, so talk-back goes silently missing on the other one.'),
+      el('p', { class: 'step-say' },
+        'Open the address at the top of this page on your laptop or phone — anywhere with Tailscale signed in. ',
+        el('b', {}, 'Always that https:// one'), ', never the plain address with a port number. A browser only starts a session on a secure address — on the plain one the page loads and then refuses, because both watching and talking back need the microphone.'),
 
       el('div', { class: 'step-do' }, 'To start a session:',
         el('ol', {},
           el('li', {}, 'On the old phone you are leaving with the pet: open Tawny, choose The Monitor, and let it use the camera. It shows a QR code.'),
-          el('li', {}, 'On the device you are watching from: open the address above, choose Viewer, and press Scan.'),
-          el('li', {}, 'Point it at the phone’s QR code. That is the pairing done.'))),
+          el('li', {}, 'On the device you are watching from: open the address, choose Viewer, and press Scan.'),
+          el('li', {}, 'Point it at the phone’s QR code. That is the pairing done — video, sound, and hold-to-talk back. A code lasts ten minutes; after that the phone shows a fresh one.'))),
 
-      el('p', { class: 'step-say' }, 'You get video, sound, and hold-to-talk back to the phone. The pairing code lasts ten minutes, so if you leave it too long, the phone will show a fresh one.'),
-
-      why('The address does not open?',
-        'The first time, give it a minute. Tailscale fetches a fresh certificate for the name on the first request, and until it lands the page can fail to load or show a certificate warning.',
-        'The device you open it on also needs Tailscale running and signed in to the same account, with MagicDNS on — that is what makes the …ts.net name resolve. On a phone that is the "Use Tailscale" switch; on a computer it is automatic once Tailscale is connected. If the name still will not resolve anywhere, MagicDNS is probably off for the whole account: turn it on at login.tailscale.com/admin/dns.'),
-
-      why('Anything worth doing before I walk away?',
-        'Give the pet camera phone a fixed address in your router settings — a DHCP reservation. Its address is baked into each pairing code, so if the router hands it a different one later, the code stops working and you have to scan again.',
-        'Leave the phone plugged in. A screen-off phone keeps streaming, but a flat one does not.')
+      why('It does not open, or it stops working later',
+        'The first time, give it a minute: Tailscale fetches a certificate for the name on the first request, and until it lands the page can fail or warn. The device you open it on needs Tailscale signed in to the same account with MagicDNS on — if the name resolves nowhere, MagicDNS is probably off for the whole account (login.tailscale.com/admin/dns).',
+        'Before you walk away: give the camera phone a fixed address in your router settings (a DHCP reservation). Its address is baked into each pairing code, so if the router hands it a different one later the code stops working. And leave the phone plugged in — a screen-off phone keeps streaming, a flat one does not.')
     ]
   };
 }
@@ -688,8 +841,15 @@ function renderVerdict(data, defs) {
   const failed = defs.some((d) => d.state === 'bad');
   const pending = (tailscale.pendingRoutes || []).length > 0;
   const badLan = !lan.cidr || lan.looksLikeDockerBridge;
+  // Must agree with setupReady() in server.js — that one decides the redirect
+  // from "/", this one decides the banner, and a banner saying "ready" over a
+  // page that keeps bouncing you back to setup is worse than either being
+  // wrong alone.
+  const carried = (tailscale.approvedRoutes || []).length ||
+    (tailscale.routeCoveredBy || []).length;
+  const undecided = !carried && tailscale.routeChoice === 'unset';
   const allGood = tailscale.loggedIn && tailscale.reachable && !failed && !pending
-    && !badLan && !!tailscale.dnsName;
+    && !badLan && !undecided && !!tailscale.dnsName;
 
   const set = (cls, ico, h, p) => {
     box.className = `verdict is-${cls}`;
@@ -715,6 +875,11 @@ function renderVerdict(data, defs) {
   if (pending) {
     set('warn', ICONS.bang, 'One click left',
       'Everything is running. Tailscale needs you to approve one thing before you can watch from outside the house.');
+    return;
+  }
+  if (undecided) {
+    set('warn', ICONS.bang, 'One choice left',
+      'Everything is running, and it works on this Wi-Fi now. Step 3 asks the one question Tawny will not answer for you: whether to open a path for watching from outside the house.');
     return;
   }
   if (!tailscale.loggedIn) {
@@ -750,6 +915,7 @@ function renderProgress(defs) {
 /* -------------------------------------------------------------- the loop */
 
 function render(data) {
+  lastData = data;
   document.getElementById('fetch-error').hidden = true;
 
   const host = document.getElementById('steps');
@@ -766,17 +932,26 @@ function render(data) {
   // Exactly one step is the card. Several steps can legitimately be actionable
   // at once — "add your devices" and "start watching" both open the moment the
   // route is approved — but two competing cards is precisely the "where do I
-  // look" problem the layout exists to solve. The first one wins; the rest
-  // wait their turn as quiet rows.
-  let claimed = false;
-  for (const d of defs) {
-    if (d.state !== 'now' && d.state !== 'bad') continue;
-    if (claimed) d.state = 'todo';
-    else claimed = true;
-  }
+  // look" problem the layout exists to solve.
+  //
+  // Which one is open is now separate from what each step's state IS: by
+  // default it is the first that needs someone, and once the operator has
+  // navigated by hand it is whatever they chose. Everything keeps its own
+  // colour either way, so a finished step still reads as finished when you
+  // open it to look.
+  let autoIdx = defs.findIndex((d) => d.state === 'now' || d.state === 'bad');
+  if (autoIdx < 0) autoIdx = defs.length - 1;
+  const openIdx = selected == null
+    ? autoIdx
+    : Math.max(0, Math.min(selected, defs.length - 1));
+  openNow = openIdx;
 
   host.textContent = '';
-  defs.forEach((d, i) => host.append(stepRow(i + 1, d)));
+  defs.forEach((d, i) => host.append(stepRow(i + 1, d, i === openIdx, i)));
+
+  // Nothing to step back to from the first one, and a dead control is worse
+  // than no control.
+  document.getElementById('setup-back').hidden = openIdx === 0;
   renderProgress(defs);
   renderVerdict(data, defs);
 

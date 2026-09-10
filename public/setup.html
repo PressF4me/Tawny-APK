@@ -17,7 +17,7 @@
 
 <main class="screen app" tabindex="-1">
   <header class="appbar">
-    <button id="setup-leave" class="appbar-back" type="button" aria-label="Back to Tawny">
+    <button id="setup-back" class="appbar-back" type="button" aria-label="Back one step" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4.5 7.8 12 15 19.5"/></svg>
     </button>
     <div class="appbar-titles">
@@ -54,15 +54,19 @@
           <span id="refresh-dot" class="dot"></span>
           <span id="refresh-label">Checking…</span>
         </div>
+        <!-- One sentence each. This footer used to run to seven lines of
+             caveats under an already long page. -->
         <p class="fine" id="skip-line" hidden>
-          Not using Tailscale? <a href="#" id="skip-link">Use Tawny on this Wi-Fi only</a>
-          — this settles it for every device, not just this one. Talk-back needs
-          HTTPS, so it won't work over the plain address. You can always come
-          back to <code>/setup</code>.
+          Not using Tailscale? <a href="#" id="skip-link">Stop showing this</a> — two phones
+          still pair directly on this Wi-Fi without the container. A browser needs an
+          <code>https</code> address, though, so this machine's plain address won't start
+          a session anywhere but on the machine itself.
         </p>
         <p class="fine">
-          <code>/setup.json</code> has all of this as JSON, for scripting or a health check.
+          <a href="#" id="leave-link">Open Tawny without finishing</a> &mdash; this device
+          only, for a day. Setup is always back at <code>/setup</code>.
         </p>
+        <p class="fine"><code>/setup.json</code> has all of this as JSON.</p>
       </div>
 
     </div>
