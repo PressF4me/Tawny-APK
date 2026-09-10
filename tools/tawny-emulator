@@ -15,7 +15,7 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 
 EMU="$ANDROID_HOME/emulator/emulator"
 ADB="$ANDROID_HOME/platform-tools/adb"
-PROJECT="$HOME/Downloads/frentalk"
+PROJECT="$HOME/Projects/Tawny Android"
 PKG="com.tawny.monitor.debug"
 
 AVD="frentalk"

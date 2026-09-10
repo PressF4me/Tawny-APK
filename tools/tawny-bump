@@ -10,7 +10,7 @@
 #
 set -euo pipefail
 
-FILE="$HOME/Downloads/frentalk/android/version.properties"
+FILE="$HOME/Projects/Tawny Android/android/version.properties"
 
 CODE=$(grep "^VERSION_CODE=" "$FILE" | cut -d= -f2 | tr -d '[:space:]')
 NAME=$(grep "^VERSION_NAME=" "$FILE" | cut -d= -f2 | tr -d '[:space:]')

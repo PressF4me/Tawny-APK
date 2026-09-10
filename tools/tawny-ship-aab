@@ -20,7 +20,7 @@ export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/sdk}"
 export JAVA_HOME="${JAVA_HOME:-$HOME/Android/jdk17}"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 
-PROJECT="$HOME/Downloads/frentalk"
+PROJECT="$HOME/Projects/Tawny Android"
 ROOT="$HOME/Documents/Tawny ship/Google Ready"
 AAB_SRC="$PROJECT/android/app/build/outputs/bundle/release/app-release.aab"
 VPROPS="$PROJECT/android/version.properties"
