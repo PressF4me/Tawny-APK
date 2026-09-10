@@ -62,6 +62,15 @@ const check = (label, cond, detail) => {
   else { fails++; console.log('  FAIL ' + label + (detail ? ' :: ' + detail : '')); }
 };
 
+// The English strings, read out of public/i18n.js rather than duplicated here,
+// so a reworded message cannot quietly drift away from what this asserts.
+const i18n = fs.readFileSync(path.join(root, 'public', 'i18n.js'), 'utf8');
+const en = (key) => {
+  const m = i18n.match(new RegExp(`\\b${key}:\\s*'((?:[^'\\\\]|\\\\.)*)'`));
+  if (!m) throw new Error('no such string: ' + key);
+  return m[1].replace(/\\'/g, "'");
+};
+
 const DEFAULT = 'wss://tawny-rendezvous.example.workers.dev';
 const CUSTOM = 'wss://relay.myhouse.example';
 
@@ -73,6 +82,13 @@ function ctx(cfg) {
     S: { cfg: { ...cfg }, relayBase: null, ice: [], iceTimer: null },
     diag: (l) => said.push(String(l)),
     toast: (t) => said.push('toast: ' + t),
+    // The user-facing strings moved behind TawnyT (public/i18n.js) and this
+    // sandbox never grew a stub, so every run since has died on "TawnyT is not
+    // defined" the moment fallBackToDefault() reached its toast. The probe was
+    // silently dead, which is the worst state for a regression test to be in.
+    // It resolves against the real English table, so an assertion about what
+    // the user is actually told keeps testing the sentence they will read.
+    TawnyT: { t: (k) => en(k) },
     fetchIce: () => said.push('fetchIce'),
     said,
   };
