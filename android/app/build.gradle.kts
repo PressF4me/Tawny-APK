@@ -140,6 +140,11 @@ dependencies {
     // The Watcher hosts the WebRTC signaling handshake itself, on the LAN.
     implementation("org.java-websocket:Java-WebSocket:1.5.3")
     implementation("org.slf4j:slf4j-nop:1.7.36")
+
+    // PairLink.kt is deliberately free of Android types, so the rules a
+    // stranger's QR code is judged by can be tested on a plain JVM — no
+    // emulator, no Robolectric, and it runs in a second. `./gradlew test`.
+    testImplementation("junit:junit:4.13.2")
 }
 
 // The native shell serves the web app from the APK, so there is no address to

@@ -695,15 +695,28 @@ class MainActivity : AppCompatActivity() {
     private fun joinAsHandheld(p: Pairing) {
         stopScanner()
         if (p.expired) { pairingExpired(); return }
-        // A web Monitor's link carries its own rendezvous. Adopt it only when the
-        // user has not set one by hand — scanning the QR should not silently
-        // rewrite a server they deliberately chose. This is what lets a plain
-        // scan of the /setup page's QR work with nothing pasted into Servers.
+        // A web Monitor's link carries its own rendezvous, and adopting it is
+        // what lets a plain scan of the /setup QR work with nothing pasted into
+        // Servers. Two conditions, and both matter:
+        //   - the user has not set a relay by hand. Scanning a code must not
+        //     silently rewrite a server they deliberately chose.
+        //   - the relay is one PairLink can vouch for. A link naming its own
+        //     host is not evidence of anything — believing it would let any QR
+        //     code from anywhere aim this phone's signalling at a server of the
+        //     sender's choosing. See PairLink.relayAdoptable().
+        // A relay that fails the second test is still parsed, still shown, and
+        // still logged; it just does not get to write itself into settings.
         val adoptRelay = p.relay?.takeIf {
-            customRendezvous().isBlank() && RELAY_URL_RE.matches(it)
+            p.relayTrusted && customRendezvous().isBlank() && RELAY_URL_RE.matches(it)
+        }
+        val relayNote = when {
+            p.relay == null -> ""
+            adoptRelay != null -> " (adopted)"
+            !p.relayTrusted -> " (NOT adopted: unrecognised host)"
+            else -> " (not adopted: own relay set)"
         }
         Diag.log("shell", "pair accepted name=\"${p.name}\" lan=${p.signal ?: "-"} " +
-            "relay=${p.relay ?: "-"}${if (adoptRelay != null) " (adopted)" else ""} " +
+            "relay=${p.relay ?: "-"}$relayNote " +
             "ticket=${if (p.token.isNullOrBlank()) "MISSING" else "yes"} " +
             "code=${if (p.code == null) "none" else "yes"}")
         prefs.edit()
@@ -739,7 +752,7 @@ class MainActivity : AppCompatActivity() {
     /** Manual fallback when the camera can't get a clean read. */
     private fun promptPairLink() {
         val input = EditText(this).apply {
-            hint = "tawny://pair?h=\u2026"
+            hint = "tawny://pair?h=\u2026  or  https://\u2026/#k=\u2026"
             inputType = InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine()
             setTextColor(Hue.TEXT)
@@ -750,7 +763,16 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(14), dp(13), dp(14), dp(13))
             minHeight = dp(48)
             layoutParams = lp(topMargin = 18)
-            clipboardText()?.let { if (it.startsWith("tawny://pair")) setText(it) }
+            // Prefill from the clipboard for either dialect. A web Monitor's
+            // link is `https://<host>/#k=…`, and only offering to prefill the
+            // `tawny://` one is how someone who has just copied the web link
+            // ends up typing it out by hand.
+            clipboardText()?.let {
+                val t = it.trim()
+                if (t.startsWith("tawny://pair") ||
+                    ((t.startsWith("https://") || t.startsWith("http://")) && t.contains("#") && t.contains("k="))
+                ) setText(t)
+            }
         }
         themedDialog(
             title = getString(R.string.pair_paste_title),
@@ -3512,90 +3534,30 @@ class MainActivity : AppCompatActivity() {
             append("&e=${pairCodeExp / 1000}")
         }
 
-    private data class Pairing(
-        val signal: String?,   // ws://<lan-ip>:<port>, or null for relay-only
-        val key: String,
-        val name: String,
-        val token: String?,
-        /** The pairing code from `c`, presented to the Monitor to be let in. */
-        val code: String?,
-        /** `e` in epoch millis, or 0 when the code carried no deadline. */
-        val expiresAt: Long,
-        /**
-         * The rendezvous the far end is on, when the link carried one: a web
-         * Monitor's QR is `https://<host>/#…`, and that host *is* the relay
-         * (`wss://<host>`) unless `rv=` names another. null for a plain
-         * `tawny://pair` link, which never carries a relay — the app uses its
-         * own configured one.
-         */
-        val relay: String? = null
-    ) {
-        val expired get() = expiresAt > 0 && System.currentTimeMillis() > expiresAt
-    }
+    // Pairing and the rules for reading a link now live in PairLink.kt, with no
+    // Android in them, so they can be unit-tested — an Activity cannot be stood
+    // up in a JVM test, and every decision a stranger's QR code is allowed to
+    // make about this phone is taken in that file.
 
     /** RFC1918 / link-local only — `h` in a pairing link is always a home-LAN address. */
-    private fun isPrivateHost(hostPort: String): Boolean {
-        val ip = hostPort.substringBeforeLast(':')
-        val o = ip.split('.').map { it.toIntOrNull() ?: return false }
-        if (o.size != 4 || o.any { it !in 0..255 }) return false
-        return o[0] == 10 ||
-            (o[0] == 172 && o[1] in 16..31) ||
-            (o[0] == 192 && o[1] == 168) ||
-            (o[0] == 169 && o[1] == 254)
-    }
+    private fun isPrivateHost(hostPort: String): Boolean = PairLink.isPrivateHostPort(hostPort)
 
+    /**
+     * Split the link with the platform's URI parser, then hand the pieces to
+     * PairLink, which holds the rules and the anchors this install trusts.
+     */
     private fun parsePairing(raw: String): Pairing? {
         val uri = try { Uri.parse(raw.trim()) } catch (e: Exception) { return null }
-
-        // Two dialects. The app's own links are `tawny://pair?…` with the
-        // parameters in the query. A web Monitor (Tawny Docker) hands out
-        // `https://<host>/#k=…&n=…&r=viewer&t=…&c=…&e=…` with the parameters in
-        // the *fragment* — a fragment never reaches a server or an access log,
-        // which is the only place the channel key may travel. Accept both. A
-        // query string on an http(s) link is the logged-secret shape and is
-        // deliberately not read.
-        val isWeb = (uri.scheme == "https" || uri.scheme == "http")
-        val paramSrc = when {
-            uri.scheme == "tawny" && uri.host == "pair" -> uri.encodedQuery ?: ""
-            isWeb && !uri.encodedFragment.isNullOrEmpty() -> uri.encodedFragment!!
-            else -> return null
-        }
-        val q = Uri.parse("tawny://pair?$paramSrc")
-
-        val key = q.getQueryParameter("k") ?: return null
-        if (!Regex("^[A-Za-z0-9_-]{16,64}$").matches(key)) return null
-        var h = q.getQueryParameter("h")
-        if (h != null && (!Regex("^\\d{1,3}(\\.\\d{1,3}){3}:\\d{2,5}$").matches(h) || !isPrivateHost(h))) {
-            h = null   // a public IP in a pairing link is not something we dial
-        }
-        val token = q.getQueryParameter("t")
-        if (token != null && !Regex("^[A-Za-z0-9_-]{8,64}$").matches(token)) return null
-
-        // Where the far end can be met. From a web link its own origin is the
-        // relay unless `rv=` names another — and `rv=` is honoured only when it
-        // is the link's own host or a rendezvous this install already uses, so a
-        // forwarded link cannot aim the phone at a stranger's server.
-        val linkHost = if (isWeb) uri.host else null
-        var relay: String? = null
-        val rv = q.getQueryParameter("rv")
-        if (!rv.isNullOrBlank()) {
-            val r = try { Uri.parse(rv) } catch (e: Exception) { null }
-            if (r != null && (r.scheme == "https" || r.scheme == "wss") && !r.host.isNullOrBlank() &&
-                (r.host == linkHost || r.host == relayHost(preferredRendezvous()))) {
-                relay = "wss://" + r.host + (if (r.port > 0) ":${r.port}" else "")
-            }
-        } else if (linkHost != null) {
-            relay = "wss://$linkHost"
-        }
-
-        // Nothing to dial: no LAN address, no relay in the link, and this build
-        // has none configured.
-        if (h == null && relay == null && !hasRendezvous) return null
-        val name = (q.getQueryParameter("n") ?: "Pet camera").take(40)
-        val code = q.getQueryParameter("c")
-            ?.takeIf { Regex("^[A-Za-z0-9_-]{8,32}$").matches(it) }
-        val exp = q.getQueryParameter("e")?.toLongOrNull()?.takeIf { it > 0 }?.times(1000) ?: 0L
-        return Pairing(h?.let { "ws://$it" }, key, name, token, code, exp, relay)
+        return PairLink.parse(
+            scheme = uri.scheme,
+            host = uri.host,
+            port = uri.port,
+            encodedQuery = uri.encodedQuery,
+            encodedFragment = uri.encodedFragment,
+            preferredRelayHost = relayHost(preferredRendezvous()),
+            buildRelayHost = relayHost(BuildConfig.RENDEZVOUS_URL),
+            hasRendezvous = hasRendezvous
+        )
     }
 
     private fun qrBitmap(text: String, sizePx: Int): Bitmap {
