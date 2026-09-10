@@ -15,7 +15,7 @@ const el = {
   channels: $('#channels'), chList: $('#ch-list'), chEmpty: $('#ch-empty'),
   chAdd: $('#ch-add'), chScan: $('#ch-scan'), chNote: $('#ch-note'),
   role: $('#role'), roleName: $('#role-name'), roleNote: $('#role-note'),
-  join: $('#join'), joinName: $('#join-name'),
+  join: $('#join'), joinName: $('#join-name'), joinNote: $('#join-note'),
   live: $('#live'), remote: $('#remote'), remoteAudio: $('#remote-audio'),
   local: $('#local'), loader: $('#loader'), peerAudio: $('#peer-audio'),
   peercount: $('#peercount'), peercountN: $('#peercount b'), peerlabel: $('#peerlabel'),
@@ -36,10 +36,13 @@ const el = {
   pairExpiry: $('#pair-expiry'),
   editor: $('#editor'), editorTitle: $('#editor-title'), editorName: $('#editor-name'),
   editorHint: $('#editor-hint'),
+  rowMenu: $('#row-menu'), rowMenuTitle: $('#row-menu-title'),
   scanner: $('#scanner'), scanVideo: $('#scan-video'), scanHint: $('#scan-hint'),
   welcome: $('#welcome'), setupRole: $('#setup-role'), setupNote: $('#setup-note'),
   watchPair: $('#watch-pair'), wpQr: $('#wp-qr'), wpStatus: $('#wp-status'),
-  wpWarn: $('#wp-warn')
+  wpWarn: $('#wp-warn'), wpUrl: $('#wp-url'), wpCopy: $('#wp-copy'),
+  wpRelay: $('#wp-relay'), wpRelayAddr: $('#wp-relay-addr'),
+  pairRelay: $('#pair-relay'), pairRelayAddr: $('#pair-relay-addr')
 };
 
 const S = {
@@ -69,6 +72,11 @@ const S = {
   // own when they set one on the Servers screen — and moves to the built-in
   // tunnel if that one will not answer. See fallBackToDefault().
   relayBase: null,
+  // The relay named by the pairing link that brought this device here (`rv=`),
+  // already normalised to a ws(s) base. Null unless a link carried one and its
+  // host was one we are willing to dial — see adopt(). It out-ranks the build's
+  // rendezvous but never the relay actually in use (S.relayBase).
+  linkRelay: null,
   facing: 'environment', micOn: true, camSending: false,
   wake: null, meterStop: null, ac: null, closing: false, dimmed: false,
   editing: null, scanStop: null, pending: null,
@@ -113,6 +121,16 @@ const PAIR_TTL_MS = 10 * 60 * 1000;
 const EXPIRED_MESSAGE =
   'That pairing code has expired. Show a new code on the monitor phone and '
   + 'scan it again.';
+
+// A pairing link may name the relay the two phones should meet on (`rv=`). It
+// is attacker-supplyable — it arrives in the same fragment as the key — so it
+// is only honoured when it points at somewhere this build already dials: this
+// page's own origin, or one of the two rendezvous addresses it was configured
+// with. Anything else is dropped rather than obeyed, and this is what the user
+// is told, because the pairing will otherwise fail with no explanation at all.
+const RELAY_MISMATCH_MESSAGE =
+  'That link names a server this app is not set up for, so it was ignored. If '
+  + 'the phones cannot find each other, set the same server address on both.';
 
 // Candidates buffered before setRemoteDescription. A real negotiation sends a
 // couple of dozen; anything past this is a peer filling memory.
@@ -187,6 +205,33 @@ function newKey() {
   return b64url(b);
 }
 
+/**
+ * The host (name plus port) of a URL, or '' when it is not one. Used to
+ * compare a link's relay against the ones this build is willing to dial, and
+ * to decide whether a pairing link needs to name its relay at all.
+ */
+function hostOf(u) {
+  if (!u) return '';
+  try { return new URL(String(u), location.href).host; } catch { return ''; }
+}
+
+/**
+ * Is this dotted-quad an address that can only be on the operator's own
+ * network? The gate on the `h=` hint in a pairing link: the page asks its own
+ * server to bridge a WebSocket to that address, and a link is something a
+ * stranger can hand you, so a public address is never a legitimate answer.
+ * Mirrors isLanTarget() in server.js, which enforces the same rule again.
+ */
+function isPrivateV4(ip) {
+  const o = String(ip).split('.').map(Number);
+  if (o.length !== 4 || o.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  return o[0] === 10
+    || (o[0] === 172 && o[1] >= 16 && o[1] <= 31)
+    || (o[0] === 192 && o[1] === 168)
+    || (o[0] === 169 && o[1] === 254)
+    || (o[0] === 100 && o[1] >= 64 && o[1] <= 127);   // 100.64/10 — a tailnet phone
+}
+
 async function roomIdFor(key) {
   const data = new TextEncoder().encode(`tawny-room-v1|${key}`);
   const digest = await crypto.subtle.digest('SHA-256', data);
@@ -218,13 +263,180 @@ function note(node, msg) {
   node.hidden = false;
 }
 
-function show(screen) {
-  const screens = [
-    el.welcome, el.setupRole, el.watchPair,
-    el.channels, el.role, el.join, el.live
-  ];
-  for (const s of screens) s.hidden = s !== screen;
+// --------------------------------------------------------- navigation
+//
+// show() used to flip `hidden` on seven <main>s, which is why the standalone
+// build read as a web page: screens replaced each other with no sense of
+// having gone anywhere. It now pushes and pops.
+//
+// The stack is derived, not declared: a screen already below the current one
+// is a *pop* (and the stack unwinds to it), anything else is a *push*. That
+// keeps every existing call site — show(el.channels), show(el.role), bail()'s
+// show(S.channel ? el.role : el.channels) — working untouched while giving
+// each of them the right direction.
+//
+// #live is deliberately exempt. Its layout, its controls and its overlays are
+// the one part of this page the Android shell also hosts, and sliding a
+// video stage in and out of a fixed layer is exactly the sort of thing that
+// would cost a frame at the moment a call comes up. To and from live is an
+// instant swap, as before.
+
+const SCREENS = () => [
+  el.welcome, el.setupRole, el.watchPair,
+  el.channels, el.role, el.join, el.live
+];
+
+/** True when either the OS or Tawny's own Animations switch asks for stillness. */
+function motionOff() {
+  return document.documentElement.getAttribute('data-motion') === 'off';
 }
+
+const NAV = [];
+const NAV_MAX = 12;
+let navToken = 0;
+
+function show(screen) {
+  const all = SCREENS();
+  const prev = all.find((s) => !s.hidden) || null;
+
+  // Work out the direction *before* touching the stack.
+  let dir = 'push';
+  const at = NAV.indexOf(screen);
+  if (at >= 0) { NAV.length = at; dir = 'pop'; }
+  NAV.push(screen);
+  if (NAV.length > NAV_MAX) NAV.splice(0, NAV.length - NAV_MAX);
+
+  if (prev === screen) { for (const s of all) s.hidden = s !== screen; return; }
+
+  const focusWasInside = prev && prev.contains(document.activeElement);
+  const instant = !prev || prev === el.live || screen === el.live || motionOff();
+
+  const settle = () => {
+    for (const s of all) {
+      s.hidden = s !== screen;
+      s.classList.remove('nav-anim', 'nav-top', 'nav-push-in', 'nav-push-out',
+        'nav-pop-in', 'nav-pop-out');
+    }
+    // Land the caret somewhere real, so a keyboard or screen-reader user is
+    // not dropped back at the top of the document on every navigation.
+    if (focusWasInside && screen.focus) {
+      try { screen.focus({ preventScroll: true }); } catch { screen.focus(); }
+    }
+    // A pushed screen always starts at the top, the way a new native screen does.
+    screen.querySelector('.screen-body')?.scrollTo?.(0, 0);
+    paintBars(screen);
+    // ...and again once layout has settled: on a cold load the bundled fonts
+    // can still be swapping in, and "is this scrollable" is not yet true.
+    requestAnimationFrame(() => paintBars(screen));
+    setTimeout(() => paintBars(screen), 250);
+  };
+
+  if (instant) { settle(); return; }
+
+  const me = ++navToken;
+  screen.hidden = false;
+  // Both layers are live for the length of the animation; the incoming card
+  // rides on top of a push, the outgoing one on top of a pop.
+  prev.classList.add('nav-anim', dir === 'push' ? 'nav-push-out' : 'nav-pop-out');
+  screen.classList.add('nav-anim', dir === 'push' ? 'nav-push-in' : 'nav-pop-in');
+  (dir === 'push' ? screen : prev).classList.add('nav-top');
+  screen.querySelector('.screen-body')?.scrollTo?.(0, 0);
+
+  const done = () => { if (me === navToken) settle(); };
+  const mover = dir === 'push' ? screen : prev;
+  // animationend bubbles, and these screens carry idling mascots of their own
+  // — only the slide itself ends the navigation.
+  const onEnd = (e) => {
+    if (e.target !== mover) return;
+    mover.removeEventListener('animationend', onEnd);
+    done();
+  };
+  mover.addEventListener('animationend', onEnd);
+  // animationend does not fire if the element is torn out from under it (a
+  // second navigation mid-flight, a collapsed duration). Belt and braces.
+  setTimeout(done, 420);
+}
+
+/**
+ * The app bar's hairline and the footer's, both earned rather than painted on:
+ * they appear only while there is content running under them. This is the one
+ * detail that most separates a native screen from a page with a header on it.
+ */
+function paintBars(screen) {
+  if (!screen) return;
+  const body = screen.querySelector('.screen-body');
+  const bar = screen.querySelector('.appbar');
+  const foot = screen.querySelector('.screen-foot');
+  if (!body) return;
+  const top = body.scrollTop > 2;
+  const room = body.scrollHeight - body.clientHeight;
+  const bottom = room > 2 && body.scrollTop < room - 2;
+  bar?.classList.toggle('is-stuck', top);
+  foot?.classList.toggle('is-lifted', bottom);
+}
+
+for (const s of [el.welcome, el.setupRole, el.watchPair, el.channels, el.role, el.join]) {
+  const body = s?.querySelector('.screen-body');
+  if (body) body.addEventListener('scroll', () => paintBars(s), { passive: true });
+}
+window.addEventListener('resize', () => {
+  const cur = SCREENS().find((x) => !x.hidden);
+  if (cur && cur !== el.live) paintBars(cur);
+});
+
+// ------------------------------------------------------------- sheets
+//
+// Bottom sheets, not centred boxes: the scrim fades, the card slides up off
+// the bottom edge, and both reverse on the way out. The CSS does the moving;
+// this only owns "when is it in the DOM", because `hidden` has to end up
+// correct for the rest of the app (and for every existing .hidden check).
+
+const SHEET_MS = 300;
+
+function openSheet(node) {
+  if (!node) return;
+  clearTimeout(node._sheetT);
+  node.hidden = false;
+  if (motionOff()) { node.classList.add('is-open'); return; }
+  // One frame at the resting transform, so the transition has somewhere to
+  // come from — adding the class in the same tick as `hidden = false` skips it.
+  node.classList.remove('is-open');
+  requestAnimationFrame(() => requestAnimationFrame(() => node.classList.add('is-open')));
+}
+
+function closeSheet(node) {
+  if (!node || node.hidden) { node?.classList.remove('is-open'); return; }
+  clearTimeout(node._sheetT);
+  node.classList.remove('is-open');
+  if (motionOff()) { node.hidden = true; return; }
+  node._sheetT = setTimeout(() => { node.hidden = true; }, SHEET_MS);
+}
+
+/**
+ * Tap the scrim, or press Escape, to send a sheet away — the two gestures a
+ * phone answers. Each sheet is dismissed through its own cancel path rather
+ * than by hiding the node, so nothing is left running behind it: the scanner
+ * in particular has to give the camera back.
+ */
+function dismissSheet(node) {
+  if (node === el.scanner) { if (S.scanStop) S.scanStop(); else closeSheet(node); return; }
+  if (node === el.pair) { closePair(); return; }
+  if (node === el.editor) { closeSheet(node); S.editing = null; return; }
+  if (node === el.rowMenu) { closeRowMenu(); return; }
+  closeSheet(node);
+}
+
+for (const sheet of [el.pair, el.editor, el.rowMenu, el.scanner]) {
+  if (!sheet) continue;
+  sheet.addEventListener('click', (e) => { if (e.target === sheet) dismissSheet(sheet); });
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  for (const sheet of [el.rowMenu, el.editor, el.scanner, el.pair]) {
+    if (sheet && !sheet.hidden) { e.preventDefault(); dismissSheet(sheet); return; }
+  }
+});
 
 function status(text, kind) {
   el.statusline.textContent = text;
@@ -343,6 +555,21 @@ function playSoon(elm, tries = 4) {
 
 // ---------------------------------------------------------- channel list
 
+// Inline marks for rows built in script. Constant strings only — nothing the
+// user typed ever reaches innerHTML (names go through textContent below).
+const ICON = {
+  paw: '<svg viewBox="0 0 32 32" aria-hidden="true"><path fill-rule="evenodd" d="'
+    + 'M5 3 C 2 10 3 18 13 18 C 12 11 10 6 5 3 Z '
+    + 'M27 3 C 30 10 29 18 19 18 C 20 11 22 6 27 3 Z '
+    + 'M16 9 C 24 9 29 14 29 21 C 29 27 24 31 16 31 C 8 31 3 27 3 21 C 3 14 8 9 16 9 Z '
+    + 'M11 19 m-3.4 0 a3.4 3.4 0 1 0 6.8 0 a3.4 3.4 0 1 0 -6.8 0 Z '
+    + 'M21 19 m-3.4 0 a3.4 3.4 0 1 0 6.8 0 a3.4 3.4 0 1 0 -6.8 0 Z"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4.5 16.2 12 9 19.5"/></svg>',
+  more: '<svg viewBox="0 0 24 24" aria-hidden="true">'
+    + '<circle cx="12" cy="5.2" r="1.9"/><circle cx="12" cy="12" r="1.9"/>'
+    + '<circle cx="12" cy="18.8" r="1.9"/></svg>'
+};
+
 function renderChannels() {
   const list = getChannels();
   el.chList.replaceChildren();
@@ -352,52 +579,92 @@ function renderChannels() {
     const li = document.createElement('li');
     li.className = 'ch-row';
 
+    // The row is one target: avatar, name, the cue that says what a tap does,
+    // and the key it is really keyed to. Everything destructive lives behind
+    // the trailing overflow instead of on the row as a pair of tiny glyphs.
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'ch-open';
+
+    const av = document.createElement('span');
+    av.className = 'ch-avatar';
+    av.setAttribute('aria-hidden', 'true');
+    av.innerHTML = ICON.paw;
+
     const nm = document.createElement('strong');
     nm.textContent = ch.name;
+
+    const cue = document.createElement('span');
+    cue.className = 'ch-cue';
+    cue.textContent = 'Choose Monitor or Viewer';
+
     const fp = document.createElement('span');
     fp.className = 'ch-fp';
     fp.textContent = `key ${ch.key.slice(0, 6)}…`;
-    open.append(nm, fp);
+
+    const chev = document.createElement('span');
+    chev.className = 'ch-chev';
+    chev.setAttribute('aria-hidden', 'true');
+    chev.innerHTML = ICON.chevron;
+
+    open.append(av, nm, cue, fp, chev);
     open.addEventListener('click', () => openRole(ch));
 
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'ch-icon';
-    edit.title = `Rename ${ch.name}`;
-    edit.setAttribute('aria-label', `Rename ${ch.name}`);
-    edit.textContent = '✎';
-    edit.addEventListener('click', () => openEditor(ch));
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'ch-more';
+    more.title = `Options for ${ch.name}`;
+    more.setAttribute('aria-label', `Options for ${ch.name}`);
+    more.innerHTML = ICON.more;
+    more.addEventListener('click', () => openRowMenu(ch));
 
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'ch-icon danger';
-    del.title = `Delete ${ch.name}`;
-    del.setAttribute('aria-label', `Delete ${ch.name}`);
-    del.textContent = '␡';
-    del.addEventListener('click', () => {
-      if (!confirm(`Delete "${ch.name}"? Devices paired to it will stop connecting.`)) return;
-      setChannels(getChannels().filter((c) => c.id !== ch.id));
-      // Drop the once-reviewed safety-code flag, this phone's pairing bond and
-      // (on a Monitor) the list of phones it had let in, so a re-pair starts
-      // clean — and so a deleted channel really does stop admitting its old
-      // Handhelds rather than remembering them past the delete.
-      try {
-        localStorage.removeItem(`tawny.sasok.${ch.id}`);
-        localStorage.removeItem(`tawny.sas.${ch.id}`);
-        localStorage.removeItem(`tawny.bond.${ch.id}`);
-        localStorage.removeItem(`tawny.paired.${ch.id}`);
-      } catch {}
-      renderChannels();
-      toast('Monitor removed');
-    });
-
-    li.append(open, edit, del);
+    li.append(open, more);
     el.chList.append(li);
   }
 }
+
+/** Delete a channel and every local trace of the devices it had paired. */
+function deleteChannel(ch) {
+  setChannels(getChannels().filter((c) => c.id !== ch.id));
+  // Drop the once-reviewed safety-code flag, this phone's pairing bond and
+  // (on a Monitor) the list of phones it had let in, so a re-pair starts
+  // clean — and so a deleted channel really does stop admitting its old
+  // Handhelds rather than remembering them past the delete.
+  try {
+    localStorage.removeItem(`tawny.sasok.${ch.id}`);
+    localStorage.removeItem(`tawny.sas.${ch.id}`);
+    localStorage.removeItem(`tawny.bond.${ch.id}`);
+    localStorage.removeItem(`tawny.paired.${ch.id}`);
+  } catch {}
+  renderChannels();
+  toast('Monitor removed');
+}
+
+// The channel row's overflow sheet. One channel at a time; the buttons are
+// wired once and read this.
+let menuChannel = null;
+
+function openRowMenu(ch) {
+  menuChannel = ch;
+  el.rowMenuTitle.textContent = ch.name;
+  openSheet(el.rowMenu);
+}
+
+function closeRowMenu() { closeSheet(el.rowMenu); menuChannel = null; }
+
+$('#row-cancel').addEventListener('click', closeRowMenu);
+$('#row-rename').addEventListener('click', () => {
+  const ch = menuChannel;
+  closeRowMenu();
+  if (ch) openEditor(ch);
+});
+$('#row-delete').addEventListener('click', () => {
+  const ch = menuChannel;
+  closeRowMenu();
+  if (!ch) return;
+  if (!confirm(`Delete "${ch.name}"? Devices paired to it will stop connecting.`)) return;
+  deleteChannel(ch);
+});
 
 function openEditor(ch) {
   S.editing = ch || null;
@@ -406,7 +673,7 @@ function openEditor(ch) {
   el.editorHint.textContent = ch
     ? 'The key stays the same, so paired devices keep working.'
     : 'A fresh key is generated for this channel. Only devices you pair can join it.';
-  el.editor.hidden = false;
+  openSheet(el.editor);
   el.editorName.focus();
 }
 
@@ -414,22 +681,28 @@ function saveEditor() {
   const name = el.editorName.value.trim();
   if (!name) return toast('Give this monitor a name.');
   const list = getChannels();
+  let fresh = null;
   if (S.editing) {
     const found = list.find((c) => c.id === S.editing.id);
     if (found) found.name = name;
   } else {
     if (list.length >= 12) return toast('That is as many monitors as Tawny keeps.');
-    list.push({ id: crypto.randomUUID(), name, key: newKey() });
+    fresh = { id: crypto.randomUUID(), name, key: newKey() };
+    list.push(fresh);
   }
   setChannels(list);
-  el.editor.hidden = true;
+  closeSheet(el.editor);
   S.editing = null;
   renderChannels();
+  // A channel that has just been made is a channel about to be used: go
+  // straight on to "which job is this phone doing", rather than dropping the
+  // new row into a list and leaving the next step to be discovered.
+  if (fresh) openRole(fresh);
 }
 
 el.chAdd.addEventListener('click', () => openEditor(null));
 $('#editor-save').addEventListener('click', saveEditor);
-$('#editor-cancel').addEventListener('click', () => { el.editor.hidden = true; S.editing = null; });
+$('#editor-cancel').addEventListener('click', () => { closeSheet(el.editor); S.editing = null; });
 el.editorName.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveEditor(); });
 
 function openRole(ch) {
@@ -462,6 +735,7 @@ function watcherChannel() {
 function openWatchPair() {
   S.channel = watcherChannel();
   const url = pairLink();
+  el.wpUrl.textContent = url;
   try {
     drawQR(url, el.wpQr);
     note(el.wpWarn, '');
@@ -474,6 +748,7 @@ function openWatchPair() {
     note(el.wpWarn, 'This is a plain http address. The Viewer will load but the ' +
       'browser will refuse it the microphone. Serve Tawny over https.');
   }
+  fillRelayHint(el.wpRelay, el.wpRelayAddr);
   el.wpStatus.textContent = 'Waiting for the Viewer';
   show(el.watchPair);
 }
@@ -489,20 +764,26 @@ $('#setup-watcher').addEventListener('click', () => {
 
 $('#setup-handheld').addEventListener('click', () => {
   markOnboarded();
-  if ('BarcodeDetector' in window) {
-    openScanner();
-    return;
-  }
-  const link = prompt('Paste the pairing link shown on the Watcher:');
-  if (link == null) return;
-  if (!adopt(link.trim())) {
-    note(el.setupNote, lastPairError
-      || 'That was not a Tawny pairing link. Try scanning it with your phone camera instead.');
-  }
+  openScanner();
 });
 
 $('#wp-start').addEventListener('click', () => start('station'));
 $('#wp-later').addEventListener('click', () => show(el.channels));
+el.wpCopy.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(pairLink());
+    toast(TawnyT.t('w_toast_link_copied'));
+  } catch {
+    toast('Copy failed — select the link text instead.');
+  }
+});
+// The app bar's back affordance and the quiet "Set up later" underneath it
+// land in the same place; the bar is just the one a thumb reaches for first.
+$('#wp-back').addEventListener('click', () => show(el.channels));
+
+// The empty channel list offers the same route the welcome screen does,
+// rather than describing it and leaving the user to find it.
+$('#ch-empty-go').addEventListener('click', () => { note(el.setupNote, ''); show(el.setupRole); });
 
 // ------------------------------------------------- connection profiles
 
@@ -542,6 +823,31 @@ function chosenBase() {
     return u.replace(/\/+$/, '') + '/';
   }
   return location.origin + location.pathname.replace(/[^/]*$/, '');
+}
+
+/**
+ * The server address to hand somebody pairing from the Android app.
+ *
+ * The app cannot open a web link, so it never sees the `rv=` the link carries;
+ * its relay is whatever is typed on its own Servers screen. Two devices only
+ * find each other on the same one, so the browser has to be able to *say* which
+ * one it is on, in the form that screen accepts (wss://…). Empty when there is
+ * no relay at all, which is when the hint has nothing to offer and is hidden.
+ */
+function relayHint() {
+  const b = rendezvousBase();
+  // `ws://` only ever means a LAN address the app cannot use from here; the
+  // Servers screen wants the secure form, and wsBase() has already made the
+  // scheme one of exactly ws:/wss:.
+  return b ? b.replace(/^wss?:/i, 'wss:').replace(/\/+$/, '') : '';
+}
+
+/** Fill a relay hint's address, or hide the whole disclosure when there is none. */
+function fillRelayHint(box, code) {
+  if (!box) return;
+  const addr = relayHint();
+  box.hidden = !addr;
+  if (addr && code) code.textContent = addr;
 }
 
 // ------------------------------------------------------------- pairing
@@ -640,10 +946,22 @@ function pairingAllowed(m) {
 function pairLink() {
   const base = chosenBase();
   const code = S.pairCode || newPairCode();
+  // The setup flow shows this link *before* start() runs, so the ticket has to
+  // exist by the time the QR is drawn or the link would hand out a `t` the
+  // Monitor then replaced. Only the browser mints one: inside the native shell
+  // the ticket comes from the shell, and pairLink() is not the screen in use.
+  if (!S.token && !S.nativeShell) S.token = newKey();
   const frag = new URLSearchParams({ k: S.channel.key, n: S.channel.name, r: 'viewer' });
   if (S.token) frag.set('t', S.token);
   frag.set('c', code.c);
   frag.set('e', String(Math.floor(code.exp / 1000)));
+  // Where to meet, but only when it is not already obvious. A link served from
+  // the same host as the rendezvous says nothing extra — the scanning phone
+  // works that out from the link's own origin — and every character left out
+  // is QR capacity given back.
+  if (S.cfg.rendezvous && hostOf(S.cfg.rendezvous) !== hostOf(base)) {
+    frag.set('rv', S.cfg.rendezvous);
+  }
   return `${base}#${frag}`;
 }
 
@@ -676,6 +994,7 @@ function refreshPair() {
   const url = pairLink();
   el.pairName.textContent = S.channel.name;
   el.pairUrl.textContent = url;
+  fillRelayHint(el.pairRelay, el.pairRelayAddr);
   try {
     drawQR(url);
     note(el.pairWarn, '');
@@ -712,14 +1031,14 @@ function openPair() {
   renderProfiles();
   if (pairCodeLeft() <= 0) newPairCode();
   refreshPair();
-  el.pair.hidden = false;
+  openSheet(el.pair);
   tickPairSheet();
   clearInterval(pairTicker);
   pairTicker = setInterval(tickPairSheet, 1000);
 }
 
 function closePair() {
-  el.pair.hidden = true;
+  closeSheet(el.pair);
   clearInterval(pairTicker);
   pairTicker = null;
 }
@@ -739,6 +1058,22 @@ el.pairCustom.addEventListener('input', () => {
   refreshPair();
 });
 
+// Both relay hints copy the same thing: the address to type on the Android
+// app's Servers screen so the two devices meet in the same place.
+async function copyRelay() {
+  const addr = relayHint();
+  if (!addr) return;
+  try {
+    await navigator.clipboard.writeText(addr);
+    toast('Server address copied.');
+  } catch {
+    toast('Copy failed — select the address instead.');
+  }
+}
+for (const id of ['#wp-relay-copy', '#pair-relay-copy']) {
+  $(id)?.addEventListener('click', copyRelay);
+}
+
 $('#pair-close').addEventListener('click', closePair);
 $('#pair-copy').addEventListener('click', async () => {
   try {
@@ -752,46 +1087,87 @@ $('#pair-copy').addEventListener('click', async () => {
 // -------------------------------------------------------------- scanner
 
 async function openScanner() {
-  if (!('BarcodeDetector' in window)) {
-    return toast('This browser cannot scan. Use your phone camera app instead.');
+  const native = 'BarcodeDetector' in window;
+  const canJsqr = typeof window.jsQR === 'function';
+  if (!native && !canJsqr) {
+    return promptPasteLink();
   }
-  el.scanner.hidden = false;
+  openSheet(el.scanner);
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
   } catch {
-    el.scanner.hidden = true;
-    return toast('Could not open the camera.');
+    closeSheet(el.scanner);
+    return promptPasteLink();
   }
   el.scanVideo.srcObject = stream;
-  const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+  try { await el.scanVideo.play(); } catch {}
   let live = true;
 
   S.scanStop = () => {
     live = false;
     stream.getTracks().forEach((t) => t.stop());
     el.scanVideo.srcObject = null;
-    el.scanner.hidden = true;
+    closeSheet(el.scanner);
     S.scanStop = null;
   };
 
-  const loop = async () => {
-    if (!live) return;
-    try {
-      const found = await detector.detect(el.scanVideo);
-      if (found.length) {
-        const ok = adopt(found[0].rawValue);
-        if (ok) { S.scanStop(); return; }
-        el.scanHint.textContent = lastPairError || 'That code is not a Tawny pairing code.';
-      }
-    } catch {}
-    setTimeout(loop, 250);
+  // One handler for both decode paths: adopt() still validates every field.
+  const take = (raw) => {
+    if (!raw) return false;
+    if (adopt(raw)) { S.scanStop(); return true; }
+    el.scanHint.textContent = lastPairError || 'That code is not a Tawny pairing code.';
+    return false;
   };
-  loop();
+
+  if (native) {
+    const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+    const loop = async () => {
+      if (!live) return;
+      try {
+        const found = await detector.detect(el.scanVideo);
+        if (found.length && take(found[0].rawValue)) return;
+      } catch {}
+      setTimeout(loop, 250);
+    };
+    loop();
+    return;
+  }
+
+  // Fallback: jsQR over a canvas. Desktop Chromium/Brave/Firefox have no
+  // BarcodeDetector, so without this the browser scanner is dead there.
+  const cv = document.createElement('canvas');
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  const loop = () => {
+    if (!live) return;
+    const v = el.scanVideo;
+    if (v.readyState >= 2 && v.videoWidth) {
+      cv.width = v.videoWidth;
+      cv.height = v.videoHeight;
+      ctx.drawImage(v, 0, 0, cv.width, cv.height);
+      try {
+        const img = ctx.getImageData(0, 0, cv.width, cv.height);
+        const r = window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+        if (r && take(r.data)) return;
+      } catch {}
+    }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+
+// Manual escape hatch — camera denied, or a link someone sent by message.
+function promptPasteLink() {
+  const link = prompt('Paste the pairing link shown on the monitor:');
+  if (link == null) return;
+  if (!adopt(link.trim())) {
+    toast(lastPairError || 'That was not a Tawny pairing link.');
+  }
 }
 
 el.chScan.addEventListener('click', openScanner);
 $('#scan-close').addEventListener('click', () => S.scanStop?.());
+$('#scan-paste').addEventListener('click', () => { S.scanStop?.(); promptPasteLink(); });
 
 // The admission ticket arrives from somewhere attacker-supplyable — a pasted
 // URL, a scanned code, a `tawny://pair` intent — and from here it is echoed
@@ -808,13 +1184,29 @@ const PAIRCODE_RE = /^[A-Za-z0-9_-]{8,32}$/;
 // Cleared on every attempt; read by the three callers for their own note.
 let lastPairError = null;
 
+// Something worth saying about a link that was otherwise fine — today, only a
+// relay this build will not dial. Cleared on every attempt; shown next to the
+// "you're about to join" copy rather than instead of it.
+let lastRelayNote = null;
+
 // Import a pairing link. Returns true when it was a valid one.
+//
+// Two dialects arrive here. The web link carries everything in the fragment
+// (`https://host/#k=…`), which is the only place a secret may travel: a
+// fragment is never sent to the server and never lands in an access log. The
+// app's own scheme has no server to keep it from, so `tawny://pair?k=…` puts
+// the same parameters in the query — and that dialect is accepted ONLY for
+// `tawny:` URLs. A query string on an https link is the logged-secret
+// regression and stays unread.
 function adopt(raw) {
   lastPairError = null;
-  let hash;
-  try { hash = new URL(raw, location.href).hash.slice(1); }
+  lastRelayNote = null;
+  let u;
+  try { u = new URL(raw, location.href); }
   catch { return false; }
-  const p = new URLSearchParams(hash);
+  const params = u.hash.length > 1 ? u.hash.slice(1)
+    : (u.protocol === 'tawny:' ? u.search.slice(1) : '');
+  const p = new URLSearchParams(params);
   const key = p.get('k');
   if (!key || !/^[A-Za-z0-9_-]{16,64}$/.test(key)) return false;
 
@@ -837,6 +1229,46 @@ function adopt(raw) {
   const code = p.get('c');
   S.pairSeen = code && PAIRCODE_RE.test(code) ? code : null;
 
+  // `h` — the LAN hint the app's own pairing links carry: the address of the
+  // signalling relay the Monitor phone is running itself, `<ip>:<port>`.
+  //
+  // This used to be dropped on the floor here, because an https page cannot
+  // open ws://192.168.x.x (mixed content) and an http page has no microphone.
+  // Both are still true; what changed is that the server this page came from
+  // will now make that connection on our behalf — /lan/<ip>/<port>/ws, on this
+  // very origin, so it is wss:// to the browser and cleartext only on the last
+  // hop across the operator's own network. See the long note in server.js.
+  //
+  // Not in the native shell: there the page is http://127.0.0.1, the WebView's
+  // CSP names the phone's relay directly, and MainActivity already passes it in
+  // through tawnyStart(). Nothing here should second-guess that.
+  if (!S.nativeShell) {
+    S.signalUrl = null;
+    const h = String(p.get('h') || '');
+    const m = /^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$/.exec(h);
+    if (m && isPrivateV4(m[1]) && Number(m[2]) >= 1024 && Number(m[2]) <= 65535) {
+      S.signalUrl = location.protocol === 'https:'
+        ? `wss://${location.host}${location.pathname.replace(/[^/]*$/, '')}lan/${m[1]}/${m[2]}`
+        : `ws://${m[1]}:${m[2]}`;
+    }
+  }
+
+  // The relay the far end is on. Honoured only when it is somewhere this build
+  // already dials — this page's own origin, or either configured rendezvous —
+  // so a forwarded link cannot point a phone at a stranger's server.
+  S.linkRelay = null;
+  const rv = p.get('rv');
+  if (rv) {
+    let ok = false;
+    try {
+      const r = new URL(rv);
+      const allowed = [location.host, hostOf(S.cfg.rendezvous), hostOf(S.cfg.rendezvousFallback)];
+      ok = r.protocol === 'https:' && allowed.includes(r.host);
+      if (ok) S.linkRelay = wsBase(r.origin);
+    } catch {}
+    if (!ok) lastRelayNote = RELAY_MISMATCH_MESSAGE;
+  }
+
   const list = getChannels();
   let ch = list.find((c) => c.key === key);
   if (!ch) {
@@ -848,6 +1280,7 @@ function adopt(raw) {
   S.channel = ch;
   S.pending = 'viewer';
   el.joinName.textContent = ch.name;
+  note(el.joinNote, lastRelayNote || '');
   show(el.join);
   return true;
 }
@@ -1123,12 +1556,31 @@ function synthChime(ac, kind) {
 const wsBase = (u) => (u ? String(u).replace(/^http/i, 'ws').replace(/\/+$/, '') : null);
 
 /**
- * The relay to dial. This is the user's own when they have set one (the Servers
- * screen behind the diagnostics hatch), otherwise the one this build ships
- * with — and after a fallback it is whichever one is actually working.
+ * The page it was served from, as a relay — the last resort for a browser.
+ *
+ * A standalone Tawny page is served by `server.js`, which *is* a relay: it
+ * speaks the same signaling on the same origin. So a deployment that ships no
+ * `rendezvous` in config.json is not a deployment with nowhere to meet, it is
+ * one that meets on itself, and saying so here is what lets a browser Monitor
+ * and a browser Viewer pair with nothing configured at all. Null inside the
+ * native shell, whose origin is the packaged asset host and relays nothing.
+ */
+const sameOriginBase = () =>
+  (S.nativeShell || !/^https?:$/.test(location.protocol) ? null : wsBase(location.origin));
+
+/**
+ * The relay to dial, most specific first:
+ *
+ *   1. the one actually in use this session (S.relayBase — set by connectAll's
+ *      seed and moved by fallBackToDefault, so a relay already given up on is
+ *      not retried);
+ *   2. the one the pairing link named, when it named one we will dial;
+ *   3. the one this build was configured with (the user's own, set on the
+ *      Servers screen behind the diagnostics hatch, or the build's default);
+ *   4. this page's own origin.
  */
 function rendezvousBase() {
-  return S.relayBase || wsBase(S.cfg.rendezvous);
+  return S.relayBase || S.linkRelay || wsBase(S.cfg.rendezvous) || sameOriginBase();
 }
 
 /**
@@ -1621,7 +2073,10 @@ function connectAll() {
   // Sticky for the session: once a custom relay has been given up on, a
   // background/foreground cycle must not spend another eight seconds
   // rediscovering that. start() clears it.
-  S.relayBase = S.relayBase || wsBase(S.cfg.rendezvous);
+  // The link's relay is part of the seed, not something the sticky value gets
+  // to out-rank: a phone that arrived on a link naming a relay must dial that
+  // one, not the build's default.
+  S.relayBase = S.relayBase || S.linkRelay || wsBase(S.cfg.rendezvous);
   const rv = rendezvousBase();
   if (S.role === 'station') {
     if (S.signalUrl) openSignal(S.signalUrl, 'lan');
@@ -3113,6 +3568,15 @@ async function start(role) {
   // closed on a missing one, so a station that reached here without a code
   // from the shell would refuse every phone rather than let one in.
   if (role === 'station' && pairCodeLeft() <= 0) newPairCode();
+  // ...and never without an admission ticket either. The ticket is the room's
+  // bearer secret: the Monitor mints it, the relay records it the first time it
+  // is presented (server.js's /turn and every rendezvous check the same value),
+  // and the pairing link carries it to the Viewer. A browser Monitor had no
+  // way to mint one — only the native shell did — so a standalone deployment
+  // could only work with ticket checking turned off. It mints its own now, and
+  // this must happen before fetchIce() asks /turn for credentials and before
+  // pairLink() builds the fragment that hands it on.
+  if (role === 'station' && !S.token) S.token = newKey();
   S.relayBase = null;   // a new session gives the user's own relay a fresh try
   S.roomId = await roomIdFor(S.channel.key);
   diag(`start role=${role} room=${S.roomId} lan=${S.signalUrl || '-'} ` +
@@ -3886,7 +4350,10 @@ window.tawnyPairCode = function (code, expMs) {
 };
 
 (async function init() {
-  if ('BarcodeDetector' in window) el.chScan.hidden = false;
+  // The scanner works everywhere now: BarcodeDetector where present, jsQR
+  // (bundled) everywhere else. Keep the button hidden only if a camera scan is
+  // truly impossible — no getUserMedia at all.
+  el.chScan.hidden = !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   initThemeToggle();
   initPinch();
   renderChannels();

@@ -36,6 +36,15 @@
   --stage:   #0c0d12;   /* live-video ground — always dark */
   --blush:   #fdecef;   /* faint top-of-page glow (light only) */
   --on-accent: #ffffff;  /* text on a --berry fill */
+  /* An accent used as TEXT, not as a fill. --berry on white is 4.0:1 and
+     --live is 3.9:1 — both under AA for the 11-13px labels, tags and links the
+     setup flow is full of, and both are the exact sizes where it shows. These
+     are the same hue carried to a contrast-safe lightness, and they flip with
+     the theme so a dark panel keeps the brighter one. Fills keep --berry /
+     --live: contrast there is the job of --on-accent. */
+  --accent-ink: var(--berry-d);
+  --live-ink:   #b23a22;
+  --on-alert:   #3b2a06;  /* text on an --alert fill; amber wants dark ink in both themes */
 
   --display: "Tawny Display", "Herculanum", "Papyrus", fantasy;
   --text: "Tawny Text", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
@@ -97,6 +106,10 @@
     --on-accent: #191410;
     --blush:   transparent;
     --ctl-line: #4a3b2b;
+    /* On a dark panel the *bright* end of each accent is the readable one, so
+       the light palette's relationship inverts here. See :root. */
+    --accent-ink: var(--berry);
+    --live-ink:   var(--live);
   }
 }
 :root[data-theme="dark"] {
@@ -114,6 +127,8 @@
   --on-accent: #191410;
   --blush:   transparent;
   --ctl-line: #4a3b2b;
+  --accent-ink: var(--berry);
+  --live-ink:   var(--live);
 }
 
 * { box-sizing: border-box; }
@@ -175,16 +190,21 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .field input {
   width: 100%;
+  min-height: 50px;
   padding: 13px 14px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--r-ctl);
   color: var(--fg);
   font: inherit;
   letter-spacing: .04em;
 }
 
-.field input:focus { border-color: var(--berry-d); outline: none; }
+.field input:focus {
+  border-color: var(--berry);
+  outline: 2px solid color-mix(in srgb, var(--berry) 30%, transparent);
+  outline-offset: 1px;
+}
 
 .field small {
   display: block;
@@ -193,45 +213,68 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 11.5px;
 }
 
+/* 12dp between cards, 18dp inside one — roleCard()'s own numbers. */
 .roles { display: grid; gap: 12px; }
 
 .role-card {
+  /* Each card carries its own accent, the way the native role screen gives
+     the Monitor berry and the Viewer sky. The inline SVG glyphs fill from
+     this too, so nothing has to be re-coloured per card. */
+  --acc: var(--berry);
+  position: relative;
+  overflow: hidden;
   display: grid;
-  gap: 5px;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
   text-align: left;
-  padding: 16px 18px;
+  padding: 18px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--berry-d);
-  border-radius: 3px;
-  transition: background .15s ease, border-color .15s ease;
+  border-radius: var(--r-card);
+  -webkit-tap-highlight-color: transparent;
+  transition: background .16s ease, border-color .16s ease,
+              transform .13s cubic-bezier(.2, .8, .3, 1);
 }
+.role-card > .role-emoji,
+.role-card > .role-tag,
+.role-card > strong,
+.role-card > em { grid-column: 1; }
+
+/* The Viewer takes the secondary hue, mirroring the native role screen. */
+#pick-viewer, #setup-handheld { --acc: var(--sky); }
 
 .role-card:hover, .role-card:focus-visible {
-  background: var(--raise);
-  border-left-color: var(--berry);
+  background: color-mix(in srgb, var(--acc) 7%, var(--panel));
+  border-color: var(--acc);
+}
+/* A firm, quick dip — the CSS twin of pressable()'s ripple. */
+.role-card:active {
+  transform: scale(.975);
+  background: color-mix(in srgb, var(--acc) 13%, var(--panel));
+  border-color: var(--acc);
 }
 
 .role-tag {
-  font-size: 12px;
-  letter-spacing: .2em;
+  font-size: 13px;                /* Type.LABEL */
+  letter-spacing: .16em;
   text-transform: uppercase;
-  color: var(--berry);
+  color: var(--acc);
 }
 
-.role-card strong { font-size: 18px; font-weight: 600; }
+.role-card strong { font-size: 20px; font-weight: 600; }   /* Type.CARD_TITLE */
 
 .role-card em {
   font-style: normal;
   color: var(--dim);
-  font-size: 14px;
-  line-height: 1.55;
+  font-size: 15px;                /* Type.SUB */
+  line-height: 1.45;
 }
 
 .note {
   margin: 0;
   padding: 12px 14px;
-  border-left: 3px solid var(--live);
+  border: 1px solid color-mix(in srgb, var(--live) 35%, var(--line));
+  border-radius: var(--r-chip);
   background: color-mix(in srgb, var(--live) 12%, var(--panel));
   color: var(--fg);
   font-size: 12.5px;
@@ -1253,12 +1296,12 @@ body.dimmed #theme-toggle { display: none; }
   bottom: calc(96px + var(--safe-b));
   transform: translateX(-50%);
   z-index: 30;
-  padding: 10px 16px;
+  padding: 11px 18px;
   background: var(--raise);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--berry);
-  border-radius: 2px;
+  border-radius: 999px;
   font-size: 12px;
+  box-shadow: 0 8px 24px -12px rgba(12, 13, 18, .35);
   max-width: min(90vw, 420px);
 }
 
@@ -1307,48 +1350,320 @@ body.dimmed #theme-toggle { display: none; }
 [data-motion="off"] .lens-btn:active,
 [data-motion="off"] .sas .wide:active { transform: none; }
 
-/* ==================== v2: channels, sheets, pairing ==================== */
+/* ------------------------------ shared primitives -----------------------
+   Sizes and presses for these are set per context: the app screens and the
+   sheets in the v4 block below, the SAS card over the video in the live
+   section above. The base is deliberately neutral so both can dress it. */
 
-.pad {
-  max-width: 560px;
-  margin: 0 auto;
-  padding: var(--pad);
-  padding-top: max(34px, calc(var(--pad) + var(--safe-t)));
-  padding-bottom: calc(var(--pad) + var(--safe-b));
+.hint {
+  margin: 0;
+  color: var(--dim);
+  font-size: 15px;      /* Type.SUB */
+  line-height: 1.55;
+}
+
+.join-body { margin: 0; font-size: 16px; color: var(--dim); }
+.join-body b { color: var(--berry); }
+
+.wide {
+  width: 100%;
+  padding: 15px 16px;
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  transition: filter .12s ease, border-color .15s ease, color .15s ease;
+}
+.wide:hover { border-color: var(--berry); color: var(--berry); }
+.wide.primary { background: var(--berry); color: var(--on-accent); border-color: var(--berry); }
+.wide.primary:hover { filter: brightness(1.06); color: var(--on-accent); }
+.wide.ghost { background: none; font-weight: 500; }
+
+.warn {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--live) 35%, var(--line));
+  border-radius: var(--r-chip);
+  background: color-mix(in srgb, var(--live) 12%, var(--panel));
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+/* ============ v4: the pre-call screens, laid out like an app ============
+ *
+ * Everything before the video is now built the way MainActivity builds a
+ * native screen, and in the same order:
+ *
+ *   .screen.app  →  clearScreen() + a root FrameLayout: a fixed-height column
+ *   .appbar      →  backLink() + heading(), on one hairline-separated bar
+ *   .screen-body →  the ScrollView from mountCentered(): the only thing that
+ *                   scrolls, so the bar and the actions never move
+ *   .screen-foot →  primary() pinned in thumb reach, above the gesture inset
+ *
+ * The proportions are the Kotlin ones read off MainActivity: 24dp column
+ * padding, 12dp between cards, 18dp inside one, Type.TITLE 27 / CARD_TITLE 20
+ * / BODY 16 / SUB 15 / LABEL 13, and a 48dp floor under anything you can hit.
+ */
+
+/* ------------------------------------------------------------ navigation */
+
+.screen.app {
   display: flex;
   flex-direction: column;
-  gap: 26px;
+  height: 100dvh;
+  min-height: 100dvh;
 }
 
-.pad.center { justify-content: center; min-height: 100dvh; text-align: center; }
-.pad.center .brand { justify-content: center; }
+/* While a push or a pop is playing, both screens are on screen at once, so
+   each becomes its own layer over the page ground. #live never gets here —
+   show() swaps to and from the live view instantly on purpose (app.js). */
+.screen.nav-anim {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  background: var(--bg);
+  background-image:
+    radial-gradient(130% 90% at 50% -20%, var(--blush) 0%, transparent 55%);
+  will-change: transform, opacity;
+}
+.screen.nav-top { z-index: 6; }
 
-.brand.small .mark { display: none; }
-
-/* Screen titles read in the UI face, not the brush script (that's for "Tawny" only) */
-.brand.small h1 {
-  font-family: var(--text);
-  font-weight: 600;
-  font-size: 26px;
-  letter-spacing: 0;
+/* Forward is a push from the right; back sends the same card back out that
+   way and lets the one underneath settle in from the left. ~260ms on a firm
+   ease-out — long enough to read as movement, short enough to stay ahead of
+   the thumb. */
+@keyframes nav-push-in {
+  from { transform: translate3d(100%, 0, 0); opacity: .75; }
+  to   { transform: translate3d(0, 0, 0);    opacity: 1; }
+}
+@keyframes nav-push-out {
+  from { transform: translate3d(0, 0, 0);      opacity: 1; }
+  to   { transform: translate3d(-22%, 0, 0);   opacity: .3; }
+}
+@keyframes nav-pop-in {
+  from { transform: translate3d(-22%, 0, 0); opacity: .3; }
+  to   { transform: translate3d(0, 0, 0);    opacity: 1; }
+}
+@keyframes nav-pop-out {
+  from { transform: translate3d(0, 0, 0);    opacity: 1; }
+  to   { transform: translate3d(100%, 0, 0); opacity: .75; }
 }
 
-.back {
-  align-self: flex-start;
-  display: inline-flex;
+.screen.nav-push-in  { animation: nav-push-in  .26s cubic-bezier(.22, .9, .28, 1) both; }
+.screen.nav-push-out { animation: nav-push-out .26s cubic-bezier(.22, .9, .28, 1) both; }
+.screen.nav-pop-in   { animation: nav-pop-in   .24s cubic-bezier(.22, .9, .28, 1) both; }
+.screen.nav-pop-out  { animation: nav-pop-out  .24s cubic-bezier(.22, .9, .28, 1) both; }
+
+/* ---------------------------------------------------------------- app bar */
+
+.appbar {
+  flex: none;
+  position: relative;
+  z-index: 3;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 9px 14px 9px 11px;
-  color: var(--fg);
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: .03em;
-  text-transform: none;
+  gap: 8px;
+  /* The theme toggle is a fixed, page-level button in the same corner, so the
+     bar keeps 54px clear on the right rather than parking an action under it. */
+  padding: calc(6px + var(--safe-t)) 54px 6px 8px;
+  min-height: calc(56px + var(--safe-t));
+  background: var(--bg);
+  box-shadow: 0 1px 0 0 transparent;
+  transition: box-shadow .18s ease, background .18s ease;
 }
-.back:hover { border-color: var(--berry); color: var(--berry); }
+/* The hairline is earned: it appears the moment the body is scrolled away
+   from the top, which is how a phone tells you the bar is floating. */
+.appbar.is-stuck {
+  background: var(--panel);
+  box-shadow: 0 1px 0 0 var(--line);
+}
+
+.appbar-titles { flex: 1; min-width: 0; }
+
+.appbar-titles h1 {
+  margin: 0;
+  font-family: var(--text);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* "Tawny" is the one string that wears the brush script. */
+.appbar-titles h1.wordmark {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 28px;
+  letter-spacing: .03em;
+}
+
+.appbar-sub {
+  margin: 1px 0 0;
+  color: var(--dim);
+  font-size: 12.5px;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.appbar-mark {
+  width: 30px; height: 30px;
+  flex: none;
+  margin-left: 6px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(12, 13, 18, .22);
+}
+
+.appbar-slot { width: 4px; flex: none; }
+
+.appbar-back,
+.appbar-action {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  color: var(--fg);
+  -webkit-tap-highlight-color: transparent;
+  transition: background .14s ease, color .14s ease,
+              transform .13s cubic-bezier(.2, .8, .3, 1);
+}
+.appbar-action { color: var(--berry); }
+
+.appbar-back svg,
+.appbar-action svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.appbar-back:hover, .appbar-action:hover { background: var(--raise); }
+.appbar-back:active, .appbar-action:active {
+  background: color-mix(in srgb, var(--berry) 16%, transparent);
+  color: var(--berry);
+  transform: scale(.9);
+}
+
+/* ------------------------------------------------------- body + footer */
+
+.screen-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.wrap {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px var(--pad) 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.center-text { text-align: center; align-items: center; }
+
+/* A hero screen (welcome, "code accepted") has no bar and centres its column
+   optically, the way mountCentered()'s fillViewport ScrollView does. */
+.screen.hero .screen-body { display: flex; }
+.screen.hero .screen-body > .wrap {
+  margin: auto;
+  width: 100%;
+  padding-top: calc(20px + var(--safe-t));
+  text-align: center;
+  align-items: center;
+  gap: 14px;
+}
+.screen.hero .brand { justify-content: center; }
+
+.screen-foot {
+  flex: none;
+  padding: 10px var(--pad) calc(10px + var(--safe-b));
+  background: var(--bg);
+  box-shadow: 0 -1px 0 0 transparent;
+  transition: box-shadow .18s ease;
+}
+/* Same rule as the bar: the separator only shows when there is content
+   running underneath it. */
+.screen-foot.is-lifted {
+  background: var(--panel);
+  box-shadow: 0 -1px 0 0 var(--line);
+}
+
+.screen-foot .wrap {
+  padding: 0;
+  gap: 6px;
+  max-width: 480px;
+}
+
+/* ------------------------------------------------------------- controls */
+
+/* The shared .wide is also the live view's SAS card buttons, which are drawn
+   for a dark overlay — so the app-screen sizing is scoped and never reaches
+   them. 52px tall, sentence case: the native pill is primary() with dp(18)
+   /dp(15) padding and Type.PILL, not a tracked-out all-caps web button. */
+.screen.app .wide,
+.sheet .wide {
+  min-height: 52px;
+  padding: 15px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .14s ease, border-color .15s ease, color .15s ease,
+              filter .12s ease, transform .13s cubic-bezier(.2, .8, .3, 1);
+}
+.screen.app .wide:active,
+.sheet .wide:active { transform: scale(.97); }
+.screen.app .wide.primary:active,
+.sheet .wide.primary:active { filter: brightness(.94); }
+.screen.app .wide:not(.primary):active,
+.sheet .wide:not(.primary):active {
+  background: color-mix(in srgb, var(--berry) 12%, var(--raise));
+  border-color: var(--berry);
+}
+
+/* The quiet second action under a primary — "I've set this up before",
+   "Set up later". A native link() row: no border, full width, 48dp tall. */
+.linkbtn {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  background: none;
+  border: 0;
+  border-radius: var(--r-ctl);
+  color: var(--dim);
+  font-size: 15px;
+  letter-spacing: .02em;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .14s ease, color .14s ease,
+              transform .13s cubic-bezier(.2, .8, .3, 1);
+}
+.linkbtn:hover { color: var(--berry); }
+.linkbtn:active {
+  background: color-mix(in srgb, var(--berry) 10%, transparent);
+  color: var(--berry);
+  transform: scale(.985);
+}
 
 .block { display: flex; flex-direction: column; gap: 12px; }
 
@@ -1356,138 +1671,338 @@ body.dimmed #theme-toggle { display: none; }
 
 .block-head h2 {
   margin: 0;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: .18em;
   text-transform: uppercase;
   color: var(--dim);
 }
 
-.mini {
-  margin-left: auto;
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: 2px;
-  padding: 5px 10px;
-  font-size: 11px;
-  letter-spacing: .08em;
-  color: var(--fg);
+.hero-title {
+  margin: 0;
+  font-size: 27px;               /* Type.TITLE */
+  font-weight: 600;
+  line-height: 1.2;
 }
-.mini:hover { border-color: var(--berry); color: var(--berry); }
 
-.ch-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.join-seal {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 26px -14px rgba(12, 13, 18, .4);
+}
+.join-mark { width: 60px; height: 60px; margin: 0; border-radius: 15px; display: block; }
+
+/* --------------------------------------------------------- channel list */
+
+.ch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
 .ch-row {
   display: flex;
   align-items: stretch;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--berry-d);
-  border-radius: 3px;
+  border-radius: var(--r-card);
   overflow: hidden;
+  transition: border-color .16s ease, box-shadow .16s ease,
+              transform .13s cubic-bezier(.2, .8, .3, 1);
 }
-.ch-row:hover { border-left-color: var(--berry); }
+.ch-row:hover { border-color: color-mix(in srgb, var(--berry) 55%, var(--line)); }
+/* :active matches the ancestors of the pressed button too, so the whole card
+   dips as one object — which is what a list row does on a phone. */
+.ch-row:active { transform: scale(.985); }
 
 .ch-open {
   flex: 1;
+  min-width: 0;
   display: grid;
-  gap: 3px;
-  justify-items: start;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0 13px;
   text-align: left;
-  padding: 13px 15px;
+  padding: 13px 4px 13px 14px;
+  min-height: 76px;
   background: none;
   border: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .14s ease;
 }
-.ch-open:hover { background: var(--raise); }
-.ch-open strong { font-size: 15px; font-weight: 600; }
+.ch-open:active { background: color-mix(in srgb, var(--berry) 9%, transparent); }
 
-.ch-fp { font-size: 10.5px; letter-spacing: .1em; color: var(--dim); }
-
-.ch-icon {
+.ch-avatar {
+  grid-column: 1;
+  grid-row: 1 / span 3;
   width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-ctl);
+  background: color-mix(in srgb, var(--berry) 15%, var(--panel));
+  color: var(--berry);
+}
+.ch-avatar svg { width: 24px; height: 24px; fill: currentColor; display: block; }
+
+.ch-open strong {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 16.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The one thing this row exists to say: tapping it is how you pick a job. */
+.ch-cue {
+  grid-column: 2;
+  grid-row: 2;
+  font-size: 12.5px;
+  letter-spacing: .02em;
+  color: var(--berry);
+}
+
+.ch-fp {
+  grid-column: 2;
+  grid-row: 3;
+  font-size: 11px;
+  letter-spacing: .08em;
+  color: var(--dim);
+}
+
+.ch-chev {
+  grid-column: 3;
+  grid-row: 1 / span 3;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  color: var(--dim);
+  transition: color .15s ease, transform .13s cubic-bezier(.2, .8, .3, 1);
+}
+.ch-chev svg {
+  width: 15px; height: 15px;
+  fill: none; stroke: currentColor; stroke-width: 2.4;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.ch-row:hover .ch-chev { color: var(--berry); transform: translateX(2px); }
+
+/* One deliberate trailing control instead of two 15px glyphs. It opens the
+   #row-menu sheet — rename / pairing code / delete. */
+.ch-more {
+  flex: none;
+  width: 50px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   background: none;
   border: 0;
   border-left: 1px solid var(--line);
   color: var(--dim);
-  font-size: 15px;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .14s ease, color .14s ease;
 }
-.ch-icon:hover { background: var(--raise); color: var(--berry); }
-.ch-icon.danger:hover { color: var(--live); }
+.ch-more svg { width: 20px; height: 20px; fill: currentColor; display: block; }
+.ch-more:hover { background: var(--raise); color: var(--berry); }
+.ch-more:active { background: color-mix(in srgb, var(--berry) 16%, transparent); color: var(--berry); }
 
-.empty, .hint {
-  margin: 0;
+/* ---------------------------------------------------------- empty state */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 9px;
+  padding: 10px 6px 2px;
+}
+.empty-state p { margin: 0; font-size: 17px; font-weight: 600; }
+.empty-state span {
+  max-width: 34ch;
   color: var(--dim);
   font-size: 14px;
   line-height: 1.6;
 }
+.empty-state .wide { margin-top: 8px; max-width: 280px; }
 
-.join-body { margin: 0; font-size: 15px; }
-.join-body b { color: var(--berry); }
+/* A cat asleep on the empty list — the restrained cousin of the native
+   PlayfulSceneView that idles over the sessions home. */
+.doze { width: min(62%, 186px); height: auto; display: block; }
+.doze * { transform-box: fill-box; }
 
-.wide {
-  width: 100%;
-  padding: 14px 16px;
-  background: var(--raise);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  font-size: 14.5px;
-  letter-spacing: .1em;
-  text-transform: uppercase;
+.doze-shadow { fill: color-mix(in srgb, var(--fg) 9%, transparent); }
+.doze-body, .doze-head {
+  fill: color-mix(in srgb, var(--berry) 15%, var(--panel));
+  stroke: color-mix(in srgb, var(--berry) 60%, transparent);
+  stroke-width: 2.4;
+  stroke-linejoin: round;
 }
-.wide:hover { border-color: var(--berry); color: var(--berry); }
-.wide.primary { background: var(--berry); color: var(--on-accent); border-color: var(--berry); font-weight: 600; }
-.wide.primary:hover { filter: brightness(1.06); }
-.wide.ghost { background: none; }
-
-.warn {
-  margin: 0;
-  padding: 10px 12px;
-  border-left: 3px solid var(--berry);
-  background: color-mix(in srgb, var(--live) 12%, var(--panel));
-  font-size: 12px;
-  line-height: 1.55;
+.doze-line, .doze-tail {
+  fill: none;
+  stroke: color-mix(in srgb, var(--berry) 60%, transparent);
+  stroke-width: 2.4;
+  stroke-linecap: round;
 }
+.doze-tail { stroke-width: 5; }
 
-/* sheets */
+.doze-cat { transform-origin: 50% 100%; animation: doze-breathe 4.4s ease-in-out infinite; }
+.doze-tail { transform-origin: 0% 100%; animation: doze-flick 6s ease-in-out infinite; }
+
+.doze-z text {
+  fill: var(--berry);
+  font-family: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  opacity: 0;
+}
+.doze-z .z1 { animation: doze-z 3.6s ease-in-out infinite; }
+.doze-z .z2 { animation: doze-z 3.6s ease-in-out infinite .5s; }
+.doze-z .z3 { animation: doze-z 3.6s ease-in-out infinite 1s; }
+
+@keyframes doze-breathe {
+  0%, 100% { transform: scaleY(1); }
+  50%      { transform: scaleY(1.025); }
+}
+@keyframes doze-flick {
+  0%, 78%, 100% { transform: rotate(0deg); }
+  86%           { transform: rotate(-9deg); }
+  93%           { transform: rotate(4deg); }
+}
+@keyframes doze-z {
+  0%   { opacity: 0;   transform: translateY(4px) scale(.8); }
+  30%  { opacity: .55; }
+  70%  { opacity: .35; }
+  100% { opacity: 0;   transform: translateY(-8px) scale(1.05); }
+}
+/* Collapsed loops stop on their last frame, which for the z's is invisible.
+   Park them somewhere legible instead. */
+[data-motion="off"] .doze-z text { opacity: .4; transform: none; }
+
+/* --------------------------------------------------------------- sheets */
 
 .sheet {
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: #0c0d12e6;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  overflow-y: auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  background: color-mix(in srgb, #0c0d12 66%, transparent);
+  opacity: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity .22s ease;
 }
+.sheet.is-open { opacity: 1; }
 
 .sheet-card {
-  width: min(420px, 100%);
+  width: min(480px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 20px;
+  gap: 13px;
+  padding: 7px 20px calc(20px + var(--safe-b));
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-bottom: 0;
+  border-radius: 22px 22px 0 0;
+  box-shadow: 0 -16px 40px -20px rgba(0, 0, 0, .5);
+  transform: translate3d(0, 100%, 0);
+  transition: transform .27s cubic-bezier(.22, .9, .28, 1);
+}
+.sheet.is-open .sheet-card { transform: translate3d(0, 0, 0); }
+
+.sheet-grip {
+  flex: none;
+  align-self: center;
+  width: 38px;
+  height: 4px;
+  margin: 3px 0 3px;
+  border-radius: 99px;
+  background: var(--line);
 }
 
 .sheet-card h2 {
   margin: 0;
-  font-size: 13px;
-  letter-spacing: .18em;
-  text-transform: uppercase;
-  color: var(--berry);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg);
 }
 
-.sheet-actions { display: flex; gap: 8px; }
+.sheet-actions { display: flex; gap: 9px; margin-top: 2px; }
+.sheet-actions .wide { flex: 1; }
+
+/* On a tablet or a desktop window a bottom sheet reads as a stranded strip,
+   so past the phone width it becomes a centred dialog again. */
+@media (min-width: 720px) {
+  .sheet { align-items: center; padding: 20px; }
+  .sheet-card {
+    border-bottom: 1px solid var(--line);
+    border-radius: var(--r-card);
+    padding-bottom: 20px;
+    transform: translate3d(0, 12px, 0) scale(.985);
+  }
+  .sheet.is-open .sheet-card { transform: none; }
+  .sheet-grip { display: none; }
+}
+
+/* the channel row's overflow menu */
+
+.menu-card { gap: 9px; }
+.menu-list { display: flex; flex-direction: column; gap: 2px; margin: 0 -8px; }
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 54px;
+  padding: 8px 12px;
+  background: none;
+  border: 0;
+  border-radius: var(--r-ctl);
+  text-align: left;
+  font-size: 16px;
+  color: var(--fg);
+  -webkit-tap-highlight-color: transparent;
+  transition: background .14s ease, transform .13s cubic-bezier(.2, .8, .3, 1);
+}
+.menu-item:hover { background: var(--raise); }
+.menu-item:active {
+  background: color-mix(in srgb, var(--berry) 13%, transparent);
+  transform: scale(.985);
+}
+.menu-item.danger { color: var(--live); }
+
+.menu-ico { flex: none; width: 24px; height: 24px; display: grid; place-items: center; color: var(--dim); }
+.menu-item.danger .menu-ico { color: var(--live); }
+.menu-ico svg {
+  width: 21px; height: 21px;
+  fill: none; stroke: currentColor; stroke-width: 1.9;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* --------------------------------------------------------- form fields */
 
 .field select {
   width: 100%;
-  padding: 11px 12px;
+  min-height: 50px;
+  padding: 12px 13px;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--r-ctl);
   color: var(--fg);
   font: inherit;
 }
@@ -1495,19 +2010,21 @@ body.dimmed #theme-toggle { display: none; }
 .qr {
   display: block;
   width: 100%;
-  max-width: 300px;
+  max-width: 292px;
   height: auto;
   margin: 0 auto;
-  border-radius: 3px;
+  padding: 14px;
+  background: #fff;
+  border-radius: var(--r-card);
   image-rendering: pixelated;
 }
 
 .pair-url {
   display: block;
-  padding: 9px 11px;
+  padding: 10px 12px;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--r-ctl);
   font-size: 10.5px;
   line-height: 1.5;
   color: var(--dim);
@@ -1515,34 +2032,56 @@ body.dimmed #theme-toggle { display: none; }
   user-select: all;
 }
 
+/* the scanner's viewfinder: a real reticle over a dimmed frame */
+
+.scan-frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: #000;
+}
+
 .scan-video {
+  display: block;
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
   background: #000;
-  border: 1px solid var(--line);
-  border-radius: 3px;
 }
 
-/* ================= v3: first-run welcome + role choice ================= */
+.scan-reticle {
+  position: absolute;
+  inset: 15%;
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--berry) 85%, transparent),
+    0 0 0 100vmax rgba(0, 0, 0, .3);
+  animation: reticle 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes reticle {
+  0%, 100% { opacity: .6; }
+  50%      { opacity: 1; }
+}
 
-.center-self { align-self: center; }
+/* ================= welcome hero + the two role pickers ================= */
 
 .welcome-lede {
   margin: 0;
-  max-width: 34ch;
+  max-width: 32ch;
   color: var(--dim);
-  font-size: 15px;
-  line-height: 1.65;
+  font-size: 16px;                /* Type.BODY */
+  line-height: 1.45;              /* Type.LEAD_BODY */
 }
 
 /* animated cat + dog */
 
 .scene {
-  width: min(78vw, 340px);
+  width: min(74vw, 300px);
   height: auto;
   display: block;
-  margin: 0 auto 4px;
+  margin: 0 auto;
 }
 
 .scene * { transform-box: fill-box; }
@@ -1583,12 +2122,58 @@ body.dimmed #theme-toggle { display: none; }
   93%           { transform: rotate(-7deg); }
 }
 
-/* role cards on the setup screen */
+/* the role picker */
 
-.role-card.big { padding: 20px; gap: 7px; }
+.role-card.big { padding: 18px; }
 
-.role-emoji { display: block; margin-bottom: 4px; }
-.role-emoji svg { width: 40px; height: 40px; display: block; }
+.role-emoji { display: block; margin-bottom: 6px; }
+.role-emoji svg { width: 42px; height: 42px; display: block; }
+
+/* The silhouette tucked in the corner the header row leaves empty — the CSS
+   twin of CritterSilhouetteView on the native role cards. It idles: a slow
+   breath and, once in a while, a head-tilt. */
+.role-critter {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 62px;
+  height: 62px;
+  color: var(--acc);
+  opacity: .17;
+  pointer-events: none;
+  transform-origin: 60% 80%;
+  animation: critter-idle 7.5s ease-in-out infinite;
+}
+.role-critter svg { width: 100%; height: 100%; fill: currentColor; display: block; }
+#setup-handheld .role-critter, #pick-viewer .role-critter { animation-delay: 2.6s; }
+
+@keyframes critter-idle {
+  0%, 100% { transform: translateY(0)     rotate(0deg); }
+  45%      { transform: translateY(-2.5px) rotate(0deg); }
+  84%      { transform: translateY(0)     rotate(0deg); }
+  90%      { transform: translateY(0)     rotate(-5deg); }
+  96%      { transform: translateY(0)     rotate(2deg); }
+}
+
+.role-go {
+  grid-column: 2;
+  /* The card has no explicit rows, so `1 / -1` would resolve against the
+     explicit grid and collapse to a single row — span the four auto-placed
+     children of column 1 instead. */
+  grid-row: 1 / span 4;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  color: var(--dim);
+  transition: color .15s ease, transform .13s cubic-bezier(.2, .8, .3, 1);
+}
+.role-go svg {
+  width: 15px; height: 15px;
+  fill: none; stroke: currentColor; stroke-width: 2.4;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.role-card:hover .role-go { color: var(--acc); transform: translateX(2px); }
 
 /* watcher "show this code" screen */
 
@@ -1604,6 +2189,99 @@ body.dimmed #theme-toggle { display: none; }
 }
 
 .wp-wait .spinner i { width: 4px; height: 16px; }
+
+.wp-share {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+}
+.wp-share-label {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* --------------------------------------------- "pairing with the app?"
+   A disclosure, shut by default, on both screens that show a pairing link.
+   The Android app cannot open a web link, so this is where the browser hands
+   over the one thing the two builds must agree on: the relay address. Closed
+   it is a single tappable row (48px, the same target as .linkbtn); open it is
+   a hairline-boxed card in the sheet's own idiom. */
+.relay-hint {
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: none;      /* the nested address block is the one that gets a fill */
+  text-align: left;
+}
+
+.relay-hint > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 12px 14px;
+  border-radius: var(--r-ctl);
+  color: var(--dim);
+  font-size: 14px;
+  cursor: pointer;
+  list-style: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.relay-hint > summary::-webkit-details-marker { display: none; }
+
+/* The twisty, drawn rather than borrowed, so it turns with the disclosure. */
+.relay-hint > summary::after {
+  content: "";
+  flex: none;
+  margin-left: auto;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .16s cubic-bezier(.2, .8, .3, 1);
+}
+.relay-hint[open] > summary::after { transform: rotate(-135deg) translate(-2px, -2px); }
+
+.relay-hint > summary:hover { color: var(--berry); }
+.relay-hint[open] > summary { color: var(--fg); }
+
+.relay-hint-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 14px 14px;
+}
+
+.relay-hint-body p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+.relay-hint-body .pair-url { font-size: 12px; user-select: all; }
+
+/* ------------------------------------------------- hold still, part two
+   The global [data-motion="off"] block collapses every duration; these are
+   the resting states that would otherwise be collapsed to somewhere wrong,
+   plus the press dips, which cannot spring back once the transition is gone. */
+[data-motion="off"] .role-critter,
+[data-motion="off"] .sheet-card { transform: none; }
+[data-motion="off"] .role-card:active,
+[data-motion="off"] .ch-row:active,
+[data-motion="off"] .ch-chev,
+[data-motion="off"] .role-go,
+[data-motion="off"] .menu-item:active,
+[data-motion="off"] .linkbtn:active,
+[data-motion="off"] .appbar-back:active,
+[data-motion="off"] .appbar-action:active,
+[data-motion="off"] .screen.app .wide:active,
+[data-motion="off"] .sheet .wide:active { transform: none; }
 
 /* ---------------------------------------------------- theme toggle (browser) */
 :root { color-scheme: light; }

@@ -19,8 +19,14 @@
 </head>
 <body>
 
-<!-- ========================== WELCOME ========================== -->
-<main id="welcome" class="screen pad center" hidden>
+<!-- ========================== WELCOME ==========================
+     Every screen before the call is laid out the way the native shell lays
+     one out (MainActivity: column() + mountCentered() + a pinned primary()):
+     an optional app bar, one scrolling body, and the primary action parked in
+     thumb reach at the bottom above the gesture inset. -->
+<main id="welcome" class="screen app hero" tabindex="-1" hidden>
+  <div class="screen-body">
+   <div class="wrap">
   <svg class="scene" viewBox="0 0 260 170" aria-hidden="true">
     <line x1="30" y1="146" x2="230" y2="146" stroke="#ece0da" stroke-width="2" stroke-linecap="round"/>
 
@@ -71,124 +77,202 @@
 
   <p class="welcome-lede">Keep an eye on your pet from anywhere in the house.
     Two phones on your Wi-Fi — no accounts, nothing to set up.</p>
+   </div>
+  </div>
 
-  <button id="welcome-go" class="wide primary" type="button">Get started</button>
-  <button id="welcome-skip" class="back center-self" type="button">I've set this up before</button>
+  <div class="screen-foot">
+    <div class="wrap">
+      <button id="welcome-go" class="wide primary" type="button">Get started</button>
+      <button id="welcome-skip" class="linkbtn" type="button">I've set this up before</button>
+    </div>
+  </div>
 </main>
 
 <!-- ======================= SETUP · ROLE ======================== -->
-<main id="setup-role" class="screen pad" hidden>
-  <button id="setup-back" class="back" type="button">← Back</button>
-
-  <header class="brand small">
-    <div>
+<main id="setup-role" class="screen app" tabindex="-1" hidden>
+  <header class="appbar">
+    <button id="setup-back" class="appbar-back" type="button" aria-label="Back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4.5 7.8 12 15 19.5"/></svg>
+    </button>
+    <div class="appbar-titles">
       <h1>This device</h1>
-      <p class="sub">Which job is it doing?</p>
+      <p class="appbar-sub">Which job is it doing?</p>
     </div>
+    <span class="appbar-slot"></span>
   </header>
 
-  <div class="roles">
-    <button id="setup-watcher" class="role-card big" type="button">
-      <span class="role-emoji" aria-hidden="true">
-        <svg viewBox="0 0 48 48">
-          <rect x="12" y="9" width="13" height="7" rx="3" fill="var(--berry)"/>
-          <rect x="5" y="14" width="38" height="25" rx="6" fill="var(--berry)"/>
-          <circle cx="24" cy="26.5" r="8" fill="var(--panel)"/>
-          <circle cx="24" cy="26.5" r="4.2" fill="var(--berry)"/>
-          <circle cx="21.6" cy="24.1" r="1.5" fill="var(--panel)"/>
-          <circle cx="37" cy="19.5" r="1.8" fill="var(--panel)"/>
-        </svg>
-      </span>
-      <span class="role-tag">The Monitor</span>
-      <strong>Stays with your pet</strong>
-      <em>Plug it in and point the camera. It sends video and sound, answers on
-        its own, and shows a code for the Viewer to scan.</em>
-    </button>
+  <div class="screen-body">
+   <div class="wrap">
+    <div class="roles">
+      <button id="setup-watcher" class="role-card big" type="button">
+        <span class="role-critter" aria-hidden="true">
+          <svg viewBox="0 0 64 64">
+            <path d="M16 27 L12.5 7 L29 18 Z M48 27 L51.5 7 L35 18 Z"/>
+            <circle cx="32" cy="35" r="18"/>
+          </svg>
+        </span>
+        <span class="role-emoji" aria-hidden="true">
+          <svg viewBox="0 0 48 48">
+            <rect x="12" y="9" width="13" height="7" rx="3" fill="var(--acc)"/>
+            <rect x="5" y="14" width="38" height="25" rx="6" fill="var(--acc)"/>
+            <circle cx="24" cy="26.5" r="8" fill="var(--panel)"/>
+            <circle cx="24" cy="26.5" r="4.2" fill="var(--acc)"/>
+            <circle cx="21.6" cy="24.1" r="1.5" fill="var(--panel)"/>
+            <circle cx="37" cy="19.5" r="1.8" fill="var(--panel)"/>
+          </svg>
+        </span>
+        <span class="role-tag">The Monitor</span>
+        <strong>Stays with your pet</strong>
+        <em>Plug it in and point the camera. It sends video and sound, answers on
+          its own, and shows a code for the Viewer to scan.</em>
+        <span class="role-go" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9 4.5 16.2 12 9 19.5"/></svg>
+        </span>
+      </button>
 
-    <button id="setup-handheld" class="role-card big" type="button">
-      <span class="role-emoji" aria-hidden="true">
-        <svg viewBox="0 0 48 48">
-          <rect x="13" y="4" width="22" height="40" rx="6" fill="var(--berry)"/>
-          <rect x="16.5" y="9.5" width="15" height="26" rx="3" fill="var(--panel)"/>
-          <rect x="20.5" y="39.2" width="7" height="2" rx="1" fill="var(--panel)"/>
-          <circle cx="24" cy="6.6" r="1" fill="var(--panel)"/>
-        </svg>
-      </span>
-      <span class="role-tag">The Viewer</span>
-      <strong>Comes with you</strong>
-      <em>See what the Monitor sees, listen in, hold to talk back, ring a chime,
-        or save a snapshot.</em>
-    </button>
+      <button id="setup-handheld" class="role-card big" type="button">
+        <span class="role-critter" aria-hidden="true">
+          <svg viewBox="0 0 64 64">
+            <path d="M16 19 C 8 23 8 45 18 47 C 21 38 19 25 22 21 Z
+                     M48 19 C 56 23 56 45 46 47 C 43 38 45 25 42 21 Z"/>
+            <circle cx="32" cy="33" r="17"/>
+          </svg>
+        </span>
+        <span class="role-emoji" aria-hidden="true">
+          <svg viewBox="0 0 48 48">
+            <rect x="13" y="4" width="22" height="40" rx="6" fill="var(--acc)"/>
+            <rect x="16.5" y="9.5" width="15" height="26" rx="3" fill="var(--panel)"/>
+            <rect x="20.5" y="39.2" width="7" height="2" rx="1" fill="var(--panel)"/>
+            <circle cx="24" cy="6.6" r="1" fill="var(--panel)"/>
+          </svg>
+        </span>
+        <span class="role-tag">The Viewer</span>
+        <strong>Comes with you</strong>
+        <em>See what the Monitor sees, listen in, hold to talk back, ring a chime,
+          or save a snapshot.</em>
+        <span class="role-go" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9 4.5 16.2 12 9 19.5"/></svg>
+        </span>
+      </button>
+    </div>
+
+    <p id="setup-note" class="note" hidden></p>
+   </div>
   </div>
-
-  <p id="setup-note" class="note" hidden></p>
 </main>
 
 <!-- ==================== SETUP · WATCHER QR ==================== -->
-<main id="watch-pair" class="screen pad center" hidden>
-  <header class="brand small">
-    <div>
+<main id="watch-pair" class="screen app" tabindex="-1" hidden>
+  <header class="appbar">
+    <button id="wp-back" class="appbar-back" type="button" aria-label="Back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4.5 7.8 12 15 19.5"/></svg>
+    </button>
+    <div class="appbar-titles">
       <h1>The Monitor</h1>
-      <p class="sub">Show this to the Viewer</p>
+      <p class="appbar-sub">Show this to the Viewer</p>
     </div>
+    <span class="appbar-slot"></span>
   </header>
 
-  <canvas id="wp-qr" class="qr" width="300" height="300"></canvas>
+  <div class="screen-body">
+   <div class="wrap center-text">
+    <canvas id="wp-qr" class="qr" width="300" height="300"></canvas>
 
-  <p id="wp-warn" class="warn" hidden></p>
+    <p id="wp-warn" class="warn" hidden></p>
 
-  <p class="hint">On the other phone, open Tawny, choose <b>The Viewer</b>,
-    and point its camera at this code.</p>
+    <p class="hint">On the other phone, open Tawny, choose <b>The Viewer</b>,
+      and point its camera at this code.</p>
 
-  <div class="wp-wait">
-    <span class="spinner" aria-hidden="true"><i></i><i></i><i></i></span>
-    <span id="wp-status">Waiting for the Viewer</span>
+    <div class="wp-share">
+      <p class="wp-share-label">Can't scan? Send this link instead</p>
+      <code id="wp-url" class="pair-url"></code>
+      <button id="wp-copy" class="wide ghost" type="button">Copy pairing link</button>
+
+      <details id="wp-relay" class="relay-hint" hidden>
+        <summary>Pairing with the Tawny app?</summary>
+        <div class="relay-hint-body">
+          <p>The app can't open a web link. On that phone, open Tawny, press and
+            hold the version number at the bottom of the first screen, then choose
+            <b>Servers</b> and paste this into <b>Rendezvous</b>.</p>
+          <code id="wp-relay-addr" class="pair-url"></code>
+          <button id="wp-relay-copy" class="wide ghost" type="button">Copy server address</button>
+          <p class="fine">Both devices have to use the same server to find each other.</p>
+        </div>
+      </details>
+    </div>
+
+    <div class="wp-wait">
+      <span class="spinner" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span id="wp-status">Waiting for the Viewer</span>
+    </div>
+   </div>
   </div>
 
-  <button id="wp-start" class="wide primary" type="button">Start watching now</button>
-  <button id="wp-later" class="back center-self" type="button">Set up later</button>
+  <div class="screen-foot">
+    <div class="wrap">
+      <button id="wp-start" class="wide primary" type="button">Start watching now</button>
+      <button id="wp-later" class="linkbtn" type="button">Set up later</button>
+    </div>
+  </div>
 </main>
 
 <!-- ========================== CHANNELS ========================== -->
-<main id="channels" class="screen pad" hidden>
-  <header class="brand">
-    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-      <path fill-rule="evenodd" d="M5 3 C 2 10 3 18 13 18 C 12 11 10 6 5 3 Z
-        M27 3 C 30 10 29 18 19 18 C 20 11 22 6 27 3 Z
-        M16 9 C 24 9 29 14 29 21 C 29 27 24 31 16 31 C 8 31 3 27 3 21 C 3 14 8 9 16 9 Z
-        M11 19 m-3.4 0 a3.4 3.4 0 1 0 6.8 0 a3.4 3.4 0 1 0 -6.8 0 Z
-        M21 19 m-3.4 0 a3.4 3.4 0 1 0 6.8 0 a3.4 3.4 0 1 0 -6.8 0 Z"/>
-    </svg>
-    <div>
-      <h1>Tawny</h1>
-      <p class="sub">Pet Monitor</p>
+<main id="channels" class="screen app" tabindex="-1" hidden>
+  <header class="appbar">
+    <img class="appbar-mark" src="icon.svg" alt="" width="30" height="30">
+    <div class="appbar-titles">
+      <h1 class="wordmark">Tawny</h1>
+      <p class="appbar-sub">Pet Monitor</p>
     </div>
+    <button id="ch-add" class="appbar-action" type="button" aria-label="New channel"
+            title="New channel">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg>
+    </button>
   </header>
 
-  <section class="block">
-    <div class="block-head">
-      <h2>Channels</h2>
-      <button id="ch-add" class="mini" type="button">+ New channel</button>
-    </div>
+  <div class="screen-body">
+   <div class="wrap">
+    <section class="block">
+      <div class="block-head">
+        <h2>Channels</h2>
+      </div>
 
-    <ul id="ch-list" class="ch-list"></ul>
+      <ul id="ch-list" class="ch-list"></ul>
 
-    <p id="ch-empty" class="empty" hidden>
-      No channels yet. Set up the device that stays with your pet as The Monitor,
-      then scan its pairing code here.
-    </p>
-  </section>
+      <div id="ch-empty" class="empty-state" hidden>
+        <svg class="doze" viewBox="0 0 160 110" aria-hidden="true">
+          <ellipse class="doze-shadow" cx="80" cy="93" rx="46" ry="7"/>
+          <g class="doze-cat">
+            <path class="doze-body" d="M34 92 C 30 66 48 54 74 56 C 104 58 124 70 126 84 C 127 90 120 92 112 92 Z"/>
+            <circle class="doze-head" cx="44" cy="66" r="17"/>
+            <path class="doze-body" d="M32 54 L29 40 L42 50 Z M56 54 L59 40 L46 50 Z"/>
+            <path class="doze-line" d="M36 68 q4 4 8 0" />
+            <path class="doze-line" d="M48 68 q4 4 8 0" />
+            <path class="doze-tail" d="M126 86 C 140 84 142 70 132 64"/>
+          </g>
+          <g class="doze-z">
+            <text x="98" y="42" class="z1">z</text>
+            <text x="112" y="30" class="z2">z</text>
+            <text x="126" y="20" class="z3">z</text>
+          </g>
+        </svg>
+        <p>Nothing paired yet</p>
+        <span>Set up the phone that stays with your pet as The Monitor, then scan
+          its pairing code on this one.</span>
+        <button id="ch-empty-go" class="wide primary" type="button">Set this up</button>
+      </div>
+    </section>
 
-  <section class="block">
-    <div class="block-head"><h2>Join a Monitor</h2></div>
-    <p class="hint">Point your phone's camera at the pairing code shown by The
-      Monitor. It opens this page already set up.</p>
-    <button id="ch-scan" class="wide" type="button" hidden>Scan pairing code</button>
-  </section>
+    <section class="block">
+      <div class="block-head"><h2>Join a Monitor</h2></div>
+      <p class="hint">Point your phone's camera at the pairing code shown by The
+        Monitor. It opens this page already set up.</p>
+      <button id="ch-scan" class="wide" type="button" hidden>Scan pairing code</button>
+    </section>
 
-  <p id="ch-note" class="note" hidden></p>
+    <p id="ch-note" class="note" hidden></p>
 
-  <footer class="fine">
+    <footer class="fine">
     Video and audio travel straight between your devices. The server only
     introduces the two phones to each other, and never gets the key that
     unlocks the picture.
@@ -232,54 +316,103 @@
         </span>
       </a>
     </span>
-  </footer>
+    </footer>
+   </div>
+  </div>
 </main>
 
 <!-- ============================ ROLE ============================ -->
-<main id="role" class="screen pad" hidden>
-  <button id="role-back" class="back" type="button">← Channels</button>
-
-  <header class="brand small">
-    <div>
+<main id="role" class="screen app" tabindex="-1" hidden>
+  <header class="appbar">
+    <button id="role-back" class="appbar-back" type="button" aria-label="Back to channels">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4.5 7.8 12 15 19.5"/></svg>
+    </button>
+    <div class="appbar-titles">
       <h1 id="role-name">Living room</h1>
-      <p class="sub">Pick this device's job</p>
+      <p class="appbar-sub">Pick this device's job</p>
     </div>
+    <span class="appbar-slot"></span>
   </header>
 
-  <div class="roles">
-    <button id="pick-station" class="role-card" type="button">
-      <span class="role-tag">The Monitor</span>
-      <strong>Leave it with the pet</strong>
-      <em>Sends camera and microphone, answers on its own, plays chimes, and
-        shows a pairing code for your phone.</em>
-    </button>
+  <div class="screen-body">
+   <div class="wrap">
+    <div class="roles">
+      <button id="pick-station" class="role-card" type="button">
+        <span class="role-critter" aria-hidden="true">
+          <svg viewBox="0 0 64 64">
+            <path d="M16 27 L12.5 7 L29 18 Z M48 27 L51.5 7 L35 18 Z"/>
+            <circle cx="32" cy="35" r="18"/>
+          </svg>
+        </span>
+        <span class="role-emoji" aria-hidden="true">
+          <svg viewBox="0 0 48 48">
+            <rect x="12" y="9" width="13" height="7" rx="3" fill="var(--acc)"/>
+            <rect x="5" y="14" width="38" height="25" rx="6" fill="var(--acc)"/>
+            <circle cx="24" cy="26.5" r="8" fill="var(--panel)"/>
+            <circle cx="24" cy="26.5" r="4.2" fill="var(--acc)"/>
+            <circle cx="21.6" cy="24.1" r="1.5" fill="var(--panel)"/>
+            <circle cx="37" cy="19.5" r="1.8" fill="var(--panel)"/>
+          </svg>
+        </span>
+        <span class="role-tag">The Monitor</span>
+        <strong>Leave it with the pet</strong>
+        <em>Sends camera and microphone, answers on its own, plays chimes, and
+          shows a pairing code for your phone.</em>
+        <span class="role-go" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9 4.5 16.2 12 9 19.5"/></svg>
+        </span>
+      </button>
 
-    <button id="pick-viewer" class="role-card" type="button">
-      <span class="role-tag">The Viewer</span>
-      <strong>Keep it with you</strong>
-      <em>Watch and listen, hold to talk, ring a chime, save a snapshot.</em>
-    </button>
+      <button id="pick-viewer" class="role-card" type="button">
+        <span class="role-critter" aria-hidden="true">
+          <svg viewBox="0 0 64 64">
+            <path d="M16 19 C 8 23 8 45 18 47 C 21 38 19 25 22 21 Z
+                     M48 19 C 56 23 56 45 46 47 C 43 38 45 25 42 21 Z"/>
+            <circle cx="32" cy="33" r="17"/>
+          </svg>
+        </span>
+        <span class="role-emoji" aria-hidden="true">
+          <svg viewBox="0 0 48 48">
+            <rect x="13" y="4" width="22" height="40" rx="6" fill="var(--acc)"/>
+            <rect x="16.5" y="9.5" width="15" height="26" rx="3" fill="var(--panel)"/>
+            <rect x="20.5" y="39.2" width="7" height="2" rx="1" fill="var(--panel)"/>
+            <circle cx="24" cy="6.6" r="1" fill="var(--panel)"/>
+          </svg>
+        </span>
+        <span class="role-tag">The Viewer</span>
+        <strong>Keep it with you</strong>
+        <em>Watch and listen, hold to talk, ring a chime, save a snapshot.</em>
+        <span class="role-go" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9 4.5 16.2 12 9 19.5"/></svg>
+        </span>
+      </button>
+    </div>
+
+    <p id="role-note" class="note" hidden></p>
+   </div>
   </div>
-
-  <p id="role-note" class="note" hidden></p>
 </main>
 
 <!-- ============================ JOIN ============================ -->
-<main id="join" class="screen pad center" hidden>
-  <header class="brand">
-    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-      <path fill-rule="evenodd" d="M5 3 C 2 10 3 18 13 18 C 12 11 10 6 5 3 Z
-        M27 3 C 30 10 29 18 19 18 C 20 11 22 6 27 3 Z
-        M16 9 C 24 9 29 14 29 21 C 29 27 24 31 16 31 C 8 31 3 27 3 21 C 3 14 8 9 16 9 Z
-        M11 19 m-3.4 0 a3.4 3.4 0 1 0 6.8 0 a3.4 3.4 0 1 0 -6.8 0 Z
-        M21 19 m-3.4 0 a3.4 3.4 0 1 0 6.8 0 a3.4 3.4 0 1 0 -6.8 0 Z"/>
-    </svg>
-    <div><h1>Tawny</h1><p class="sub">Pairing code accepted</p></div>
-  </header>
-  <p class="join-body">You're about to join <b id="join-name">the monitor</b> as
-    a handset.</p>
-  <button id="join-go" class="wide primary" type="button">Join now</button>
-  <button id="join-cancel" class="wide ghost" type="button">Not now</button>
+<main id="join" class="screen app hero" tabindex="-1" hidden>
+  <div class="screen-body">
+   <div class="wrap center-text">
+    <span class="join-seal" aria-hidden="true">
+      <img class="join-mark" src="icon.svg" alt="" width="60" height="60">
+    </span>
+    <h1 class="hero-title">Pairing code accepted</h1>
+    <p class="join-body">You're about to join <b id="join-name">the monitor</b> as
+      a handset.</p>
+    <p id="join-note" class="warn" hidden></p>
+   </div>
+  </div>
+
+  <div class="screen-foot">
+    <div class="wrap">
+      <button id="join-go" class="wide primary" type="button">Join now</button>
+      <button id="join-cancel" class="wide ghost" type="button">Not now</button>
+    </div>
+  </div>
 </main>
 
 <!-- ============================ LIVE ============================ -->
@@ -417,9 +550,13 @@
   </div>
 </main>
 
-<!-- ========================== PAIRING =========================== -->
+<!-- ========================== PAIRING ===========================
+     The three sheets below slide up from the bottom edge behind a fading
+     scrim, the way a phone presents a modal — see openSheet()/closeSheet()
+     in app.js and the `.sheet` block in style.css. -->
 <div id="pair" class="sheet" hidden>
-  <div class="sheet-card">
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-label="Pair a handset">
+    <span class="sheet-grip" aria-hidden="true"></span>
     <h2>Pair a handset</h2>
     <p class="hint">Point your phone's camera at this code. It opens Tawny
       already joined to <b id="pair-name"></b>.</p>
@@ -443,6 +580,18 @@
 
     <code id="pair-url" class="pair-url"></code>
 
+    <details id="pair-relay" class="relay-hint" hidden>
+      <summary>Pairing with the Tawny app?</summary>
+      <div class="relay-hint-body">
+        <p>The app can't open a web link. On that phone, open Tawny, press and
+          hold the version number at the bottom of the first screen, then choose
+          <b>Servers</b> and paste this into <b>Rendezvous</b>.</p>
+        <code id="pair-relay-addr" class="pair-url"></code>
+        <button id="pair-relay-copy" class="wide ghost" type="button">Copy server address</button>
+        <p class="fine">Both devices have to use the same server to find each other.</p>
+      </div>
+    </details>
+
     <div class="sheet-actions">
       <button id="pair-copy" class="wide ghost" type="button">Copy link</button>
       <button id="pair-close" class="wide" type="button">Done</button>
@@ -452,7 +601,8 @@
 
 <!-- ========================= NEW CHANNEL ======================== -->
 <div id="editor" class="sheet" hidden>
-  <div class="sheet-card">
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+    <span class="sheet-grip" aria-hidden="true"></span>
     <h2 id="editor-title">New channel</h2>
     <label class="field">
       <span>Name</span>
@@ -462,18 +612,51 @@
       Only devices you pair can join it.</p>
     <div class="sheet-actions">
       <button id="editor-cancel" class="wide ghost" type="button">Cancel</button>
-      <button id="editor-save" class="wide" type="button">Save</button>
+      <button id="editor-save" class="wide primary" type="button">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== CHANNEL ROW OVERFLOW ====================
+     The trailing "⋯" on a channel row opens this, rather than parking two
+     tiny glyph buttons on the row itself. Same shape as the native app's
+     long-press menu on a session card (MainActivity.showSessionsHome). -->
+<div id="row-menu" class="sheet" hidden>
+  <div class="sheet-card menu-card" role="dialog" aria-modal="true" aria-labelledby="row-menu-title">
+    <span class="sheet-grip" aria-hidden="true"></span>
+    <h2 id="row-menu-title">Channel</h2>
+    <div class="menu-list">
+      <button id="row-rename" class="menu-item" type="button">
+        <span class="menu-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4Z"/><path d="m14.5 5.5 4 4"/></svg>
+        </span>
+        <span>Rename</span>
+      </button>
+      <button id="row-delete" class="menu-item danger" type="button">
+        <span class="menu-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.5h4V7m-8 0 1 13h10l1-13"/></svg>
+        </span>
+        <span>Delete channel</span>
+      </button>
+    </div>
+    <div class="sheet-actions">
+      <button id="row-cancel" class="wide ghost" type="button">Cancel</button>
     </div>
   </div>
 </div>
 
 <!-- ========================== SCANNER =========================== -->
 <div id="scanner" class="sheet" hidden>
-  <div class="sheet-card">
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-label="Scan pairing code">
+    <span class="sheet-grip" aria-hidden="true"></span>
     <h2>Scan pairing code</h2>
-    <video id="scan-video" class="scan-video" playsinline autoplay muted></video>
+    <div class="scan-frame">
+      <video id="scan-video" class="scan-video" playsinline autoplay muted></video>
+      <span class="scan-reticle" aria-hidden="true"></span>
+    </div>
     <p class="hint" id="scan-hint">Hold the monitor's code in frame.</p>
     <div class="sheet-actions">
+      <button id="scan-paste" class="wide ghost" type="button">Paste link instead</button>
       <button id="scan-close" class="wide ghost" type="button">Cancel</button>
     </div>
   </div>
@@ -487,6 +670,9 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="i18n.js"></script>
+<!-- QR decoder for the in-browser scanner. Bundled (no CDN). Used only when the
+     native BarcodeDetector API is missing — i.e. desktop Chromium/Brave/Firefox. -->
+<script src="vendor/jsqr.js"></script>
 <script src="app.js" type="module"></script>
 </body>
 </html>
