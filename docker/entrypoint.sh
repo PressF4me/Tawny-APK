@@ -135,7 +135,17 @@ TS_AUTHKEY="${TS_AUTHKEY:-}"
 TS_HOSTNAME="${TS_HOSTNAME:-tawny}"
 TS_STATE_DIR="${TS_STATE_DIR:-/data/tailscale}"
 TS_HOST_SOCKET="${TS_HOST_SOCKET:-/var/run/tailscale/tailscaled.sock}"
-TS_SERVE="${TS_SERVE:-on}"
+# Normalised to exactly `on` or `off`, and exported, because server.js reads
+# the same variable and reads it the other way round: this script asks
+# `= on` (anything else is off) and server.js asks `!== 'off'` (anything else
+# is on). An operator writing TS_SERVE=false or TS_SERVE=0 therefore got a
+# container that skipped `serve` at boot while server.js went on re-running it
+# from every /setup poll and reporting the missing address as a fault.
+case "${TS_SERVE:-on}" in
+	0|off|OFF|no|NO|false|FALSE|disabled) TS_SERVE=off ;;
+	*) TS_SERVE=on ;;
+esac
+export TS_SERVE
 # Subnet routing is OFF unless somebody asks for it.
 #
 # It used to default to "advertise whatever subnet this container is on", which
@@ -286,9 +296,32 @@ ts_launch() {
 #   badkey  — the auth key: expired, single-use spent, tags not permitted.
 #   network — could not reach the coordination server at all.
 #   unknown — anything else; do not touch the state dir.
+#
+# The daemon's own account of why it is not logged in has to come from
+# `status --json`: plain `tailscale status` prints "Logged out." and stops
+# there in exactly the states this classifies, while the JSON `Health` array
+# reliably carries "You are logged out. The last login error was: register
+# request: http 400: node nodekey:… already exists" — the one string that tells
+# a stale identity apart from a key the operator simply got wrong. Folding in
+# the plain output instead was letting `stale` go undetected.
+ts_health() {
+	tailscale --socket="$ts_sock" status --json 2>/dev/null | node -e '
+	  let s = "";
+	  process.stdin.on("data", (d) => (s += d)).on("end", () => {
+	    try {
+	      const j = JSON.parse(s);
+	      // Health is an array in current releases and was a map in older
+	      // ones; take either without caring which.
+	      const h = Array.isArray(j.Health) ? j.Health : Object.values(j.Health || {});
+	      process.stdout.write([j.BackendState || "", ...h.map(String)].join("\n"));
+	    } catch {}
+	  });
+	' 2>/dev/null || true
+}
+
 ts_fail_kind() { # up_log
 	txt="$(cat "$1" 2>/dev/null || true)
-$(tailscale --socket="$ts_sock" status 2>&1 || true)"
+$(ts_health)"
 	# `already exists` / `register request` / `last login error` come straight
 	# from a control-plane registration that failed on the persisted node key —
 	# `status` keeps printing the last one, which is why the daemon health is
@@ -344,6 +377,11 @@ ts_join() { # authkey
 			--authkey="$1" --hostname="$TS_HOSTNAME" \
 			--accept-dns=false --accept-routes=false --timeout=60s \
 			>"$RUN_DIR/ts-up.log" 2>&1; then
+			# Clearing the state dir is what fixed it, so the marker has done
+			# its job and must not survive: left behind it disarms the
+			# self-heal for the life of the volume, and the *next* time an
+			# identity goes stale nothing would clear it.
+			rm -f "$TS_RESET_MARK"
 			log "joined as $TS_HOSTNAME after clearing a leftover identity"
 			step tailscale_up 1 "joined after clearing a leftover Tailscale identity; the old state was archived to $(cat "$RUN_DIR/ts-archived" 2>/dev/null || true)"
 			advertise_route "$ts_sock"
@@ -615,7 +653,10 @@ while :; do
 		rm -f "$TS_RECOVER_REQ"
 		echo "tawny: /setup asked to clear a leftover Tailscale identity" >&2
 		ts_reset_state
-		: >"$TS_RESET_MARK"   # this was the deliberate reset; ts_join reports if it still fails
+		# `|| true`: this loop is the container's supervisor and `set -e` is in
+		# force here — a marker that cannot be written (a read-only /data) must
+		# not be what takes the whole deployment down.
+		: >"$TS_RESET_MARK" || true   # deliberate reset; ts_join reports if it still fails
 		[ -n "$rk" ] && ts_join "$rk" || true
 		continue
 	fi
