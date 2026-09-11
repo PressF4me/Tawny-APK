@@ -161,17 +161,54 @@ object PairLink {
         buildRelayHost: String?
     ): Boolean {
         val h = hostPort?.substringBefore(':')?.lowercase()?.takeIf { it.isNotBlank() } ?: return false
+        // Port is deliberately no part of these two rules. `*.ts.net` and a
+        // private address are anchors about *reachability*: a name under
+        // .ts.net resolves for nobody who is not on that tailnet, and an
+        // RFC1918 address cannot leave the house — on any port. Which port a
+        // link names changes nothing about who can be behind it.
         if (h.endsWith(".ts.net")) return true
-        // relayHost() keeps the port ("relay.example.net:8443") while a parsed
-        // URI host never does, so both sides are trimmed before comparing —
-        // without this a rendezvous configured with a port could never match.
-        if (sameHost(h, preferredRelayHost?.substringBefore(':'))) return true
-        if (sameHost(h, buildRelayHost?.substringBefore(':'))) return true
-        return isPrivateIpv4(h)
+        if (isPrivateIpv4(h)) return true
+        // These two are a different claim: "this exact relay is one this
+        // install already uses". A port is part of that identity, and comparing
+        // hostnames alone let a link naming a trusted host on some *other*
+        // port — relay.example.net:9999, a service the operator never chose —
+        // be adopted as trusted.
+        return sameEndpoint(hostPort, preferredRelayHost) || sameEndpoint(hostPort, buildRelayHost)
     }
 
+    /**
+     * Hostname only, and deliberately so: this is the *pre-filter* on `rv=`,
+     * answering "is this pointing somewhere related to the link at all" before
+     * relayAdoptable() decides whether the result may be trusted. Keeping it
+     * loose here is what lets `rv=wss://<link host>:8443` be read at all; the
+     * port-aware test is the one that grants trust.
+     */
     private fun sameHost(a: String?, b: String?): Boolean =
         !a.isNullOrBlank() && !b.isNullOrBlank() && a.equals(b, ignoreCase = true)
+
+    /**
+     * Same host *and* same port.
+     *
+     * An absent port means the default for the secure transports a relay is
+     * ever named with (https / wss), so the bare `relay.example.net` a web
+     * Monitor hands out still matches a `relay.example.net` on the Servers
+     * screen — and matches `relay.example.net:443` too, because those are one
+     * endpoint written two ways. relayHost() keeps the port while a parsed URI
+     * host never does, which is why both sides are normalised here rather than
+     * compared as given.
+     */
+    private fun sameEndpoint(a: String?, b: String?): Boolean {
+        if (a.isNullOrBlank() || b.isNullOrBlank()) return false
+        val ah = a.substringBefore(':').lowercase()
+        val bh = b.substringBefore(':').lowercase()
+        if (ah.isBlank() || ah != bh) return false
+        return port(a) == port(b)
+    }
+
+    private fun port(hostPort: String): Int {
+        val p = hostPort.substringAfter(':', "").toIntOrNull()
+        return if (p != null && p in 1..65535) p else 443
+    }
 
     /** `https://h[:p]` or `wss://h[:p]` from an `rv=`, reduced to `h[:p]`. */
     private fun splitRelay(rv: String): String? {

@@ -177,13 +177,44 @@ class PairLinkTest {
     }
 
     @Test
-    fun `the relay this install already uses is an anchor, port or no port`() {
-        // relayHost() keeps the port; a parsed URI host never does. Both sides
-        // are trimmed, so a rendezvous configured with a port still matches.
-        assertTrue(PairLink.relayAdoptable("relay.example.net", "relay.example.net:8443", null))
-        assertTrue(PairLink.relayAdoptable("relay.example.net:8443", "relay.example.net", null))
+    fun `the relay this install already uses is an anchor, and the port is part of it`() {
+        // Bare on both sides — the shipping shape. A web Monitor hands out a
+        // host with no port and the Servers screen holds one with no port.
+        assertTrue(PairLink.relayAdoptable("relay.example.net", "relay.example.net", null))
         assertTrue(PairLink.relayAdoptable("worker.example.dev", null, "worker.example.dev"))
+        // Bare and :443 are the same endpoint written two ways.
+        assertTrue(PairLink.relayAdoptable("relay.example.net", "relay.example.net:443", null))
+        assertTrue(PairLink.relayAdoptable("relay.example.net:443", "relay.example.net", null))
+        // The same explicit port on both sides.
+        assertTrue(PairLink.relayAdoptable("relay.example.net:8443", "relay.example.net:8443", null))
+        // A trusted NAME on an untrusted PORT is not the relay this install
+        // uses — it is some other service on that box.
+        assertFalse(PairLink.relayAdoptable("relay.example.net:9999", "relay.example.net", null))
+        assertFalse(PairLink.relayAdoptable("relay.example.net", "relay.example.net:8443", null))
+        assertFalse(PairLink.relayAdoptable("relay.example.net:8443", "relay.example.net:9999", null))
+        assertFalse(PairLink.relayAdoptable("relay.example.net:9999", null, "relay.example.net"))
+        // ...and a different name is still a different name.
         assertFalse(PairLink.relayAdoptable("other.example.net", "relay.example.net", null))
+    }
+
+    @Test
+    fun `a port never weakens the reachability anchors`() {
+        // .ts.net and RFC1918 are about who can reach the host at all, which no
+        // port changes — and the real QR carries no port anyway.
+        assertTrue(PairLink.relayAdoptable("tawny.ainu-anoles.ts.net", null, null))
+        assertTrue(PairLink.relayAdoptable("tawny.ainu-anoles.ts.net:8443", null, null))
+        assertTrue(PairLink.relayAdoptable("192.168.1.50:8099", null, null))
+        assertFalse(PairLink.relayAdoptable("evil.example:443", null, null))
+    }
+
+    @Test
+    fun `THE SHIPPING CASE - a same-origin ts_net QR with no rv is adopted`() {
+        // What the confirmed-working v2.0.7 flow actually sends: a web Monitor
+        // at https://tawny.<tailnet>.ts.net/ with the parameters in the
+        // fragment and no rv= at all.
+        val p = parse(WEB_LINK)!!
+        assertEquals("wss://tawny.ainu-anoles.ts.net", p.relay)
+        assertTrue(p.relayTrusted)
     }
 
     @Test
