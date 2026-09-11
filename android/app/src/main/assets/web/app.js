@@ -732,8 +732,7 @@ function watcherChannel() {
   return ch;
 }
 
-function openWatchPair() {
-  S.channel = watcherChannel();
+function refreshWatchPair() {
   const url = pairLink();
   el.wpUrl.textContent = url;
   try {
@@ -749,8 +748,60 @@ function openWatchPair() {
       'browser will refuse it the microphone. Serve Tawny over https.');
   }
   fillRelayHint(el.wpRelay, el.wpRelayAddr);
+}
+
+// "Waiting for the Viewer" is a screen meant to be left sitting there, which is
+// exactly why it may not show a code that stopped working while nobody was
+// looking. It drew its QR once and never again: ten minutes later the code on
+// screen had lapsed, and pairingAllowed() on this same page refused the scan
+// as expired — the Monitor rejecting a code it was still displaying. The
+// pairing sheet already rotates (tickPairSheet); this is the same duty for the
+// first-run screen, which is the one most likely to be left alone for an hour.
+let wpTicker = null;
+function tickWatchPair() {
+  // The screen went away (Set up later, back, or the session started elsewhere)
+  // — stop rather than redraw something nobody is looking at.
+  if (!el.watchPair || el.watchPair.hidden) { clearInterval(wpTicker); wpTicker = null; return; }
+  // The shell rotates its own code and tells us about it; never mint over it.
+  if (S.nativeShell) return;
+  if (pairCodeLeft() > 0) return;
+  newPairCode();
+  refreshWatchPair();
+}
+
+async function openWatchPair() {
+  S.channel = watcherChannel();
+  // Same rule as openPair(): never open on a code that has already lapsed.
+  if (pairCodeLeft() <= 0 && !S.nativeShell) newPairCode();
+  // refreshWatchPair() first, because pairLink() is what mints S.token — and
+  // the ticket in the QR has to be the same secret start() then registers as
+  // hashT, or the Viewer would present a `t` the relay has never hashed.
+  refreshWatchPair();
   el.wpStatus.textContent = 'Waiting for the Viewer';
   show(el.watchPair);
+  clearInterval(wpTicker);
+  wpTicker = setInterval(tickWatchPair, 1000);
+
+  // ...and actually be waiting. This screen showed a QR, a spinner and the
+  // words "Waiting for the Viewer" while opening no socket at all: the relay
+  // only learns a room's ticket from a station hello, so until someone pressed
+  // "Start watching now" there was no ticket registered, and a Viewer scanning
+  // that QR was turned away at admission — as "pairing expired", about a code
+  // that had never been wrong. The screen was lying about being ready; now it
+  // is telling the truth.
+  //
+  // The camera opens here rather than on "Start watching now" because a warm
+  // room is not enough on its own: the Monitor answers a Viewer's offer with
+  // its live tracks (answerPeer attaches S.local), so a room held open with no
+  // camera would pair and then show nothing. Acquiring media inside the offer
+  // handler instead would put a permission prompt in the middle of a timed
+  // handshake. Opening it when someone picks "The Monitor" — the role whose
+  // whole job is to be the camera, on a screen that says it is waiting — is
+  // the least surprising of the three.
+  //
+  // Not in the native shell: there the shell runs its own pairing screen and
+  // connects itself, exactly as tickWatchPair() stands down for the same reason.
+  if (!S.nativeShell) await start('station', { stayPut: true });
 }
 
 $('#welcome-go').addEventListener('click', () => { note(el.setupNote, ''); show(el.setupRole); });
@@ -767,8 +818,28 @@ $('#setup-handheld').addEventListener('click', () => {
   openScanner();
 });
 
-$('#wp-start').addEventListener('click', () => start('station'));
-$('#wp-later').addEventListener('click', () => show(el.channels));
+// The session is already up — openWatchPair() started it so the QR on that
+// screen actually works — so this is only the move to the live view and the
+// pairing sheet that lives there. start() again would re-open the camera.
+// The fallback covers a start() that bailed (no camera, an insecure origin)
+// and the native shell, which never auto-starts here.
+$('#wp-start').addEventListener('click', () => {
+  clearInterval(wpTicker);
+  wpTicker = null;
+  if (S.role === 'station' && S.local) { show(el.live); openPair(); }
+  else start('station');
+});
+
+// Leaving this screen means the Monitor is not waiting for anyone after all, so
+// the camera and the room go with it. Without this, "Set up later" walked away
+// from a live camera with its light on and a room still held open at the relay.
+function leaveWatchPair() {
+  clearInterval(wpTicker);
+  wpTicker = null;
+  if (S.role === 'station' && S.local) return hangUp();
+  show(el.channels);
+}
+$('#wp-later').addEventListener('click', leaveWatchPair);
 el.wpCopy.addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(pairLink());
@@ -779,7 +850,7 @@ el.wpCopy.addEventListener('click', async () => {
 });
 // The app bar's back affordance and the quiet "Set up later" underneath it
 // land in the same place; the bar is just the one a thumb reaches for first.
-$('#wp-back').addEventListener('click', () => show(el.channels));
+$('#wp-back').addEventListener('click', leaveWatchPair);
 
 // The empty channel list offers the same route the welcome screen does,
 // rather than describing it and leaving the user to find it.
@@ -945,7 +1016,18 @@ function pairingAllowed(m) {
 
 function pairLink() {
   const base = chosenBase();
-  const code = S.pairCode || newPairCode();
+  // Expired counts as absent. `S.pairCode || newPairCode()` re-minted only when
+  // there was no code at all, so a link built after the ten minutes had run out
+  // carried the lapsed `c` and `e` — and pairingAllowed() on this very page
+  // then refused that code as expired. The Viewer was told "that pairing code
+  // has expired" about a code this page had just handed it.
+  //
+  // Except inside the native shell, where the shell draws the QR and owns the
+  // code, pushing each rotation in through window.tawnyPairCode(). Minting one
+  // here would leave pairingAllowed() judging phones against a code no QR has
+  // ever displayed — breaking the app-as-Monitor direction, which works.
+  const code = (pairCodeLeft() > 0 || (S.nativeShell && S.pairCode))
+    ? S.pairCode : newPairCode();
   // The setup flow shows this link *before* start() runs, so the ticket has to
   // exist by the time the QR is drawn or the link would hand out a `t` the
   // Monitor then replaced. Only the browser mints one: inside the native shell
@@ -1967,7 +2049,9 @@ function openSignal(base, tag) {
 
       // Fatal close codes: for a Handheld (one transport) the session is over;
       // for the Watcher, a bad cloud socket must NOT tear down a healthy LAN one.
-      if (ev.code === 4003 || ev.code === 4004 || ev.code === 4008) {
+      // 4010 joins the fatal set: the relay is answering and has told us the
+      // room has no Monitor in it. Retrying into that changes nothing.
+      if (ev.code === 4003 || ev.code === 4004 || ev.code === 4008 || ev.code === 4010) {
         if (S.role === 'station') {
           // ...but not immediately fatal on the cloud leg. When this phone's
           // radio blips, the socket dies without a close handshake and the
@@ -2000,12 +2084,20 @@ function openSignal(base, tag) {
         return bail(
           ev.code === 4003 ? FULL_MESSAGE
           : ev.code === 4004 ? TawnyT.t('w_bail_already_running')
+          // 4010: the relay has no ticket for this room at all, so no Monitor
+          // has ever connected. The code in this person's hand is fine and
+          // rescanning it will not help — the other end is simply not running.
+          // This used to arrive as 4008 and be read out as "expired", which
+          // sent people back to the same QR over and over.
+          : ev.code === 4010 ? TawnyT.t('w_bail_monitor_offline')
           // 4008 is the relay's own refusal — a ticket that no longer matches
           // the room. Different cause from the Monitor's pairing gate, same
           // thing to do about it, so it gets the same sentence and the same
           // screen in the native shell.
           : EXPIRED_MESSAGE,
-          ev.code === 4003 ? 'full' : ev.code === 4008 ? 'expired' : undefined
+          ev.code === 4003 ? 'full'
+            : ev.code === 4008 ? 'expired'
+            : ev.code === 4010 ? 'offline' : undefined
         );
       }
 
@@ -3560,7 +3652,16 @@ function cameraConstraints(wide = screenIsWide()) {
 // bar. Matching the capture shape to how the phone is held (idealCaptureSize)
 // is what keeps those bars small — or gone, when both ends face the same way.
 
-async function start(role) {
+/**
+ * Go live in `role`.
+ *
+ * `opts.stayPut` runs the whole of this — camera, ticket, socket, room —
+ * but leaves the caller's own screen showing instead of jumping to the live
+ * view. openWatchPair() needs exactly that: its QR is worthless unless this
+ * has run, because the relay only learns the room's ticket from a station
+ * hello, and a Viewer scanning before then is turned away at admission.
+ */
+async function start(role, opts = {}) {
   if (!S.channel) return;
   S.role = role;
   S.pending = null;
@@ -3677,7 +3778,9 @@ async function start(role) {
   const room = (S.channel.name || 'Pet camera').trim().replace(/\s*monitor$/i, '');
   el.channel.textContent = room || 'Pet camera';
 
-  show(el.live);
+  // Not while the caller is showing a screen of its own — see opts.stayPut.
+  // Everything below still runs, so the room is warm either way.
+  if (!opts.stayPut) show(el.live);
   status(TawnyT.t('w_status_connecting'), null);
   tellNative('live', { role });
   connectAll();
@@ -3685,7 +3788,9 @@ async function start(role) {
   // Settle the light question now, on the track we have just opened, so the
   // first Viewer to join is told the truth about this camera before it can
   // press anything. It is one constraint write and nothing lights up.
-  if (role === 'station') { refreshTorchSupport(); openPair(); }
+  // The pairing sheet belongs to the live screen. A caller that stayed put is
+  // already showing its own QR and would get two.
+  if (role === 'station') { refreshTorchSupport(); if (!opts.stayPut) openPair(); }
 }
 
 // ---------------------------------------------------------- capture loss
