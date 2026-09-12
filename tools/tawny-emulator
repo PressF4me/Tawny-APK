@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # Launch the Android emulator for the Tawny project.
 #
-#   tawny-emulator            start the 'frentalk' AVD
+#   tawny-emulator            start the 'frentalk36' AVD
 #   tawny-emulator --run      start it, then build+install+launch the debug app
 #   tawny-emulator --clean    cold boot (ignore the saved snapshot)
 #   tawny-emulator <avd>      start a different AVD by name
 #
-# Env overrides: ANDROID_HOME, JAVA_HOME, TAWNY_EMU_ARGS
+# Env overrides: ANDROID_HOME, JAVA_HOME, TAWNY_EMU_ARGS, TAWNY_EMU_CAMERA
+#   TAWNY_EMU_CAMERA=virtualscene   a fixed test pattern, no real camera (default)
+#   TAWNY_EMU_CAMERA=webcam0        the host's first USB webcam — real framing,
+#                                   but its software passthrough pins a vCPU
+#                                   (~170-200%) regardless of capture size, so
+#                                   expect UI lag while it's active
+#   TAWNY_EMU_CAMERA=none           back camera disabled
 set -euo pipefail
 
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/sdk}"
@@ -18,7 +24,7 @@ ADB="$ANDROID_HOME/platform-tools/adb"
 PROJECT="$HOME/Projects/Tawny Android"
 PKG="com.tawny.monitor.debug"
 
-AVD="frentalk"
+AVD="frentalk36"
 RUN=0
 EXTRA=()
 for a in "$@"; do
@@ -45,9 +51,10 @@ if "$ADB" devices | grep -q 'emulator-.*device'; then
   echo "An emulator is already running."
 else
   echo "Starting AVD '$AVD'…"
-  # -camera-back virtualscene lets the in-app QR scanner see a test pattern.
+  # -camera-back feeds the app's Monitor role — the host's real webcam by
+  # default so it can point at an actual pet/room, same as a phone would.
   "$EMU" -avd "$AVD" -gpu auto -no-boot-anim \
-    -camera-back virtualscene ${TAWNY_EMU_ARGS:-} "${EXTRA[@]}" &
+    -camera-back "${TAWNY_EMU_CAMERA:-virtualscene}" ${TAWNY_EMU_ARGS:-} "${EXTRA[@]}" &
 fi
 
 [ "$RUN" -eq 1 ] || exit 0
