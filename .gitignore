@@ -14,3 +14,32 @@ local.properties
 node_modules/
 .wrangler/
 .DS_Store
+
+# Not the APK — other platforms, the self-hosted server, and anything
+# publish/release tooling only touches
+/ios/
+/desktop/
+/docker/
+/rendezvous/
+/server.js
+/package.json
+/package-lock.json
+/install.sh
+/tawny-launch
+/.dockerignore
+/.github/
+/.claude/
+/PLAY-SUBMISSION.md
+/docs/play-submission-runbook.md
+/docs/store-listing.md
+/docs/data-safety.md
+/docs/review-notes.md
+/docs/DIRECTION.md
+/docs/release-notes/
+/docs/play-icon-512.png
+/tools/make-ios-certs.sh
+/tools/tawny-bump
+/tools/tawny-ship-aab
+/tools/tawny-release-notes
+/tools/tawny-reports
+/tools/probes/
