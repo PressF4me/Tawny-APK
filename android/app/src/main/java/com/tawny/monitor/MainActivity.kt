@@ -293,6 +293,22 @@ private const val MAX_VIEWERS = 3
  */
 private const val STILL_MODE = "stillMode"
 
+/** Roles ("viewer" / "station") whose first-call walkthrough has been shown. */
+private const val COACH_SEEN = "coachSeen"
+
+/** The native walkthrough was finished or skipped once. */
+private const val TOUR_SEEN = "tourSeen"
+
+/** The rating prompt's bookkeeping: sessions used for real, times asked, and
+ *  when last. See MainActivity.maybeAskForReview. */
+private const val GOOD_SESSIONS = "goodSessions"
+private const val REVIEW_ASKS = "reviewAsks"
+private const val REVIEW_LAST = "reviewLast"
+
+/** The Play listing the rating row and the review fallback open. Not
+ *  packageName: a debug build carries a ".debug" suffix that has no listing. */
+private const val PLAY_PACKAGE = "com.tawny.monitor"
+
 /**
  * Whether the user has asked this app to hold still, read straight from the
  * prefs file for the benefit of the drawn scenes.
@@ -323,6 +339,8 @@ class MainActivity : AppCompatActivity() {
     private var viewersNow = 0
     private var viewersMax = MAX_VIEWERS
     private var isLive = false
+    /** When the current live session began, for [countSession]. */
+    private var liveSince = 0L
     /** Live only while this phone is the Monitor: forwards its battery to the
      *  page, which mirrors it to every Handheld. */
     private var batteryRx: BroadcastReceiver? = null
@@ -503,6 +521,11 @@ class MainActivity : AppCompatActivity() {
         // A recreate (theme flip, system light/dark change) carries the screen
         // in the instance state — honour it instead of re-running the cold-start
         // routing, which would send the user back to the front door.
+        savedInstanceState?.let {
+            tourStep = it.getInt("tourStep", 0)
+            tourFrom = it.getString("tourFrom") ?: "welcome"
+            helpFrom = it.getString("helpFrom") ?: "home"
+        }
         val resumed = savedInstanceState?.getString("screen")?.let { restoreScreen(it) } == true
         // A permission request that was in flight when the Activity was
         // recreated: keep what it was for, so the grant still leads somewhere.
@@ -528,6 +551,9 @@ class MainActivity : AppCompatActivity() {
         // Only the native screens are worth restoring; a live call is rebuilt by
         // the normal resume path instead of being re-entered blind.
         if (!isLive) outState.putString("screen", screen)
+        outState.putInt("tourStep", tourStep)
+        outState.putString("tourFrom", tourFrom)
+        outState.putString("helpFrom", helpFrom)
         consentTag?.let { outState.putString("consentTag", it) }
         if (pendingScan) outState.putBoolean("pendingScan", true)
     }
@@ -543,6 +569,8 @@ class MainActivity : AppCompatActivity() {
             "servers" -> showServers()
             "about" -> showAbout()
             "lntip" -> showLightningTip()
+            "tour" -> showTour(tourStep)
+            "help" -> showHelp()
             // Only if there is still something to list, else fall through to the
             // normal routing rather than showing an empty home.
             "sessions" -> if (loadRecentSessions().isEmpty()) return false else showSessionsHome()
@@ -1443,7 +1471,7 @@ class MainActivity : AppCompatActivity() {
         }
         // Deliberately hidden behind a long-press: a support hatch, not a feature.
         isLongClickable = true
-        setOnLongClickListener { haptic(); showDiagnostics(); true }
+        setOnLongClickListener { haptic(); diagFromHelp = false; showDiagnostics(); true }
     }
 
     /**
@@ -1454,7 +1482,8 @@ class MainActivity : AppCompatActivity() {
     private fun showDiagnostics() {
         clearScreen()
         screen = "diag"
-        swipeNav(back = { afterSession() }, forward = null)
+        val diagBack = { if (diagFromHelp) showHelp() else afterSession() }
+        swipeNav(back = diagBack, forward = null)
         val report = Diag.dump().ifBlank { "(nothing recorded yet)" }
 
         val outer = LinearLayout(this).apply {
@@ -1462,7 +1491,7 @@ class MainActivity : AppCompatActivity() {
             val p = dp(16); setPadding(p, p, p, p)
             layoutParams = FrameLayout.LayoutParams(MP, MP)
         }
-        outer.addView(backLink { afterSession() })
+        outer.addView(backLink { diagBack() })
         outer.addView(heading(getString(R.string.diag_title), getString(R.string.diag_subtitle)))
 
         // Vertical scroller wrapping a horizontal one: the lines are long and
@@ -1823,7 +1852,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Small round Light ↔ Dark toggle, pinned top-right of the screen. */
+    /** Small round theme toggle, pinned top-right of the screen: cycles
+     *  Follow system → Light → Dark. */
     private fun themeToggleView(): View {
         return TextView(this).apply {
             textSize = 17f
@@ -1840,12 +1870,15 @@ class MainActivity : AppCompatActivity() {
                 it.topMargin = dp(6); it.rightMargin = dp(6)
             }
             isClickable = true; isFocusable = true
-            contentDescription = getString(R.string.a11y_theme_toggle)
-            text = if (currentTheme() == "dark") "☾" else "☀"
+            val mode = themeMode()
+            contentDescription = getString(R.string.a11y_theme_toggle, themeLabel(mode))
+            text = when (mode) { "dark" -> "☾"; "light" -> "☀\uFE0E"; else -> "◐" }
+            // The half-disc sets small in the UI font next to the sun and moon.
+            if (mode == "system") textSize = 22f
             setOnClickListener {
-                val next = if (currentTheme() == "dark") "light" else "dark"
-                prefs.edit().putString("theme", next).apply()
-                applyNightMode(next)   // recreates the activity
+                haptic()
+                val next = when (mode) { "system" -> "light"; "light" -> "dark"; else -> "system" }
+                setThemeMode(next) { rebuildScreen() }
             }
         }
     }
@@ -2638,14 +2671,22 @@ class MainActivity : AppCompatActivity() {
             metaRow("bolt", getString(R.string.meta_tip_bitcoin), Hue.SKY, "›") {
                 lnFromAbout = false; showLightningTip()
             },
-            motionRow { showSessionsHome() },
-            metaRow("info", getString(R.string.meta_about), Hue.TEXT, "›") { showAbout() },
+            metaRow("star", getString(R.string.meta_rate), Hue.TEXT, "↗") { openStoreListing() },
         ))
+        // Settings and help, apart from the asks above: a change of subject.
+        col.addView(metaPanel(
+            themeRow { showSessionsHome() },
+            motionRow { showSessionsHome() },
+            metaRow("help", getString(R.string.meta_help), Hue.TEXT, "›") { showHelp(from = "home") },
+            metaRow("info", getString(R.string.meta_about), Hue.TEXT, "›") { showAbout() },
+        ).apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(14) })
+        col.addView(gap(24))
 
         scroll.addView(col)
         root.addView(scroll)
         root.addView(themeToggleView())
         root.addView(languageToggleView())
+        maybeAskForReview()
     }
 
     // ---------------------------------------------------------- about
@@ -2758,7 +2799,12 @@ class MainActivity : AppCompatActivity() {
         // drawn pets is exactly the phone whose owner goes hunting through
         // About for something to turn off.
         col.addView(eyebrow(getString(R.string.about_eyebrow_thisphone)))
-        col.addView(metaPanel(motionRow { showAbout() }))
+        col.addView(metaPanel(
+            themeRow { showAbout() },
+            motionRow { showAbout() },
+            metaRow("help", getString(R.string.meta_help), Hue.TEXT, "›") { showHelp(from = "about") },
+            metaRow("star", getString(R.string.meta_rate), Hue.TEXT, "↗") { openStoreListing() },
+        ))
 
         col.addView(eyebrow(getString(R.string.about_eyebrow_keeping)))
         col.addView(aboutBody(
@@ -2932,6 +2978,544 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ---------------------------------------------------- walkthrough
+
+    /** Which walkthrough page is up, and where it was opened from — both ride
+     *  along in the instance state, so a theme flip mid-tour stays put. */
+    private var tourStep = 0
+    private var tourFrom = "welcome"      // "welcome" | "role" | "help"
+
+    private class TourPage(val icons: List<String>, val title: Int, val body: Int)
+
+    private val tourPages = listOf(
+        TourPage(listOf("camera", "phone"), R.string.tour_1_title, R.string.tour_1_body),
+        TourPage(listOf("qr"), R.string.tour_2_title, R.string.tour_2_body),
+        TourPage(listOf("chat", "heart"), R.string.tour_3_title, R.string.tour_3_body),
+        TourPage(listOf("moon"), R.string.tour_4_title, R.string.tour_4_body),
+        TourPage(listOf("help"), R.string.tour_5_title, R.string.tour_5_body),
+    )
+
+    /**
+     * The new-user walkthrough: what Tawny is, one idea per page, before the
+     * role picker asks a question that only makes sense once you know it.
+     *
+     * First run passes through it on the way from "Get started"; after that
+     * it is one tap away from the role picker and from Help. Skippable from
+     * every page, swipeable both ways, and it never repeats on its own. The
+     * in-call half — a spotlight on the real keys — lives in the page, see
+     * runCoach() in public/app.js.
+     */
+    private fun showTour(step: Int, from: String? = null) {
+        if (from != null) tourFrom = from
+        val i = step.coerceIn(0, tourPages.lastIndex)
+        val forward = i >= tourStep
+        tourStep = i
+        clearScreen()
+        screen = "tour"
+        val last = i == tourPages.lastIndex
+        val back = { if (i > 0) showTour(i - 1) else leaveTour(backOut = true) }
+        val next = { if (last) leaveTour(backOut = false) else showTour(i + 1) }
+        swipeNav(back = back, forward = next)
+        val page = tourPages[i]
+
+        val col = column(scroll = false)
+
+        // The illustration: the app's own glyphs on a soft disc, rather than
+        // stock art that would look like any other app.
+        val art = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Hue.PANEL)
+                setStroke(dp(1), Hue.LINE)
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(168), dp(168)).also {
+                it.gravity = Gravity.CENTER_HORIZONTAL
+                it.topMargin = dp(8)
+            }
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                layoutParams = FrameLayout.LayoutParams(MP, MP)
+                val size = if (page.icons.size > 1) 58 else 80
+                page.icons.forEachIndexed { n, k ->
+                    addView(IconView(
+                        this@MainActivity, k, behind = Hue.PANEL,
+                        tint = if (n == 0) Hue.BERRY else Hue.SKY,
+                    ).apply {
+                        layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)).also {
+                            if (n > 0) it.leftMargin = dp(10)
+                        }
+                    })
+                }
+            })
+        }
+        col.addView(art)
+
+        val title = TextView(this).apply {
+            text = getString(page.title)
+            setTextColor(Hue.TEXT)
+            textSize = Type.TITLE
+            typeface = uiFontSemi
+            gravity = Gravity.CENTER
+            setLineSpacing(0f, 1.2f)
+            layoutParams = lp(topMargin = 26)
+        }
+        col.addView(title)
+        val text = body(getString(page.body), maxW = 340).apply {
+            layoutParams = lp(topMargin = 12)
+        }
+        col.addView(text)
+
+        // Progress dots: where you are, and how little is left.
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutParams = lp(topMargin = 26, centerH = true)
+            contentDescription = getString(R.string.tour_progress, i + 1, tourPages.size)
+            tourPages.indices.forEach { n ->
+                addView(View(this@MainActivity).apply {
+                    background = roundRect(if (n == i) Hue.BERRY else Hue.LINE, 0, 4)
+                    layoutParams = LinearLayout.LayoutParams(dp(if (n == i) 22 else 8), dp(8)).also {
+                        it.leftMargin = dp(4); it.rightMargin = dp(4)
+                    }
+                })
+            }
+        })
+
+        col.addView(gap(10))
+        col.addView(primary(getString(
+            if (!last) R.string.common_next
+            else if (tourFrom == "help") R.string.common_done
+            else R.string.tour_finish
+        )) { next() })
+        if (!last) col.addView(link(getString(R.string.tour_skip)) { leaveTour(backOut = false) })
+        mountCentered(col)
+        // Pinned to the top corner rather than riding in the centred column,
+        // where it floated halfway down the screen.
+        root.addView(backLink { back() }.apply {
+            layoutParams = FrameLayout.LayoutParams(WC, WC).also {
+                it.gravity = Gravity.START or Gravity.TOP
+                it.leftMargin = dp(18); it.topMargin = dp(18)
+            }
+        })
+
+        // The page slides in from the side it came from.
+        val a = animScale
+        if (a > 0f) listOf(art, title, text).forEachIndexed { n, v ->
+            v.alpha = 0f
+            v.translationX = dp(if (forward) 28 else -28).toFloat()
+            v.animate().alpha(1f).translationX(0f)
+                .setStartDelay((40L * n * a).toLong())
+                .setDuration((260 * a).toLong())
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+                .start()
+        }
+    }
+
+    /**
+     * @param backOut the back arrow on the first page: return to where the
+     *   tour was opened. Otherwise (finished or skipped) move on to setting
+     *   up — or back to Help, which is where a replay starts and ends.
+     */
+    private fun leaveTour(backOut: Boolean) {
+        prefs.edit().putBoolean(TOUR_SEEN, true).apply()
+        tourStep = 0
+        when {
+            tourFrom == "help" -> showHelp()
+            backOut && tourFrom == "welcome" -> showWelcome()
+            else -> showRole()
+        }
+    }
+
+    // ------------------------------------------------ help & feedback
+
+    private var helpFrom = "home"         // "home" | "about" | "handheld"
+
+    private fun helpBack() = when (helpFrom) {
+        "about" -> showAbout()
+        "handheld" -> showHandheldHome()
+        else -> afterSession()
+    }
+
+    /**
+     * Help & feedback: the common questions answered on the phone itself, and
+     * every way of telling us something — a note, a diagnostics log, a rating.
+     *
+     * The answers are what the listing, the battery tip and the support inbox
+     * already say, gathered in one place; keep them in step with those when
+     * behaviour changes (docs/store-listing.md).
+     */
+    private fun showHelp(from: String? = null) {
+        if (from != null) helpFrom = from
+        clearScreen()
+        screen = "help"
+        swipeNav(back = { helpBack() }, forward = null)
+
+        val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+        val col = column(scroll = true)
+        col.addView(backLink { helpBack() })
+        col.addView(heading(getString(R.string.help_title), getString(R.string.help_subtitle)))
+
+        fun eyebrow(s: String) = TextView(this).apply {
+            text = s.uppercase()
+            setTextColor(Hue.DIM)
+            textSize = Type.LABEL
+            letterSpacing = 0.16f
+            typeface = uiFontSemi
+            layoutParams = lp(topMargin = 28)
+        }
+
+        col.addView(metaPanel(
+            metaRow("info", getString(R.string.help_replay_tour), Hue.TEXT, "›",
+                sub = getString(R.string.help_replay_tour_sub)) { showTour(0, from = "help") },
+        ).apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(22) })
+
+        col.addView(eyebrow(getString(R.string.help_eyebrow_faq)))
+        val faqs = listOf(
+            R.string.faq_two_phones_q to R.string.faq_two_phones_a,
+            R.string.faq_pair_q to R.string.faq_pair_a,
+            R.string.faq_away_q to R.string.faq_away_a,
+            R.string.faq_screen_q to R.string.faq_screen_a,
+            R.string.faq_battery_q to R.string.faq_battery_a,
+            R.string.faq_private_q to R.string.faq_private_a,
+            R.string.faq_viewers_q to R.string.faq_viewers_a,
+            R.string.faq_light_q to R.string.faq_light_a,
+            R.string.faq_connect_q to R.string.faq_connect_a,
+            R.string.faq_cost_q to R.string.faq_cost_a,
+        )
+        col.addView(metaPanel(*faqs.map { (q, a) -> faqRow(getString(q), getString(a)) }.toTypedArray())
+            .apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(10) })
+
+        col.addView(eyebrow(getString(R.string.help_eyebrow_tell_us)))
+        col.addView(metaPanel(
+            metaRow("chat", getString(R.string.help_feedback), Hue.TEXT, "›",
+                sub = getString(R.string.help_feedback_sub)) { showFeedback() },
+            metaRow("star", getString(R.string.meta_rate), Hue.TEXT, "↗",
+                sub = getString(R.string.help_rate_sub)) { openStoreListing() },
+            metaRow("info", getString(R.string.help_diagnostics), Hue.TEXT, "›",
+                sub = getString(R.string.help_diagnostics_sub)) { diagFromHelp = true; showDiagnostics() },
+        ).apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(10) })
+        col.addView(gap(24))
+
+        scroll.addView(col)
+        root.addView(scroll)
+    }
+
+    /** One question in the FAQ panel; tap to open or close its answer. */
+    private fun faqRow(question: String, answer: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = pressable(roundRect(0, Color.TRANSPARENT, 0), 0, Hue.BERRY)
+        val ph = dp(16); val pv = dp(14)
+        setPadding(ph, pv, ph, pv)
+        val sign = TextView(this@MainActivity).apply {
+            text = "+"
+            setTextColor(Hue.BERRY)
+            textSize = 20f
+            typeface = uiFontSemi
+            layoutParams = LinearLayout.LayoutParams(WC, WC).also { it.leftMargin = dp(12) }
+        }
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = question
+                setTextColor(Hue.TEXT)
+                textSize = Type.SUB
+                typeface = uiFontSemi
+                setLineSpacing(0f, 1.3f)
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+            })
+            addView(sign)
+        })
+        val ans = TextView(this@MainActivity).apply {
+            text = answer
+            setTextColor(Hue.DIM)
+            textSize = 14.5f
+            typeface = uiFont
+            setLineSpacing(0f, Type.LEAD_BODY)
+            setPadding(0, dp(8), dp(8), dp(2))
+            visibility = View.GONE
+        }
+        addView(ans)
+        isClickable = true; isFocusable = true
+        setOnClickListener {
+            haptic()
+            val open = ans.visibility != View.VISIBLE
+            ans.visibility = if (open) View.VISIBLE else View.GONE
+            sign.text = if (open) "−" else "+"
+            val a = animScale
+            if (open && a > 0f) {
+                ans.alpha = 0f
+                ans.animate().alpha(1f).setDuration((220 * a).toLong()).start()
+            }
+        }
+    }
+
+    /** Where diagnostics' back arrow goes: Help, when it was opened from there. */
+    private var diagFromHelp = false
+
+    /**
+     * "Send feedback": pick what kind of note it is, write it, and it goes to
+     * the support inbox through the user's own mail app — no account, no
+     * server of ours in the way, and the user sees exactly what is sent before
+     * it goes. The diagnostics log rides along only if they switch it on.
+     */
+    private fun showFeedback(kind: Int = 0, draft: String = "", withLog: Boolean = false) {
+        val kinds = listOf(R.string.feedback_kind_bug, R.string.feedback_kind_idea, R.string.feedback_kind_other)
+        var picked = kind
+        var attachLog = withLog
+
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val chips = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = lp(topMargin = 16)
+        }
+        fun paintChips() {
+            for (n in 0 until chips.childCount) {
+                val c = chips.getChildAt(n) as TextView
+                val on = n == picked
+                c.setTextColor(if (on) Hue.ON_ACCENT else Hue.TEXT)
+                c.background = pressable(
+                    roundRect(if (on) Hue.BERRY else 0, if (on) Hue.BERRY else Hue.LINE),
+                    tint = if (on) Hue.ON_ACCENT else Hue.BERRY
+                )
+            }
+        }
+        kinds.forEachIndexed { n, res ->
+            chips.addView(TextView(this).apply {
+                text = getString(res)
+                textSize = 14f
+                typeface = uiFontSemi
+                gravity = Gravity.CENTER
+                maxLines = 1
+                setPadding(dp(6), dp(10), dp(6), dp(10))
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also {
+                    if (n > 0) it.leftMargin = dp(8)
+                }
+                isClickable = true; isFocusable = true
+                setOnClickListener { haptic(); picked = n; paintChips() }
+            })
+        }
+        paintChips()
+        content.addView(chips)
+
+        val input = EditText(this).apply {
+            hint = getString(R.string.feedback_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            filters = arrayOf(android.text.InputFilter.LengthFilter(2000))
+            minLines = 4
+            maxLines = 8
+            gravity = Gravity.TOP or Gravity.START
+            setText(draft)
+            setSelection(text.length)
+            typeface = uiFont
+            textSize = Type.BODY
+            setTextColor(Hue.TEXT)
+            setHintTextColor(Hue.DIM)
+            background = roundRect(Hue.BG, Hue.LINE)
+            setPadding(dp(14), dp(13), dp(14), dp(13))
+            layoutParams = lp(topMargin = 14)
+        }
+        content.addView(input)
+
+        val knob = SwitchMark(this, attachLog).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(46), dp(28)).also { it.leftMargin = dp(12) }
+        }
+        content.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = lp(topMargin = 12)
+            setPadding(0, dp(6), 0, dp(6))
+            addView(TextView(this@MainActivity).apply {
+                text = getString(R.string.feedback_attach_log)
+                setTextColor(Hue.DIM)
+                textSize = 14f
+                typeface = uiFont
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+            })
+            addView(knob)
+            isClickable = true; isFocusable = true
+            setOnClickListener { haptic(); attachLog = !attachLog; knob.on = attachLog }
+        })
+
+        themedDialog(
+            title = getString(R.string.help_feedback),
+            body = getString(R.string.feedback_body),
+            primaryLabel = getString(R.string.feedback_send),
+            onPrimary = {
+                val note = input.text.toString().trim()
+                if (note.isEmpty()) {
+                    toast(getString(R.string.feedback_empty))
+                    showFeedback(picked, "", attachLog)
+                } else {
+                    sendFeedback(getString(kinds[picked]), note, attachLog)
+                }
+            },
+            secondaryLabel = getString(R.string.common_cancel),
+            content = content,
+        )
+    }
+
+    private fun sendFeedback(kind: String, note: String, attachLog: Boolean) {
+        val about = "Tawny ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · " +
+            "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · " +
+            "Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT}) · " +
+            currentLang()
+        val text = buildString {
+            append(note).append("\n\n—\n").append(about)
+            if (attachLog) append("\n\n--- diagnostics ---\n").append(Diag.dump().ifBlank { "(empty)" })
+        }
+        val subject = getString(R.string.feedback_subject, kind, BuildConfig.VERSION_NAME)
+        val mail = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(SUPPORT_EMAIL))
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        try {
+            startActivity(mail)
+        } catch (e: Exception) {
+            // No mail app: any app that takes text, and failing that the
+            // clipboard, so the note is never simply lost.
+            try {
+                startActivity(Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf(SUPPORT_EMAIL))
+                        putExtra(Intent.EXTRA_SUBJECT, subject)
+                        putExtra(Intent.EXTRA_TEXT, text)
+                    },
+                    getString(R.string.help_feedback)
+                ))
+            } catch (e2: Exception) {
+                copyToClipboard(subject, "$SUPPORT_EMAIL\n\n$text")
+                toast(getString(R.string.feedback_copied, SUPPORT_EMAIL))
+            }
+        }
+    }
+
+    // ---------------------------------------------------------- rating
+
+    /** The Play listing, in the Play Store app if there is one. */
+    private fun openStoreListing() {
+        try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$PLAY_PACKAGE"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            openExternal("https://play.google.com/store/apps/details?id=$PLAY_PACKAGE")
+        }
+    }
+
+    /**
+     * A session counts toward the rating prompt once it has actually been used
+     * — a minute or more live — not every time a screen was opened and closed.
+     */
+    private fun countSession(ms: Long) {
+        if (ms < 60_000L) return
+        prefs.edit().putInt(GOOD_SESSIONS, prefs.getInt(GOOD_SESSIONS, 0) + 1).apply()
+    }
+
+    /**
+     * The in-app rating prompt, through Google Play's own review sheet.
+     *
+     * Asked of everyone the same way, whatever their experience: no "Do you
+     * like Tawny?" gate in front of it, which Play's policy forbids and which
+     * would skew the ratings anyway. It waits until Tawny has been used for
+     * real — three sessions of a minute or more — and lands on a home screen
+     * between calls, never during one or in the middle of setting up. Play
+     * itself decides whether the sheet actually appears (it has its own quota),
+     * so this asks at most three times, a month apart, and moves on.
+     */
+    private fun maybeAskForReview() {
+        val sessions = prefs.getInt(GOOD_SESSIONS, 0)
+        val asks = prefs.getInt(REVIEW_ASKS, 0)
+        val last = prefs.getLong(REVIEW_LAST, 0L)
+        if (sessions < 3 || asks >= 3) return
+        if (System.currentTimeMillis() - last < 30L * 24 * 3600 * 1000) return
+        if (sessions < 3 * (asks + 1)) return
+        val shownOn = screen
+        root.postDelayed({
+            if (isFinishing || isDestroyed || screen != shownOn || isLive) return@postDelayed
+            prefs.edit()
+                .putInt(REVIEW_ASKS, asks + 1)
+                .putLong(REVIEW_LAST, System.currentTimeMillis())
+                .apply()
+            val manager = com.google.android.play.core.review.ReviewManagerFactory.create(this)
+            manager.requestReviewFlow().addOnCompleteListener { req ->
+                if (!req.isSuccessful || isFinishing || isDestroyed) {
+                    Diag.log("review", "flow unavailable: ${req.exception?.javaClass?.simpleName}")
+                    return@addOnCompleteListener
+                }
+                manager.launchReviewFlow(this, req.result)
+                    .addOnCompleteListener { Diag.log("review", "flow finished") }
+            }
+        }, 1500L)
+    }
+
+    // ----------------------------------------------------------- theme row
+
+    /**
+     * Theme, as a row: Follow system, Light or Dark. The round toggle on the
+     * landing screens cycles the same three; this is where the choice is
+     * spelled out, for anyone who never guessed what "◐" meant.
+     */
+    private fun themeRow(rebuild: () -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = pressable(roundRect(0, Color.TRANSPARENT, 0), 0, Hue.BERRY)
+        val ph = dp(16); val pv = dp(15)
+        setPadding(ph, pv, ph, pv)
+        minimumHeight = dp(54)
+        addView(IconView(this@MainActivity, "theme", behind = Hue.PANEL, tint = Hue.DIM).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(19), dp(19))
+        })
+        addView(TextView(this@MainActivity).apply {
+            text = getString(R.string.theme_title)
+            setTextColor(Hue.TEXT)
+            textSize = Type.SUB
+            typeface = uiFontSemi
+            letterSpacing = 0.01f
+            maxLines = 1
+            layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(13) }
+        })
+        // A three-way segmented control in the trailing slot: the state is
+        // visible without opening anything, and one tap changes it.
+        val seg = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = roundRect(Hue.BG, Hue.LINE, 999)
+            setPadding(dp(3), dp(3), dp(3), dp(3))
+        }
+        val now = themeMode()
+        listOf("system" to "◐", "light" to "☀\uFE0E", "dark" to "☾").forEach { (mode, glyph) ->
+            val on = mode == now
+            seg.addView(TextView(this@MainActivity).apply {
+                text = glyph
+                // U+FE0E asks for the text form of the sun; the half-disc sets
+                // small in the UI font, so it gets a size up to match.
+                textSize = if (mode == "system") 19f else 15f
+                gravity = Gravity.CENTER
+                setTextColor(if (on) Hue.ON_ACCENT else Hue.DIM)
+                background = if (on) roundRect(Hue.BERRY, Hue.BERRY, 999) else null
+                layoutParams = LinearLayout.LayoutParams(dp(38), dp(30))
+                contentDescription = themeLabel(mode)
+                isSelected = on
+                isClickable = true; isFocusable = true
+                setOnClickListener { haptic(); if (!on) setThemeMode(mode, rebuild) }
+            })
+        }
+        addView(seg)
+    }
+
+    /** Re-mount whatever native screen is up — after a setting that changes
+     *  how it draws but not which screen it is. */
+    private fun rebuildScreen() {
+        if (!isLive && !restoreScreen(screen)) afterSession()
+    }
+
+    private fun coachSeen(): Set<String> = prefs.getStringSet(COACH_SEEN, emptySet()) ?: emptySet()
+
     // -------------------------------------------------------- welcome
 
     private fun showWelcome() {
@@ -2957,7 +3541,11 @@ class MainActivity : AppCompatActivity() {
             )
         )
         col.addView(gap(4))
-        col.addView(primary(getString(R.string.welcome_get_started)) { showRole() })
+        // First run goes through the walkthrough on its way to the role
+        // picker; anyone who has seen it (or skipped it) goes straight there.
+        col.addView(primary(getString(R.string.welcome_get_started)) {
+            if (prefs.getBoolean(TOUR_SEEN, false)) showRole() else showTour(0, from = "welcome")
+        })
         // Not "I want to watch a monitor": that asked the user to know which of
         // two roles they were before the app had explained either, and it
         // competed with "Get started" for the same first-time tap. Having a
@@ -3000,7 +3588,9 @@ class MainActivity : AppCompatActivity() {
         col.addView(gap(6))
         col.addView(primary(getString(R.string.handheld_watch_now, name)) { goLive("viewer") })
         col.addView(link(getString(R.string.handheld_connect_different)) { onHandheld() })
+        col.addView(link(getString(R.string.meta_help)) { showHelp(from = "handheld") })
         mountCentered(col)
+        maybeAskForReview()
 
         // Same reasoning as showRole(): keep the trail off the actual content,
         // recomputed on layout/scroll since mountCentered's ScrollView can
@@ -3049,6 +3639,9 @@ class MainActivity : AppCompatActivity() {
             "phone", "dog"
         ) { onHandheld() }
         col.addView(viewerCard)
+        // For whoever reaches the quiz without the explanation: a returning
+        // user who skipped the walkthrough, or one who has forgotten it.
+        col.addView(link(getString(R.string.role_how_it_works)) { showTour(0, from = "role") })
         scroll.addView(col)
         root.addView(scroll)
 
@@ -3788,7 +4381,11 @@ class MainActivity : AppCompatActivity() {
                     "window.tawnyStart && window.tawnyStart(" +
                         "${jsStr(role)},${jsStr(key)},${jsStr(name)}," +
                         "${signal?.let { jsStr(it) } ?: "null"},${jsStr(rendezvous)}," +
-                        "${token?.let { jsStr(it) } ?: "null"},{theme:${jsStr(currentTheme())}," +
+                        "${token?.let { jsStr(it) } ?: "null"},{theme:${jsStr(themeMode())}," +
+                        // "Follow system" is resolved here: the WebView's own
+                        // prefers-color-scheme tracks the app's forced mode.
+                        "systemTheme:${jsStr(systemTheme())}," +
+                        "coachSeen:${org.json.JSONArray(coachSeen().toList())}," +
                         // The page cannot see the app's own Animations switch —
                         // a WebView reads prefers-reduced-motion off the system
                         // setting, which is the one thing this switch exists to
@@ -4511,13 +5108,48 @@ class MainActivity : AppCompatActivity() {
         pairTick = null
     }
 
-    /** The palette the WebView should use right now — "light" or "dark". Honours
-     *  an explicit user choice; otherwise follows the resolved OS setting. */
-    private fun currentTheme(): String {
-        prefs.getString("theme", null)?.let { if (it == "light" || it == "dark") return it }
-        val night = resources.configuration.uiMode and
+    /** The user's choice: "system", "light" or "dark". */
+    private fun themeMode(): String =
+        prefs.getString("theme", null).takeIf { it == "light" || it == "dark" } ?: "system"
+
+    /**
+     * What the *phone* is set to, "light" or "dark". Read off the system
+     * resources rather than this Activity's, which carry the app's forced mode
+     * — so "Follow system" can still be resolved while the user has pinned one.
+     */
+    private fun systemTheme(): String {
+        val night = android.content.res.Resources.getSystem().configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK
         return if (night == android.content.res.Configuration.UI_MODE_NIGHT_YES) "dark" else "light"
+    }
+
+    /** The palette on screen right now — "light" or "dark". */
+    private fun currentTheme(): String = themeMode().takeIf { it != "system" } ?: systemTheme()
+
+    private fun themeLabel(mode: String) = getString(
+        when (mode) {
+            "light" -> R.string.theme_light
+            "dark" -> R.string.theme_dark
+            else -> R.string.theme_system
+        }
+    )
+
+    /**
+     * Take a new theme choice: persist it, say what it is now, and re-theme.
+     * The toast is the feedback the switch itself cannot give — "Follow system"
+     * looks exactly like whichever of light or dark the phone is in, and when
+     * the palette doesn't change at all there would otherwise be no sign the
+     * tap registered. Toasted on the application context so it outlives the
+     * recreate that follows.
+     */
+    private fun setThemeMode(mode: String, rebuild: (() -> Unit)? = null) {
+        val before = currentTheme()
+        prefs.edit().putString("theme", mode).apply()
+        Toast.makeText(
+            applicationContext, getString(R.string.theme_now, themeLabel(mode)), Toast.LENGTH_SHORT
+        ).show()
+        applyNightMode(mode)   // recreates the activity if the palette changes
+        if (currentTheme() == before) rebuild?.invoke()
     }
 
     private fun jsStr(s: String) =
@@ -4691,9 +5323,19 @@ class MainActivity : AppCompatActivity() {
                     // Theme changed from the in-session web toggle.
                     "theme" -> {
                         val mode = obj.optString("mode")
-                        if (mode == "light" || mode == "dark") {
+                        if (mode == "light" || mode == "dark" || mode == "system") {
                             prefs.edit().putString("theme", mode).apply()
-                            if (!isLive) applyNightMode(mode)   // don't recreate mid-call
+                            // Don't recreate mid-call; the next native screen
+                            // picks the choice up from TawnyApp on restart, or
+                            // from applyNightMode when it is next set.
+                            if (!isLive) applyNightMode(mode)
+                        }
+                    }
+                    // The first-call walkthrough was shown for this role.
+                    "coachDone" -> {
+                        val r = obj.optString("role")
+                        if (r == "viewer" || r == "station") {
+                            prefs.edit().putStringSet(COACH_SEEN, coachSeen() + r).apply()
                         }
                     }
                     "petname" -> {
@@ -4969,6 +5611,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun beginLive() {
         isLive = true
+        liveSince = System.currentTimeMillis()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         acquireSessionLocks()
         if (prefs.getString("role", null) == "station") {
@@ -4995,6 +5638,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun endLive() {
+        if (isLive) countSession(System.currentTimeMillis() - liveSince)
         isLive = false
         stopBatteryMirror()
         stopChimeAudio()
@@ -5234,7 +5878,11 @@ class MainActivity : AppCompatActivity() {
         val w = web
         if (w != null) {
             w.evaluateJavascript(
-                "window.tawnySetTheme && window.tawnySetTheme(${jsStr(currentTheme())})", null
+                // Repaint only. This used to call tawnySetTheme with the
+                // *resolved* palette, which posted it straight back as the
+                // user's choice — so a phone going dark at sunset mid-call
+                // silently pinned the app to dark for good.
+                "window.tawnySystemTheme && window.tawnySystemTheme(${jsStr(systemTheme())})", null
             )
         } else if (scannerStop == null) {
             recreate()   // rebuild the current native screen with the new palette
@@ -5565,6 +6213,71 @@ private class IconView(
                     lineTo(38f, 12f); lineTo(24f, 22.5f); lineTo(10f, 12f); close()
                 }
                 canvas.drawPath(flap, cut)
+            }
+            "star" -> {
+                // The rating row. Five points on the 48-box's centre, a hair
+                // low so it sits optically level with the round glyphs.
+                val st = Path()
+                for (n in 0 until 10) {
+                    val r = if (n % 2 == 0) 21f else 9f
+                    val ang = -PI / 2 + n * PI / 5
+                    val x = 24f + (r * cos(ang)).toFloat()
+                    val y = 25.5f + (r * sin(ang)).toFloat()
+                    if (n == 0) st.moveTo(x, y) else st.lineTo(x, y)
+                }
+                st.close()
+                canvas.drawPath(st, body)
+                canvas.drawCircle(19.5f, 21.5f, 2.2f, cut)       // shine
+            }
+            "help" -> {
+                canvas.drawCircle(24f, 24f, 20f, body)
+                val hook = Paint(cut).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = 5f
+                    strokeCap = Paint.Cap.ROUND
+                }
+                val q = Path().apply {
+                    moveTo(17.5f, 18.5f)
+                    cubicTo(17.5f, 10.5f, 30.5f, 10.5f, 30.5f, 18f)
+                    cubicTo(30.5f, 23f, 24f, 23f, 24f, 28.5f)
+                }
+                canvas.drawPath(q, hook)
+                canvas.drawCircle(24f, 35.5f, 2.9f, cut)         // dot
+            }
+            "theme" -> {
+                // A disc, half lit: follow-the-system, light and dark at once.
+                canvas.drawCircle(24f, 24f, 20f, body)
+                canvas.drawCircle(24f, 24f, 15.5f, cut)
+                canvas.drawArc(RectF(8.5f, 8.5f, 39.5f, 39.5f), 90f, 180f, true, body)
+            }
+            "chat" -> {
+                rr(canvas, 5f, 7f, 43f, 34f, 8f, body)           // bubble
+                canvas.drawPath(Path().apply {                   // tail
+                    moveTo(12f, 31f); lineTo(10f, 43f); lineTo(23f, 33f); close()
+                }, body)
+                canvas.drawCircle(15.5f, 20.5f, 2.6f, cut)
+                canvas.drawCircle(24f, 20.5f, 2.6f, cut)
+                canvas.drawCircle(32.5f, 20.5f, 2.6f, cut)
+            }
+            "qr" -> {
+                // Three finder squares and a scatter of modules: reads as "a
+                // code to scan" at any size, without pretending to be one.
+                fun finder(x: Float, y: Float) {
+                    rr(canvas, x, y, x + 16f, y + 16f, 3.5f, body)
+                    rr(canvas, x + 3.5f, y + 3.5f, x + 12.5f, y + 12.5f, 1.5f, cut)
+                    rr(canvas, x + 5.5f, y + 5.5f, x + 10.5f, y + 10.5f, 1f, dot)
+                }
+                finder(5f, 5f); finder(27f, 5f); finder(5f, 27f)
+                rr(canvas, 27f, 27f, 33f, 33f, 1.5f, body)
+                rr(canvas, 36f, 31f, 43f, 37f, 1.5f, body)
+                rr(canvas, 29f, 37f, 35f, 43f, 1.5f, body)
+                rr(canvas, 38f, 40f, 43f, 43f, 1f, body)
+            }
+            "moon" -> {
+                canvas.drawCircle(22f, 25f, 18f, body)
+                canvas.drawCircle(31f, 17f, 15f, cut)            // the bite
+                canvas.drawCircle(38.5f, 34f, 2f, body)          // a star
+                canvas.drawCircle(33f, 42f, 1.3f, body)
             }
             else -> {                                            // "phone"
                 rr(canvas, 13f, 4f, 35f, 44f, 6f, body)          // handset

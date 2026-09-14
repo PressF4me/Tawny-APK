@@ -266,8 +266,80 @@
     <string name="snap_save_video_failed">Could not save the video</string>
 
     <!-- =============================== a11y ==================== -->
-    <string name="a11y_theme_toggle">Toggle light / dark theme</string>
+    <string name="a11y_theme_toggle">Theme — <xliff:g id="mode" example="Follow system">%1$s</xliff:g>. Tap to change</string>
     <string name="a11y_app_version">App version — long-press for diagnostics</string>
     <string name="a11y_back">Back</string>
     <string name="a11y_animations">Animations</string>
+
+    <!-- ============================== theme ============================== -->
+    <string name="theme_title">Theme</string>
+    <string name="theme_system">Follow system</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_now">Theme: <xliff:g id="mode" example="Follow system">%1$s</xliff:g></string>
+    <string name="common_next">Next</string>
+    <string name="common_done">Done</string>
+
+    <!-- ============================ walkthrough ========================== -->
+    <string name="role_how_it_works">How does Tawny work?</string>
+    <string name="tour_skip">Skip</string>
+    <string name="tour_finish">Set up this phone</string>
+    <string name="tour_progress">Page <xliff:g id="n">%1$d</xliff:g> of <xliff:g id="total">%2$d</xliff:g></string>
+    <string name="tour_1_title">Two phones, one pet</string>
+    <string name="tour_1_body">One phone stays with your pet and becomes the Monitor — an old phone on a charger is perfect. The other comes with you as the Viewer.</string>
+    <string name="tour_2_title">Pair with a photo</string>
+    <string name="tour_2_body">The Monitor shows a QR code. Point the Viewer’s camera at it, and that’s the whole setup — no account, no sign-up, nothing to type.</string>
+    <string name="tour_3_title">Look in, talk back</string>
+    <string name="tour_3_body">Watch and listen live. Hold to talk, play a chime to call them over, turn on the Monitor’s light in a dark room, or save a snapshot.</string>
+    <string name="tour_4_title">Leave it watching</string>
+    <string name="tour_4_body">Keep the Monitor on a charger with Tawny open. Tap “Dim screen” once someone is watching — the stream keeps running on almost no battery.</string>
+    <string name="tour_5_title">Private by design</string>
+    <string name="tour_5_body">Video and sound go straight between your phones, encrypted, and nothing is ever recorded by us. Questions later? Help &amp; feedback is on the home screen.</string>
+
+    <!-- ========================== help & feedback ======================== -->
+    <string name="meta_help">Help &amp; feedback</string>
+    <string name="meta_rate">Rate Tawny</string>
+    <string name="help_title">Help &amp; feedback</string>
+    <string name="help_subtitle">Answers to common questions, and a direct line to us.</string>
+    <string name="help_replay_tour">Take the tour again</string>
+    <string name="help_replay_tour_sub">A one-minute look at how Tawny works</string>
+    <string name="help_eyebrow_faq">Common questions</string>
+    <string name="help_eyebrow_tell_us">Tell us</string>
+    <string name="help_feedback">Send feedback</string>
+    <string name="help_feedback_sub">A bug, an idea, or anything else</string>
+    <string name="help_rate_sub">On Google Play — it helps other pet owners find Tawny</string>
+    <string name="help_diagnostics">Connection diagnostics</string>
+    <string name="help_diagnostics_sub">The log to send us if a connection won’t hold</string>
+
+    <string name="faq_two_phones_q">Why do I need two phones?</string>
+    <string name="faq_two_phones_a">One phone is the camera that stays with your pet (the Monitor); the other is the one you watch on (the Viewer). There is no cloud camera service in between — your own phones do the whole job, which is how your video stays yours.</string>
+    <string name="faq_pair_q">How do I connect the two phones?</string>
+    <string name="faq_pair_a">On the phone that stays home, choose “The Monitor”. It shows a QR code. On your other phone, choose “The Viewer” and scan that code. No camera on hand? On the Monitor tap “Show as link”, send it to yourself, and paste it on the Viewer. Once paired, the Viewer remembers the Monitor.</string>
+    <string name="faq_away_q">Can I watch when I’m not at home?</string>
+    <string name="faq_away_a">Yes. Tawny connects the two phones over the internet by itself — nothing to set up and no ports to open. The first time you connect from away, check that the short safety code matches on both phones.</string>
+    <string name="faq_screen_q">Why does the Monitor stop when its screen turns off?</string>
+    <string name="faq_screen_a">Android takes the camera away from any app that isn’t on screen, so the Monitor has to stay open. If it does get interrupted, the Viewer shows “Monitor paused” and the picture comes back as soon as Tawny is open again. To save power, use “Dim screen” instead of switching the screen off.</string>
+    <string name="faq_battery_q">How do I save battery on the Monitor?</string>
+    <string name="faq_battery_a">Keep it on a charger, turn the brightness down and adaptive brightness off, and tap “Dim screen” once a Viewer has connected. The backlight goes almost completely dark while the stream keeps running.</string>
+    <string name="faq_private_q">Is my video recorded or stored anywhere?</string>
+    <string name="faq_private_a">No. Video and sound travel encrypted, directly between your phones, and are never recorded or kept by us. There’s no account, no ads and no analytics. Snapshots and clips you save yourself stay on your phone, in Pictures/Tawny and Movies/Tawny.</string>
+    <string name="faq_viewers_q">Can more than one person watch?</string>
+    <string name="faq_viewers_a">Up to three phones can watch one Monitor at the same time. On the Monitor, tap the + in the corner to show the pairing code again and scan it from the new phone.</string>
+    <string name="faq_light_q">Why can’t I turn on the light?</string>
+    <string name="faq_light_a">The light is the Monitor’s camera flash, so the Monitor has to be using its back camera — switch it with “Flip camera”. Some phones and most tablets have no flash at all. The light turns itself off after five minutes to spare the Monitor’s battery.</string>
+    <string name="faq_connect_q">The phones won’t connect. What can I try?</string>
+    <string name="faq_connect_a">Make sure Tawny is open on both phones and both are online — Wi-Fi at either end helps. Pairing codes expire after ten minutes, so scan a fresh one. Still stuck? Send us the connection diagnostics from the “Tell us” section below.</string>
+    <string name="faq_cost_q">Does Tawny cost anything?</string>
+    <string name="faq_cost_a">No. Tawny is free, with no ads and nothing to unlock. You can chip in toward the relay it runs on, but it gets you nothing extra — on purpose.</string>
+
+    <string name="feedback_body">Pick what it is and tell us in a few words. It opens in your email app, so you can check it before it’s sent.</string>
+    <string name="feedback_kind_bug">Bug</string>
+    <string name="feedback_kind_idea">Idea</string>
+    <string name="feedback_kind_other">Other</string>
+    <string name="feedback_hint">What happened, or what would make Tawny better?</string>
+    <string name="feedback_attach_log">Include the diagnostics log</string>
+    <string name="feedback_send">Send</string>
+    <string name="feedback_empty">Write a few words first</string>
+    <string name="feedback_subject">Tawny feedback — <xliff:g id="kind" example="Idea">%1$s</xliff:g> (v<xliff:g id="version" example="1.0.0">%2$s</xliff:g>)</string>
+    <string name="feedback_copied">No email app — note copied. Paste it to <xliff:g id="email">%1$s</xliff:g></string>
 </resources>

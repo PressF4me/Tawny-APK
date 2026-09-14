@@ -267,8 +267,80 @@
     <string name="snap_save_video_failed">No se pudo guardar el video</string>
 
     <!-- =============================== a11y ================== -->
-    <string name="a11y_theme_toggle">Cambiar entre tema claro y oscuro</string>
+    <string name="a11y_theme_toggle">Tema — <xliff:g id="mode" example="Según el sistema">%1$s</xliff:g>. Pulsa para cambiar</string>
     <string name="a11y_app_version">Versión de la app; mantén pulsado para el diagnóstico</string>
     <string name="a11y_back">Atrás</string>
     <string name="a11y_animations">Animaciones</string>
+
+    <!-- ============================== theme ============================== -->
+    <string name="theme_title">Tema</string>
+    <string name="theme_system">Según el sistema</string>
+    <string name="theme_light">Claro</string>
+    <string name="theme_dark">Oscuro</string>
+    <string name="theme_now">Tema: <xliff:g id="mode" example="Según el sistema">%1$s</xliff:g></string>
+    <string name="common_next">Siguiente</string>
+    <string name="common_done">Listo</string>
+
+    <!-- ============================ walkthrough ========================== -->
+    <string name="role_how_it_works">¿Cómo funciona Tawny?</string>
+    <string name="tour_skip">Omitir</string>
+    <string name="tour_finish">Configurar este teléfono</string>
+    <string name="tour_progress">Página <xliff:g id="n">%1$d</xliff:g> de <xliff:g id="total">%2$d</xliff:g></string>
+    <string name="tour_1_title">Dos teléfonos, una mascota</string>
+    <string name="tour_1_body">Un teléfono se queda con tu mascota y hace de Monitor — uno viejo en el cargador es perfecto. El otro va contigo como Visor.</string>
+    <string name="tour_2_title">Vincula con una foto</string>
+    <string name="tour_2_body">El Monitor muestra un código QR. Apunta la cámara del Visor hacia él y listo — sin cuenta, sin registro, sin escribir nada.</string>
+    <string name="tour_3_title">Mira y háblale</string>
+    <string name="tour_3_body">Mira y escucha en directo. Mantén pulsado para hablar, reproduce un sonido para llamarla, enciende la luz del Monitor en una habitación oscura o guarda una foto.</string>
+    <string name="tour_4_title">Déjalo vigilando</string>
+    <string name="tour_4_body">Deja el Monitor en el cargador con Tawny abierto. Pulsa “Atenuar” cuando alguien esté mirando — la transmisión sigue gastando casi nada de batería.</string>
+    <string name="tour_5_title">Privado por diseño</string>
+    <string name="tour_5_body">El vídeo y el sonido van directamente entre tus teléfonos, cifrados, y nosotros nunca grabamos nada. ¿Dudas más adelante? Ayuda y comentarios está en la pantalla de inicio.</string>
+
+    <!-- ========================== help & feedback ======================== -->
+    <string name="meta_help">Ayuda y comentarios</string>
+    <string name="meta_rate">Valorar Tawny</string>
+    <string name="help_title">Ayuda y comentarios</string>
+    <string name="help_subtitle">Respuestas a preguntas frecuentes y una línea directa con nosotros.</string>
+    <string name="help_replay_tour">Ver el recorrido otra vez</string>
+    <string name="help_replay_tour_sub">Un vistazo de un minuto a cómo funciona Tawny</string>
+    <string name="help_eyebrow_faq">Preguntas frecuentes</string>
+    <string name="help_eyebrow_tell_us">Cuéntanos</string>
+    <string name="help_feedback">Enviar comentarios</string>
+    <string name="help_feedback_sub">Un error, una idea o cualquier otra cosa</string>
+    <string name="help_rate_sub">En Google Play — ayuda a otros dueños de mascotas a encontrar Tawny</string>
+    <string name="help_diagnostics">Diagnóstico de conexión</string>
+    <string name="help_diagnostics_sub">El registro para enviarnos si la conexión no se mantiene</string>
+
+    <string name="faq_two_phones_q">¿Por qué necesito dos teléfonos?</string>
+    <string name="faq_two_phones_a">Un teléfono es la cámara que se queda con tu mascota (el Monitor); el otro es con el que miras (el Visor). No hay ningún servicio de cámara en la nube de por medio — tus propios teléfonos hacen todo el trabajo, y así tu vídeo sigue siendo tuyo.</string>
+    <string name="faq_pair_q">¿Cómo conecto los dos teléfonos?</string>
+    <string name="faq_pair_a">En el teléfono que se queda en casa, elige “El monitor”. Mostrará un código QR. En tu otro teléfono, elige “El visor” y escanea ese código. ¿Sin cámara a mano? En el Monitor pulsa “Mostrar como enlace”, envíatelo y pégalo en el Visor. Una vez vinculado, el Visor recuerda el Monitor.</string>
+    <string name="faq_away_q">¿Puedo mirar cuando no estoy en casa?</string>
+    <string name="faq_away_a">Sí. Tawny conecta los dos teléfonos por internet por sí solo — nada que configurar ni puertos que abrir. La primera vez que te conectes desde fuera, comprueba que el código de seguridad corto coincida en ambos teléfonos.</string>
+    <string name="faq_screen_q">¿Por qué se detiene el Monitor cuando se apaga su pantalla?</string>
+    <string name="faq_screen_a">Android le quita la cámara a cualquier app que no esté en pantalla, así que el Monitor tiene que seguir abierto. Si se interrumpe, el Visor muestra “Monitor en pausa” y la imagen vuelve en cuanto Tawny esté abierto otra vez. Para ahorrar energía, usa “Atenuar” en lugar de apagarla.</string>
+    <string name="faq_battery_q">¿Cómo ahorro batería en el Monitor?</string>
+    <string name="faq_battery_a">Déjalo en el cargador, baja el brillo y desactiva el brillo adaptativo, y pulsa “Atenuar” cuando un Visor se haya conectado. La retroiluminación queda casi a oscuras mientras la transmisión sigue.</string>
+    <string name="faq_private_q">¿Se graba o guarda mi vídeo en algún sitio?</string>
+    <string name="faq_private_a">No. El vídeo y el sonido viajan cifrados, directamente entre tus teléfonos, y nosotros nunca los grabamos ni guardamos. No hay cuenta, ni anuncios, ni analítica. Las fotos y clips que guardes tú se quedan en tu teléfono, en Pictures/Tawny y Movies/Tawny.</string>
+    <string name="faq_viewers_q">¿Puede mirar más de una persona?</string>
+    <string name="faq_viewers_a">Hasta tres teléfonos pueden mirar un mismo Monitor a la vez. En el Monitor, pulsa el + de la esquina para volver a mostrar el código y escanéalo desde el nuevo teléfono.</string>
+    <string name="faq_light_q">¿Por qué no puedo encender la luz?</string>
+    <string name="faq_light_a">La luz es el flash de la cámara del Monitor, así que el Monitor tiene que usar su cámara trasera — cámbiala con “Girar”. Algunos teléfonos y casi todas las tabletas no tienen flash. La luz se apaga sola a los cinco minutos para cuidar la batería del Monitor.</string>
+    <string name="faq_connect_q">Los teléfonos no se conectan. ¿Qué puedo probar?</string>
+    <string name="faq_connect_a">Asegúrate de que Tawny esté abierto en los dos teléfonos y de que ambos tengan conexión — el Wi-Fi en cualquiera de los dos lados ayuda. Los códigos caducan a los diez minutos, así que escanea uno nuevo. ¿Sigue sin funcionar? Envíanos el diagnóstico de conexión desde la sección “Cuéntanos” de abajo.</string>
+    <string name="faq_cost_q">¿Tawny cuesta algo?</string>
+    <string name="faq_cost_a">No. Tawny es gratis, sin anuncios y sin nada que desbloquear. Puedes aportar para el relé en el que funciona, pero no obtienes nada extra — a propósito.</string>
+
+    <string name="feedback_body">Elige qué es y cuéntanoslo en pocas palabras. Se abre en tu app de correo, así puedes revisarlo antes de enviarlo.</string>
+    <string name="feedback_kind_bug">Error</string>
+    <string name="feedback_kind_idea">Idea</string>
+    <string name="feedback_kind_other">Otro</string>
+    <string name="feedback_hint">¿Qué pasó, o qué haría mejor a Tawny?</string>
+    <string name="feedback_attach_log">Incluir el registro de diagnóstico</string>
+    <string name="feedback_send">Enviar</string>
+    <string name="feedback_empty">Escribe unas palabras primero</string>
+    <string name="feedback_subject">Comentarios de Tawny — <xliff:g id="kind" example="Idea">%1$s</xliff:g> (v<xliff:g id="version" example="1.0.0">%2$s</xliff:g>)</string>
+    <string name="feedback_copied">No hay app de correo — nota copiada. Pégala en <xliff:g id="email">%1$s</xliff:g></string>
 </resources>
