@@ -1926,8 +1926,10 @@ function syncStationSas() {
   S.sasAsk = ask ? ask.id : null;
 
   if (!ask) {
+    const wasUp = !el.sas.hidden;
     el.sas.hidden = true;
     el.sas.classList.remove('sas--warn');
+    if (wasUp) maybeCoach();   // the first-call tour waits behind this card
     return;
   }
 
@@ -4463,6 +4465,7 @@ $('#sas-ok')?.addEventListener('click', () => {
   if (!el.sas.classList.contains('sas--warn')) markSasReviewed(el.sascode.textContent);
   el.sas.hidden = true;
   el.saschip.hidden = true;
+  maybeCoach();
 });
 $('#sas-no')?.addEventListener('click', () => {
   if (S.role === 'station') {
@@ -4608,14 +4611,17 @@ function markCoachSeen(role) {
 }
 
 let coachOn = false;
+// The safety-code card comes first: the tour waits until it has been answered
+// (the #sas-ok / #sas-no handlers and syncStationSas call maybeCoach again).
+const sasUp = () => !el.sas.hidden;
 function maybeCoach() {
   const role = S.role;
   if (coachOn || !COACH_STEPS[role] || coachSeen(role)) return;
-  if (document.body.classList.contains('dimmed')) return;
+  if (document.body.classList.contains('dimmed') || sasUp()) return;
   // Give the picture a moment to land before anything is drawn over it.
   setTimeout(() => {
     if (coachOn || S.role !== role || coachSeen(role)) return;
-    if (document.body.classList.contains('dimmed') || el.live.hidden) return;
+    if (document.body.classList.contains('dimmed') || el.live.hidden || sasUp()) return;
     const steps = COACH_STEPS[role]
       .map(([sel, key]) => [document.querySelector(sel), key])
       .filter(([node]) => node && !node.hidden && node.offsetParent !== null);
@@ -4625,7 +4631,6 @@ function maybeCoach() {
 
 function runCoach(role, steps) {
   coachOn = true;
-  markCoachSeen(role);   // once is once, even if the call drops mid-tour
   const wrap = document.createElement('div');
   wrap.className = 'coach';
   wrap.setAttribute('role', 'dialog');
@@ -4664,7 +4669,10 @@ function runCoach(role, steps) {
     if (r.top > vh / 2) { bubble.style.top = ''; bubble.style.bottom = `${vh - r.top + pad + 12}px`; }
     else { bubble.style.bottom = ''; bubble.style.top = `${r.bottom + pad + 12}px`; }
   };
-  const end = () => {
+  // Once is once, even if the call drops mid-tour — except when the safety-code
+  // card cuts in, which hides the tour; that one runs again after the card.
+  const end = (shown = true) => {
+    if (shown) markCoachSeen(role);
     coachOn = false;
     window.removeEventListener('resize', place);
     wrap.remove();
@@ -4673,11 +4681,12 @@ function runCoach(role, steps) {
 
   next.addEventListener('click', (e) => { e.stopPropagation(); advance(); });
   skip.addEventListener('click', (e) => { e.stopPropagation(); end(); });
-  wrap.addEventListener('click', advance);
+  wrap.addEventListener('click', () => advance());
   window.addEventListener('resize', place);
   // A call that ends, or a screen that dims, takes the tour with it.
   const watch = setInterval(() => {
     if (!coachOn) return clearInterval(watch);
+    if (sasUp()) { clearInterval(watch); end(false); return; }
     if (el.live.hidden || document.body.classList.contains('dimmed')) { clearInterval(watch); end(); }
   }, 500);
   place();
