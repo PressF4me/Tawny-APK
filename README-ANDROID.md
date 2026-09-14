@@ -47,7 +47,7 @@ tawny.turnMode=auto
 ```
 
 With none of these set, the app builds **LAN-only** — identical to a build
-before remote support existed. Deploy steps for the relay: `rendezvous/README.md`.
+before remote support existed. Deploy steps for the relay: `app/rendezvous/README.md` in the Tawny Docker repo.
 
 These are the *build's* defaults. An installed app can be pointed elsewhere at
 runtime — see **Servers (advanced)** below — including a build with none of
@@ -113,8 +113,7 @@ keytool -genkeypair -v -keystore tawny-upload.jks -alias upload \
 ```
 
 Then enrol in **Play App Signing** on the first upload. If the file is absent the
-release build is produced unsigned (useful as a CI artifact). See
-`PLAY-SUBMISSION.md` for the full store checklist.
+release build is produced unsigned (useful as a CI artifact).
 
 ## Install a debug build
 

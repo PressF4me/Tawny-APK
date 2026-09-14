@@ -10,8 +10,7 @@ Video and audio go **peer to peer over WebRTC**, encrypted end to end
 the job a server would.
 
 - **Android app:** [`README-ANDROID.md`](README-ANDROID.md)
-- **Remote (off-Wi-Fi) setup:** [`rendezvous/README.md`](rendezvous/README.md)
-- **Publishing to Google Play:** [`PLAY-SUBMISSION.md`](PLAY-SUBMISSION.md)
+- **Self-hosting (container, relay, rendezvous):** the separate **Tawny Docker** repo
 - **Security model & residual risk:** [`SECURITY.md`](SECURITY.md)
 
 ## Supporting it
@@ -58,37 +57,21 @@ rule is about who can newly join, not how long a session lasts. See
 
 ```
 android/                 the Android app (native shell + bundled web client)
-public/                  the web client — index.html, style.css, app.js
-public/vendor/           qrcode-generator (MIT), vendored for offline use
-server.js                self-host reference relay (Node) — signalling + /turn + static
-rendezvous/              Cloudflare Worker + Durable Object for the remote path
-  worker.js room.js wrangler.toml
-  privacy.js             the privacy policy page, served at GET /privacy
-  deno/main.ts           single-file alternative for Deno Deploy
-  README.md              deploy steps (Cloudflare / Deno / self-hosted coturn)
-desktop/                 optional Linux desktop launcher for the web client
-PLAY-SUBMISSION.md       Google Play checklist + pre-review audit
-privacy-policy.md        privacy policy source text (published from rendezvous/privacy.js)
-docs/                    DIRECTION.md (strategy), play-submission-runbook.md, listing notes
+public/                  the web client — index.html, style.css, app.js, i18n.js
+public/vendor/           QR encode/decode libraries, vendored for offline use
+public/sounds/           chime clips (sounds/_src/ holds the recordings; not shipped)
+tools/                   build, release, emulator and probe helpers
+docs/diagnostic-reports.md  what an opt-in diagnostic report contains
+README-ANDROID.md        building and running the Android app
+privacy-policy.md        privacy policy source text
 SECURITY.md              threat model, hardening, residual risk
 ```
 
-## Self-hosting the web client
+## Self-hosting
 
-`server.js` (Node 18+) serves `public/` and the signalling relay. For a quick
-local run:
-
-```sh
-npm install && node server.js       # http://localhost:8099
-```
-
-Browsers only release the camera/mic on `https://` (or `localhost`), so put it
-behind TLS. Environment: `PORT`, `HOST`, `ALLOWED_HOSTS`, `STUN_URLS`,
-`RENDEZVOUS_URL`, `TURN_MODE`, `TAWNY_TURN_URLS`, `TAWNY_TURN_SECRET`.
-
-For a real deployment — container, automatic HTTPS, and an optional bundled TURN
-relay — use the sibling **`../Tawny Docker/`** folder and its
-[`README.md`](../Tawny%20Docker/README.md).
+The self-host relay (`server.js`), the rendezvous Worker, and the container —
+automatic HTTPS over Tailscale and an optional bundled TURN relay — live in the
+separate **Tawny Docker** repo, which vendors `public/` from here.
 
 No CDN, no web fonts fetched at runtime, no analytics — the app works on a
 network with no internet at all.
