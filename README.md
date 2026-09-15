@@ -28,10 +28,6 @@ the job a server would.
   <img src="docs/media/screenshot-07.jpg" width="200" alt="Back in one tap">
   <img src="docs/media/screenshot-08.jpg" width="200" alt="Light or dark">
 </p>
-<p align="center">
-  <a href="docs/media/demo.mp4"><b>▶ Watch the setup video</b></a> (79 s, a real
-  recording of two phones on Tawny 1.0)
-</p>
 
 - **Android app:** [`README-ANDROID.md`](README-ANDROID.md)
 - **Self-hosting (container, relay, rendezvous):** the separate **Tawny Docker** repo
@@ -86,7 +82,7 @@ public/vendor/           QR encode/decode libraries, vendored for offline use
 public/sounds/           chime clips (sounds/_src/ holds the recordings; not shipped)
 tools/                   build, release, emulator and probe helpers
 docs/diagnostic-reports.md  what an opt-in diagnostic report contains
-docs/media/              README screenshots and the setup video (from the store pack)
+docs/media/              README screenshots (from the store pack)
 README-ANDROID.md        building and running the Android app
 privacy-policy.md        privacy policy source text
 SECURITY.md              threat model, hardening, residual risk
