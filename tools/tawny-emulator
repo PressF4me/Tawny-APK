@@ -15,14 +15,36 @@
 #   TAWNY_EMU_CAMERA=none           back camera disabled
 set -euo pipefail
 
+# Errors have to be visible even when this is started from a launcher with no
+# terminal attached (wofi, a .desktop entry), so route them to a notification.
+die() {
+  echo "$*" >&2
+  command -v notify-send >/dev/null 2>&1 &&
+    notify-send -a "Tawny Emulator" -u critical "Tawny Emulator" "$*" || true
+  exit 1
+}
+
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/sdk}"
 export JAVA_HOME="${JAVA_HOME:-$HOME/Android/jdk17}"
-export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+
+# Wayland session (Hyprland): the SDK bundles its own Qt, which ships no
+# wayland platform plugin and no qt6ct theme plugin. Inheriting the session's
+# QT_QPA_* leaves the emulator hunting for plugins it doesn't have, so pin it
+# to xcb and let Xwayland host the window.
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+  export QT_QPA_PLATFORM=xcb
+  unset QT_QPA_PLATFORMTHEME
+  [ -n "${DISPLAY:-}" ] || die "Wayland session with no Xwayland DISPLAY; the emulator UI needs Xwayland."
+fi
 
 EMU="$ANDROID_HOME/emulator/emulator"
 ADB="$ANDROID_HOME/platform-tools/adb"
 PROJECT="$HOME/Projects/Tawny Android"
 PKG="com.tawny.monitor.debug"
+
+[ -x "$EMU" ] || die "No emulator binary at $EMU. Set ANDROID_HOME or install the SDK's emulator package."
+[ -x "$ADB" ] || die "No adb at $ADB. Install the SDK's platform-tools."
 
 AVD="frentalk36"
 RUN=0
@@ -41,14 +63,56 @@ if ! "$EMU" -list-avds | grep -qx "$AVD"; then
   "$EMU" -list-avds >&2
   echo >&2
   echo "Create one with Android Studio, or:" >&2
-  echo "  sdkmanager 'system-images;android-35;google_apis;x86_64'" >&2
-  echo "  avdmanager create avd -n frentalk -k 'system-images;android-35;google_apis;x86_64' -d pixel_6" >&2
-  exit 1
+  echo "  sdkmanager 'system-images;android-36;google_apis;x86_64'" >&2
+  echo "  avdmanager create avd -n $AVD -k 'system-images;android-36;google_apis;x86_64' -d pixel_6" >&2
+  die "AVD '$AVD' not found. Available: $("$EMU" -list-avds | paste -sd' ' -)"
 fi
+
+# The emulator logs an adb connection error if the daemon isn't up when it
+# starts, and then never registers with it.
+"$ADB" start-server >/dev/null 2>&1 || true
+
+# Hyprland: pull an existing emulator window into view. Without this, clicking
+# the launcher a second time just reports "already running" and exits, which
+# looks identical to nothing happening when the window sits on a workspace or
+# monitor you are not currently looking at.
+#
+# This Hyprland is configured in Lua, so `hyprctl dispatch` wants a dispatcher
+# object (hl.dsp.*), not the plain "movetoworkspace 1,class:foo" string form.
+# The emulator owns two windows (the device and its tool strip) and a class
+# match only ever moves the first one, so each is moved by address.
+show_existing_window() {
+  [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || return 0
+  command -v hyprctl >/dev/null 2>&1 || return 0
+
+  local ws addrs a
+  ws="$(hyprctl activeworkspace -j 2>/dev/null | sed -n 's/.*"id": *\([0-9-]*\).*/\1/p' | head -1)"
+  [ -n "$ws" ] || return 0
+
+  if command -v jq >/dev/null 2>&1; then
+    addrs="$(hyprctl clients -j 2>/dev/null |
+      jq -r '.[] | select(.class == "Emulator") | .address')"
+  fi
+
+  # Bring it to wherever you are, rather than yanking you to another workspace.
+  if [ -n "${addrs:-}" ]; then
+    for a in $addrs; do
+      hyprctl dispatch \
+        "hl.dsp.window.move({ workspace = \"$ws\", window = \"address:$a\" })" \
+        >/dev/null 2>&1 || true
+    done
+  else
+    hyprctl dispatch \
+      "hl.dsp.window.move({ workspace = \"$ws\", window = \"class:^(Emulator)$\" })" \
+      >/dev/null 2>&1 || true
+  fi
+  hyprctl dispatch 'hl.dsp.focus({ window = "class:^(Emulator)$" })' >/dev/null 2>&1 || true
+}
 
 # already running?
 if "$ADB" devices | grep -q 'emulator-.*device'; then
-  echo "An emulator is already running."
+  echo "An emulator is already running; bringing its window to this workspace."
+  show_existing_window
 else
   echo "Starting AVD '$AVD'…"
   # -camera-back feeds the app's Monitor role — the host's real webcam by
@@ -64,7 +128,7 @@ echo "Waiting for boot…"
 until [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done
 
 echo "Building + installing the debug app…"
-( cd "$PROJECT/android" && ./gradlew -q :app:assembleDebug )
+( cd "$PROJECT/android" && ./gradlew -q :app:assembleDebug ) || die "Gradle build failed; run tawny-emulator --run from a terminal to see why."
 "$ADB" install -r "$PROJECT/android/app/build/outputs/apk/debug/app-debug.apk"
 "$ADB" shell am start -n "$PKG/com.tawny.monitor.MainActivity" >/dev/null
 echo "Tawny launched on $AVD."

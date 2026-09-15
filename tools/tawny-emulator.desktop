@@ -3,18 +3,25 @@ Type=Application
 Name=Tawny Emulator
 GenericName=Android Emulator
 Comment=Start the Android emulator for the Tawny project
-Exec=$HOME/.local/bin/tawny-emulator
+# The bin path below is substituted at install time — the desktop spec does
+# not expand $HOME or any other variable inside Exec.
+Exec=@BIN@/tawny-emulator
 Icon=tawny-emulator
 Terminal=false
 Categories=Development;
 Keywords=android;emulator;avd;tawny;
 StartupNotify=true
-Actions=run;clean;
+StartupWMClass=Emulator
+Actions=run;clean;terminal;
 
 [Desktop Action run]
 Name=Start + build & install Tawny
-Exec=$HOME/.local/bin/tawny-emulator --run
+Exec=@BIN@/tawny-emulator --run
 
 [Desktop Action clean]
 Name=Cold boot (wipe data)
-Exec=$HOME/.local/bin/tawny-emulator --clean
+Exec=@BIN@/tawny-emulator --clean
+
+[Desktop Action terminal]
+Name=Start + build in a terminal (show output)
+Exec=xdg-terminal-exec @BIN@/tawny-emulator --run
