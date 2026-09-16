@@ -35,6 +35,8 @@ the job a server would.
 
 ## Supporting it
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/A6N425ZWFE)
+
 Tawny is free: no ads, no account, no paywall, nothing locked. The only
 recurring cost is the rendezvous/TURN relay that lets the two phones find each
 other when they are not on the same Wi-Fi.

@@ -27,7 +27,8 @@ node_modules/
 /install.sh
 /tawny-launch
 /.dockerignore
-/.github/
+/.github/*
+!/.github/FUNDING.yml
 /.claude/
 /PLAY-SUBMISSION.md
 /docs/play-submission-runbook.md
