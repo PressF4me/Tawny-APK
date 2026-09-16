@@ -35,16 +35,14 @@ the job a server would.
 
 ## Supporting it
 
-Tawny is free, has no ads, no account, and nothing behind a paywall. The only
+Tawny is free: no ads, no account, no paywall, nothing locked. The only
 recurring cost is the rendezvous/TURN relay that lets the two phones find each
 other when they are not on the same Wi-Fi.
 
-**<https://ko-fi.com/tawnyone>** — one-off or recurring, and it unlocks nothing
-in the app. That is deliberate: Play's Payments policy only permits an external
-contribution link when it grants no digital benefit of any kind, and "supporters
-get nothing extra" is also the honest version. The same URL is the one shown in
-the app's **About** screen and in the web client's footer — if you see a
-different one anywhere claiming to be us, it isn't.
+If you want to chip in: **<https://ko-fi.com/tawnyone>**. It unlocks nothing —
+every feature is there for everyone either way. That link and the Lightning
+address in the app's **About** screen are the only ones we use; anything else
+claiming to be us isn't.
 
 ---
 
@@ -72,6 +70,12 @@ screen and re-minted in place when it runs out — an old photograph of a QR doe
 not pair a phone later. Phones that paired inside the window keep working; the
 rule is about who can newly join, not how long a session lasts. See
 [`SECURITY.md`](SECURITY.md), "Pairing codes expire after ten minutes".
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). Use it, fork it, ship it; keep the copyright
+notice. The owlet mascot and the Tawny name are the one exception: they are the
+app's identity on the Play Store, so please use your own if you publish a fork.
 
 ## Repository layout
 
