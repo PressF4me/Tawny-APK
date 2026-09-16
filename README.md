@@ -36,15 +36,15 @@ the job a server would.
 ## Supporting it
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/A6N425ZWFE)
+[![Tip in Bitcoin](docs/media/lightning-button.png)](https://strike.me/@loustrikes)
 
 Tawny is free: no ads, no account, no paywall, nothing locked. The only
 recurring cost is the rendezvous/TURN relay that lets the two phones find each
-other when they are not on the same Wi-Fi.
+other when they are not on the same Wi-Fi. Chipping in unlocks nothing — every
+feature is there for everyone either way.
 
-If you want to chip in: **<https://ko-fi.com/tawnyone>**. It unlocks nothing —
-every feature is there for everyone either way. That link and the Lightning
-address in the app's **About** screen are the only ones we use; anything else
-claiming to be us isn't.
+The two buttons above are the same ones in the app's **About** screen. Anything
+else asking for money in Tawny's name isn't us.
 
 ---
 
