@@ -1,6 +1,6 @@
 # Tawny — Privacy Policy
 
-_Last updated: 2026-08-30_
+_Last updated: 2026-09-18_
 
 Tawny is a two-way pet monitor. One device (**the Monitor**) stays with your pet
 and sends its camera and microphone; one or more other devices (**Viewers**)
@@ -49,8 +49,40 @@ Video and audio use **WebRTC** and are encrypted end to end with DTLS-SRTP.
     must, to route packets. These are not logged to identify you and are not
     shared with anyone.
 
+- **To find a direct path**, each device may ask a public **STUN** server what
+  its public IP address is. The Play release uses Cloudflare's
+  (`stun.cloudflare.com`) and Google's (`stun.l.google.com`). A STUN server sees
+  the device's IP address and nothing else: no key, no room, no media.
+
 The rendezvous service for the Play release is operated by the developer of this
-listing; contact details are below.
+listing, on Cloudflare's infrastructure (Cloudflare Workers for the rendezvous,
+Cloudflare Realtime for the TURN relay); contact details are below. Cloudflare
+processes the connection data described above on the developer's behalf.
+
+The app draws its screens in Android's own **System WebView**. On most devices
+the WebView may contact Google for its own services, such as Safe Browsing,
+under Google's privacy policy. The app itself sends Google nothing.
+
+## Using your own servers
+
+The diagnostics screen (long-press the version number) has a **Servers**
+screen where you can point the app at a rendezvous, STUN and TURN servers of
+your own. Those servers then receive what Tawny's would (IP addresses, hashed
+room identifiers, encrypted media when relaying), and they are operated by
+whoever runs them, not by us. Normally, Tawny's servers stay behind yours as a
+fallback, used only if yours do not answer.
+
+The same screen has **For tighter privacy [advanced]**. With it on, the app
+contacts only the servers you type there and nothing else:
+
+- no Tawny rendezvous or TURN relay, not even as a fallback;
+- no public STUN (a blank STUN field means none);
+- no relay picked up from a scanned pairing code;
+- no **Send to Tawny** button for diagnostics;
+- the WebView's Safe Browsing checks are turned off.
+
+If your servers are wrong or unreachable, the app does not connect over the
+internet at all. It never falls back to ours.
 
 ## Sending a diagnostics report
 
