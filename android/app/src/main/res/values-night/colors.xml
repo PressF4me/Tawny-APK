@@ -12,6 +12,5 @@
     <color name="sky">#FFA6B489</color>     <!-- muted sage -->
     <color name="live">#FFDB5A4A</color>
     <color name="stage">#FF0C0B0A</color>
-    <color name="icon_bg">#FF9BC3E3</color>
     <color name="on_accent">#FF191410</color>
 </resources>

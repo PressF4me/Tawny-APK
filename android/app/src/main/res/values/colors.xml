@@ -12,6 +12,5 @@
     <color name="sky">#FF5B93B8</color>
     <color name="live">#FFD8452F</color>
     <color name="stage">#FF0C0D12</color>
-    <color name="icon_bg">#FF9BC3E3</color>
     <color name="on_accent">#FFFFFFFF</color>
 </resources>
