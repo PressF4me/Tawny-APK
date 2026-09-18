@@ -5,7 +5,7 @@
 > avoid AI-built software for ethical, political, professional or personal
 > reasons, so you should know that before you install, run or contribute.
 
-# Tawny — Pet Monitor
+# 🦉 Tawny — Pet Monitor
 
 Turn two phones into a private pet camera. One phone stays with the pet (**the
 Monitor**) and streams its camera and microphone; the other (**the Viewer**)
@@ -42,7 +42,7 @@ the job a server would.
   and watch from any browser on your tailnet.</sub>
 </p>
 
-## Supporting it
+## 😌 Supporting it
 
 <a href="https://ko-fi.com/A6N425ZWFE"><img src="https://ko-fi.com/img/githubbutton_sm.svg" height="30" alt="Support me on Ko-fi"></a>
 <a href="https://strike.me/@loustrikes"><img src="docs/media/lightning-button.png" height="30" alt="Tip in Bitcoin"></a>
@@ -57,7 +57,7 @@ else asking for money in Tawny's name isn't us.
 
 ---
 
-## How it connects
+## 🔍 How it connects
 
 | Situation | Path | Server involved |
 |---|---|---|
@@ -103,7 +103,7 @@ privacy-policy.md        privacy policy source text
 SECURITY.md              threat model, hardening, residual risk
 ```
 
-## Self-hosting
+## 🤓 Self-hosting
 
 The self-host relay (`server.js`), the rendezvous Worker, and the container —
 automatic HTTPS over Tailscale and an optional bundled TURN relay — live in the
