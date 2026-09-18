@@ -19,8 +19,8 @@ node_modules/
 # publish/release tooling only touches
 /ios/
 /desktop/
-/docker/
-/rendezvous/
+/docker
+/rendezvous
 /server.js
 /package.json
 /package-lock.json
