@@ -740,7 +740,7 @@ class MainActivity : AppCompatActivity() {
         val relayNote = when {
             p.relay == null -> ""
             adoptRelay != null -> " (adopted)"
-            strictPrivacy() -> " (not adopted: harder privacy)"
+            strictPrivacy() -> " (not adopted: tighter privacy)"
             !p.relayTrusted -> " (NOT adopted: unrecognised host)"
             else -> " (not adopted: own relay set)"
         }
@@ -1528,7 +1528,7 @@ class MainActivity : AppCompatActivity() {
                 )
             )
         }
-        // Under harder privacy the log goes nowhere this app picks: the share
+        // Under tighter privacy the log goes nowhere this app picks: the share
         // sheet only, to wherever the user sends it.
         if (builtInRendezvous().isNotBlank()) {
             outer.addView(primary(getString(R.string.diag_send_to_tawny)) { sendReport(report, shareOut) })
@@ -1583,7 +1583,7 @@ class MainActivity : AppCompatActivity() {
      * public/app.js). Blank fields mean "use the defaults", which is also the
      * reset.
      *
-     * "For harder privacy" turns every one of those safety nets off, on
+     * "For tighter privacy" turns every one of those safety nets off, on
      * purpose — see [PREF_STRICT]. The switch is held on this screen until Save,
      * like the fields, so nothing half-applies; turning it on asks first, and
      * Save repeats back exactly what this phone will and will not contact.
@@ -1593,7 +1593,7 @@ class MainActivity : AppCompatActivity() {
         screen = "servers"
         swipeNav(back = { showDiagnostics() }, forward = null)
 
-        // The screen's own copy of the harder-privacy settings. Written to prefs
+        // The screen's own copy of the tighter-privacy settings. Written to prefs
         // on Save only.
         var strict = strictPrivacy()
         var turnMode = strictTurnMode()
@@ -1668,7 +1668,7 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { haptic(); onFlip(knob) }
             }
 
-        // ---- the harder-privacy switch, above everything it changes ----------
+        // ---- the tighter-privacy switch, above everything it changes ----------
         val privacyCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val p = dp(14); setPadding(p, dp(4), p, p)
@@ -1776,7 +1776,7 @@ class MainActivity : AppCompatActivity() {
         val userIn = field(getString(R.string.servers_turn_user_label), getString(R.string.servers_turn_blank_hint), PREF_TURN_USER)
         val passIn = field(getString(R.string.servers_turn_pass_label), getString(R.string.servers_turn_blank_hint), PREF_TURN_PASS, password = true)
 
-        // ---- the controls only harder privacy has ----------------------------
+        // ---- the controls only tighter privacy has ----------------------------
         strictBox.addView(TextView(this).apply {
             text = getString(R.string.privacy_controls_title)
             setTextColor(Hue.TEXT)
@@ -1866,7 +1866,7 @@ class MainActivity : AppCompatActivity() {
         }
         col.addView(note)
 
-        /** Everything that reads differently once harder privacy is on. */
+        /** Everything that reads differently once tighter privacy is on. */
         fun paintStrict() {
             strictBox.visibility = if (strict) View.VISIBLE else View.GONE
             tailscaleTip.visibility = if (strict) View.GONE else View.VISIBLE
@@ -1938,7 +1938,7 @@ class MainActivity : AppCompatActivity() {
                 flag(passIn, getString(R.string.servers_err_turn_pass))
             if (turnList.isEmpty() && (userVal.isNotEmpty() || passVal.isNotEmpty()))
                 flag(turnIn, getString(R.string.servers_err_turn_orphan))
-            // Under harder privacy the only checks left are the ones where the
+            // Under tighter privacy the only checks left are the ones where the
             // combination cannot work at all — everything else is the user's
             // call, including a setup that only works on their own Wi-Fi.
             if (strict && rv.isEmpty() && !lanPath)
@@ -2539,12 +2539,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Harder privacy left this phone with no road to the other one: the Wi-Fi
+     * Tighter privacy left this phone with no road to the other one: the Wi-Fi
      * path is off (or there is no LAN hint) and no rendezvous is set. There is
      * deliberately nothing to fall back to, so say so and point at the fix.
      */
     private fun strictNothingToDial() {
-        Diag.log("shell", "harder privacy: no rendezvous and no Wi-Fi path — nothing to dial")
+        Diag.log("shell", "tighter privacy: no rendezvous and no Wi-Fi path — nothing to dial")
         themedDialog(
             title = getString(R.string.privacy_nothing_title),
             body = getString(R.string.privacy_nothing_body),
@@ -2556,7 +2556,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun withSignalServer(onReady: (Int) -> Unit) {
-        // Harder privacy with the Wi-Fi path off: nothing listens on this phone.
+        // Tighter privacy with the Wi-Fi path off: nothing listens on this phone.
         // 0 is "no relay" to every caller (the pairing code then has no `h=`).
         if (!lanPathOn()) {
             try { signalServer?.stop(800) } catch (e: Exception) {}
@@ -4286,7 +4286,7 @@ class MainActivity : AppCompatActivity() {
     private val PREF_TURN_USER = "srvTurnUser"
     private val PREF_TURN_PASS = "srvTurnPass"
 
-    // ---- harder privacy -----------------------------------------------------
+    // ---- tighter privacy -----------------------------------------------------
     //
     // Everything above is built to be forgiving: a relay that does not answer
     // hands the session to Tawny's, and STUN falls back to the build's public
@@ -4309,10 +4309,10 @@ class MainActivity : AppCompatActivity() {
     private fun strictPrivacy(): Boolean = prefs.getBoolean(PREF_STRICT, false)
     private fun strictTurnMode(): String =
         prefs.getString(PREF_TURN_MODE, "auto").takeIf { it in TURN_MODES } ?: "auto"
-    /** The direct Wi-Fi path is only ever switched off by harder privacy. */
+    /** The direct Wi-Fi path is only ever switched off by tighter privacy. */
     private fun lanPathOn(): Boolean = !strictPrivacy() || prefs.getBoolean(PREF_LAN_PATH, true)
 
-    /** The rendezvous this build ships with — none at all under harder privacy. */
+    /** The rendezvous this build ships with — none at all under tighter privacy. */
     private fun builtInRendezvous(): String =
         if (strictPrivacy()) "" else BuildConfig.RENDEZVOUS_URL
 
@@ -4549,7 +4549,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun goLive(role: String) {
         if (role == "station" && !lanPathOn()) {
-            // Harder privacy with the Wi-Fi path off: no local relay is
+            // Tighter privacy with the Wi-Fi path off: no local relay is
             // started, nothing listens on this phone, and the code carries no
             // `h=`. The user's rendezvous is the only way in — and without one
             // there is no way in at all, which is said rather than hidden.
@@ -4593,7 +4593,7 @@ class MainActivity : AppCompatActivity() {
         val token = if (role == "station") watcherToken()
                     else prefs.getString("pairToken", null)
         prefs.edit().putString("role", role).apply()
-        // No LAN address in the code when harder privacy has the Wi-Fi path off.
+        // No LAN address in the code when tighter privacy has the Wi-Fi path off.
         val ip = if (lanPathOn()) lanIp() else null   // was enumerated three times in a row, on the UI thread
         // A Monitor going live mints (or keeps) the code its QR advertises; a
         // Handheld carries the code it scanned, which the Monitor checks once.
@@ -4632,7 +4632,7 @@ class MainActivity : AppCompatActivity() {
             loadWithOverviewMode = true
             useWideViewPort = true
             cacheMode = WebSettings.LOAD_DEFAULT
-            // Harder privacy: the WebView's Safe Browsing checks go to Google
+            // Tighter privacy: the WebView's Safe Browsing checks go to Google
             // from this app's own uid (measured on the emulator). The page is
             // bundled and served from loopback, so they protect nothing here.
             safeBrowsingEnabled = !strictPrivacy()

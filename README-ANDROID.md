@@ -85,7 +85,7 @@ A custom TURN entry goes **ahead of** whatever `/turn` issues rather than
 instead of it, so a wrong one costs nothing. Custom STUN replaces the build's
 list.
 
-**For harder privacy [advanced]** is a switch at the top of the same screen
+**For tighter privacy [advanced]** is a switch at the top of the same screen
 (`srvStrict`). Turning it on asks for confirmation first, and it removes every
 safety net above: no built-in rendezvous (not as a fallback, not in the CSP),
 no public STUN (blank means none), no relay adopted from a scanned code, no

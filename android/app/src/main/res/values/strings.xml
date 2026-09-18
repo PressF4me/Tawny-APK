@@ -342,9 +342,9 @@
     <string name="feedback_empty">Write a few words first</string>
     <string name="feedback_subject">Tawny feedback — <xliff:g id="kind" example="Idea">%1$s</xliff:g> (v<xliff:g id="version" example="1.0.0">%2$s</xliff:g>)</string>
     <string name="feedback_copied">No email app — note copied. Paste it to <xliff:g id="email">%1$s</xliff:g></string>
-    <!-- Servers: harder privacy -->
-    <string name="servers_meta_strict">Servers — harder privacy on</string>
-    <string name="privacy_toggle_title">For harder privacy [advanced]</string>
+    <!-- Servers: tighter privacy -->
+    <string name="servers_meta_strict">Servers — tighter privacy on</string>
+    <string name="privacy_toggle_title">For tighter privacy [advanced]</string>
     <string name="privacy_toggle_sub">Only your servers. Every fallback off. You set every connection.</string>
     <string name="privacy_state_off">Off — Tawny’s servers and public STUN stay behind yours as a safety net.</string>
     <string name="privacy_state_on">On — nothing falls back. If something here is wrong or down, watching from outside your Wi-Fi will not work at all.</string>
@@ -352,8 +352,8 @@
     <string name="privacy_confirm_body">With this on, this phone contacts only the servers you type on this screen, and nothing else:\n\n• No Tawny rendezvous. If yours is wrong, down or unreachable, remote watching stops. Nothing takes over.\n• No public STUN. Blank STUN means none at all, and on some networks that means no connection.\n• No relay picked up from a scanned code, and no “Send to Tawny” for diagnostics.\n• Leave Rendezvous blank and the phones can only meet on your own Wi-Fi.\n\nBoth phones need the same settings. Tawny cannot tell a broken setup apart from one you meant, so it will not warn you mid-call or fix it for you. You are fully in control, and so is fixing it.\n\nYour video and sound stay encrypted end to end either way. This changes who you depend on to connect, not whether anyone can watch.</string>
     <string name="privacy_confirm_yes">I understand — turn it on</string>
     <string name="privacy_confirm_no">Keep the safety net</string>
-    <string name="privacy_servers_body">Harder privacy is on. This phone uses exactly what is on this screen and nothing else: no Tawny server, no public STUN, no fallback of any kind.\n\nBlank means none. A blank Rendezvous means the phones only meet on your own Wi-Fi. Blank STUN means no STUN.</string>
-    <string name="privacy_stunturn_body">STUN lets each phone learn its public address, and TURN forwards media when no direct path works. Under harder privacy only the servers you list here are used. Leave STUN blank to send no STUN request anywhere, which usually rules out connecting between two different networks unless you use a VPN or TURN.</string>
+    <string name="privacy_servers_body">Tighter privacy is on. This phone uses exactly what is on this screen and nothing else: no Tawny server, no public STUN, no fallback of any kind.\n\nBlank means none. A blank Rendezvous means the phones only meet on your own Wi-Fi. Blank STUN means no STUN.</string>
+    <string name="privacy_stunturn_body">STUN lets each phone learn its public address, and TURN forwards media when no direct path works. Under tighter privacy only the servers you list here are used. Leave STUN blank to send no STUN request anywhere, which usually rules out connecting between two different networks unless you use a VPN or TURN.</string>
     <string name="privacy_rv_hint">wss://relay.example.net — blank = Wi-Fi only</string>
     <string name="privacy_stun_hint">stun:stun.example.net:3478 — blank = none</string>
     <string name="privacy_controls_title">Every connection</string>
@@ -372,7 +372,7 @@
     <string name="privacy_note_on">Takes effect on the next session. Nothing here is checked against a live server. A wrong address shows up as a call that does not connect.</string>
     <string name="privacy_err_no_path">With the direct Wi-Fi path off, this is the only way the phones can meet. Add a rendezvous, or turn the Wi-Fi path back on.</string>
     <string name="privacy_err_always_no_turn">“Always” relays every call, so it needs a TURN server: add one here, or let your rendezvous hand one out.</string>
-    <string name="privacy_saved_title">Harder privacy is on</string>
+    <string name="privacy_saved_title">Tighter privacy is on</string>
     <string name="privacy_sum_intro">From the next session this phone contacts only:</string>
     <string name="privacy_sum_rv">Rendezvous: %1$s</string>
     <string name="privacy_sum_rv_none">none, your own Wi-Fi only</string>
@@ -386,8 +386,8 @@
     <string name="privacy_sum_lan_off">Direct Wi-Fi path: off (nothing listens on this phone)</string>
     <string name="privacy_sum_ws">Your rendezvous is ws://, which is not encrypted. Use it only on a network you trust.</string>
     <string name="privacy_sum_outro">No Tawny server, no public STUN, no fallback. Put the same settings on the other phone. If a call does not connect, the cause is in this list.</string>
-    <string name="privacy_back_body">Your addresses are cleared from this phone and harder privacy is turned off. Tawny’s servers and public STUN come back as the fallback.</string>
+    <string name="privacy_back_body">Your addresses are cleared from this phone and tighter privacy is turned off. Tawny’s servers and public STUN come back as the fallback.</string>
     <string name="privacy_nothing_title">Nothing to connect through</string>
-    <string name="privacy_nothing_body">Harder privacy is on, and this phone has no way to reach the other one: no rendezvous is set, and there is no direct Wi-Fi path (it is turned off, or this pairing has no Wi-Fi address).\n\nThis is deliberate. With every fallback off, Tawny will not pick a server for you. Add your rendezvous, or turn the Wi-Fi path back on, in Servers.</string>
+    <string name="privacy_nothing_body">Tighter privacy is on, and this phone has no way to reach the other one: no rendezvous is set, and there is no direct Wi-Fi path (it is turned off, or this pairing has no Wi-Fi address).\n\nThis is deliberate. With every fallback off, Tawny will not pick a server for you. Add your rendezvous, or turn the Wi-Fi path back on, in Servers.</string>
     <string name="privacy_open_servers">Open Servers</string>
 </resources>

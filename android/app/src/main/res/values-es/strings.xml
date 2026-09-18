@@ -343,8 +343,8 @@
     <string name="feedback_empty">Escribe unas palabras primero</string>
     <string name="feedback_subject">Comentarios de Tawny — <xliff:g id="kind" example="Idea">%1$s</xliff:g> (v<xliff:g id="version" example="1.0.0">%2$s</xliff:g>)</string>
     <string name="feedback_copied">No hay app de correo — nota copiada. Pégala en <xliff:g id="email">%1$s</xliff:g></string>
-    <!-- Servidores: privacidad reforzada -->
-    <string name="servers_meta_strict">Servidores — privacidad reforzada activa</string>
+    <!-- Servidores: privacidad estricta -->
+    <string name="servers_meta_strict">Servidores — privacidad estricta activa</string>
     <string name="privacy_toggle_title">Para más privacidad [avanzado]</string>
     <string name="privacy_toggle_sub">Solo tus servidores. Sin ningún respaldo. Tú decides cada conexión.</string>
     <string name="privacy_state_off">Desactivado — los servidores de Tawny y el STUN público siguen detrás de los tuyos como respaldo.</string>
@@ -353,8 +353,8 @@
     <string name="privacy_confirm_body">Con esto activado, este teléfono solo contacta los servidores que escribas en esta pantalla, y nada más:\n\n• Sin rendezvous de Tawny. Si el tuyo está mal, caído o inaccesible, ver a distancia se detiene. Nada lo reemplaza.\n• Sin STUN público. STUN vacío significa ninguno, y en algunas redes eso significa que no hay conexión.\n• No se adopta ningún relé de un código escaneado, y no hay “Enviar a Tawny” en los diagnósticos.\n• Si dejas Rendezvous vacío, los teléfonos solo se encuentran en tu propio Wi-Fi.\n\nAmbos teléfonos necesitan la misma configuración. Tawny no puede distinguir una configuración rota de una intencional, así que no te avisará durante una llamada ni lo arreglará por ti. Tienes el control total, y también la responsabilidad de arreglarlo.\n\nTu video y sonido siguen cifrados de extremo a extremo de todos modos. Esto cambia de quién dependes para conectar, no si alguien puede ver.</string>
     <string name="privacy_confirm_yes">Entiendo — activarlo</string>
     <string name="privacy_confirm_no">Mantener el respaldo</string>
-    <string name="privacy_servers_body">La privacidad reforzada está activa. Este teléfono usa exactamente lo que hay en esta pantalla y nada más: ningún servidor de Tawny, ningún STUN público, ningún respaldo.\n\nVacío significa ninguno. Rendezvous vacío significa que los teléfonos solo se encuentran en tu propio Wi-Fi. STUN vacío significa sin STUN.</string>
-    <string name="privacy_stunturn_body">STUN permite que cada teléfono conozca su dirección pública, y TURN reenvía el medio cuando no hay camino directo. Con privacidad reforzada solo se usan los servidores que escribas aquí. Deja STUN vacío para no enviar ninguna consulta STUN, lo que normalmente impide conectar entre dos redes distintas salvo con una VPN o TURN.</string>
+    <string name="privacy_servers_body">La privacidad estricta está activa. Este teléfono usa exactamente lo que hay en esta pantalla y nada más: ningún servidor de Tawny, ningún STUN público, ningún respaldo.\n\nVacío significa ninguno. Rendezvous vacío significa que los teléfonos solo se encuentran en tu propio Wi-Fi. STUN vacío significa sin STUN.</string>
+    <string name="privacy_stunturn_body">STUN permite que cada teléfono conozca su dirección pública, y TURN reenvía el medio cuando no hay camino directo. Con privacidad estricta solo se usan los servidores que escribas aquí. Deja STUN vacío para no enviar ninguna consulta STUN, lo que normalmente impide conectar entre dos redes distintas salvo con una VPN o TURN.</string>
     <string name="privacy_rv_hint">wss://relay.example.net — vacío = solo Wi-Fi</string>
     <string name="privacy_stun_hint">stun:stun.example.net:3478 — vacío = ninguno</string>
     <string name="privacy_controls_title">Cada conexión</string>
@@ -373,7 +373,7 @@
     <string name="privacy_note_on">Se aplica en la próxima sesión. Nada de esto se comprueba contra un servidor real. Una dirección incorrecta se ve como una llamada que no conecta.</string>
     <string name="privacy_err_no_path">Con el camino por Wi-Fi desactivado, esta es la única forma de que los teléfonos se encuentren. Agrega un rendezvous o vuelve a activar el Wi-Fi.</string>
     <string name="privacy_err_always_no_turn">“Siempre” retransmite cada llamada, así que necesita un servidor TURN: agrega uno aquí o deja que tu rendezvous lo entregue.</string>
-    <string name="privacy_saved_title">Privacidad reforzada activa</string>
+    <string name="privacy_saved_title">Privacidad estricta activa</string>
     <string name="privacy_sum_intro">Desde la próxima sesión este teléfono solo contacta:</string>
     <string name="privacy_sum_rv">Rendezvous: %1$s</string>
     <string name="privacy_sum_rv_none">ninguno, solo tu propio Wi-Fi</string>
@@ -387,8 +387,8 @@
     <string name="privacy_sum_lan_off">Camino directo por Wi-Fi: desactivado (nada escucha en este teléfono)</string>
     <string name="privacy_sum_ws">Tu rendezvous es ws://, que no está cifrado. Úsalo solo en una red de confianza.</string>
     <string name="privacy_sum_outro">Ningún servidor de Tawny, ningún STUN público, ningún respaldo. Pon la misma configuración en el otro teléfono. Si una llamada no conecta, la causa está en esta lista.</string>
-    <string name="privacy_back_body">Tus direcciones se borran de este teléfono y la privacidad reforzada se desactiva. Los servidores de Tawny y el STUN público vuelven como respaldo.</string>
+    <string name="privacy_back_body">Tus direcciones se borran de este teléfono y la privacidad estricta se desactiva. Los servidores de Tawny y el STUN público vuelven como respaldo.</string>
     <string name="privacy_nothing_title">No hay por dónde conectar</string>
-    <string name="privacy_nothing_body">La privacidad reforzada está activa y este teléfono no tiene forma de llegar al otro: no hay rendezvous y no hay camino directo por Wi-Fi (está desactivado, o este emparejamiento no tiene dirección Wi-Fi).\n\nEs a propósito. Sin respaldos, Tawny no elegirá un servidor por ti. Agrega tu rendezvous, o vuelve a activar el Wi-Fi, en Servidores.</string>
+    <string name="privacy_nothing_body">La privacidad estricta está activa y este teléfono no tiene forma de llegar al otro: no hay rendezvous y no hay camino directo por Wi-Fi (está desactivado, o este emparejamiento no tiene dirección Wi-Fi).\n\nEs a propósito. Sin respaldos, Tawny no elegirá un servidor por ti. Agrega tu rendezvous, o vuelve a activar el Wi-Fi, en Servidores.</string>
     <string name="privacy_open_servers">Abrir Servidores</string>
 </resources>
