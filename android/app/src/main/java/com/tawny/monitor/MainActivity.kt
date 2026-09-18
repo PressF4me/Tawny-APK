@@ -735,11 +735,12 @@ class MainActivity : AppCompatActivity() {
         // A relay that fails the second test is still parsed, still shown, and
         // still logged; it just does not get to write itself into settings.
         val adoptRelay = p.relay?.takeIf {
-            p.relayTrusted && customRendezvous().isBlank() && RELAY_URL_RE.matches(it)
+            p.relayTrusted && !strictPrivacy() && customRendezvous().isBlank() && RELAY_URL_RE.matches(it)
         }
         val relayNote = when {
             p.relay == null -> ""
             adoptRelay != null -> " (adopted)"
+            strictPrivacy() -> " (not adopted: harder privacy)"
             !p.relayTrusted -> " (NOT adopted: unrecognised host)"
             else -> " (not adopted: own relay set)"
         }
@@ -1527,7 +1528,9 @@ class MainActivity : AppCompatActivity() {
                 )
             )
         }
-        if (BuildConfig.RENDEZVOUS_URL.isNotBlank()) {
+        // Under harder privacy the log goes nowhere this app picks: the share
+        // sheet only, to wherever the user sends it.
+        if (builtInRendezvous().isNotBlank()) {
             outer.addView(primary(getString(R.string.diag_send_to_tawny)) { sendReport(report, shareOut) })
             outer.addView(TextView(this).apply {
                 text = getString(R.string.diag_send_body)
@@ -1558,8 +1561,9 @@ class MainActivity : AppCompatActivity() {
         // The other thing behind this hatch. Same reasoning as the hatch
         // itself: a support surface, not a feature.
         outer.addView(link(
-            if (customRendezvous().isNotBlank()) "Servers — using your own"
-            else "Servers (advanced)"
+            if (strictPrivacy()) getString(R.string.servers_meta_strict)
+            else if (customRendezvous().isNotBlank()) getString(R.string.servers_meta_using_own)
+            else getString(R.string.servers_meta_default)
         ) { showServers() })
         root.addView(outer)
     }
@@ -1573,23 +1577,35 @@ class MainActivity : AppCompatActivity() {
      * all, which for a project whose whole pitch is "your video does not go
      * through anybody's cloud" is the wrong way round.
      *
-     * Nothing here can take the remote path down. A custom relay is *preferred*,
-     * never substituted: if it does not answer, the page falls back to the
-     * built-in tunnel and says so (see openSignal/fetchIce in public/app.js).
-     * Blank fields mean "use the defaults", which is also the reset.
+     * Normally nothing here can take the remote path down. A custom relay is
+     * *preferred*, never substituted: if it does not answer, the page falls
+     * back to the built-in tunnel and says so (see openSignal/fetchIce in
+     * public/app.js). Blank fields mean "use the defaults", which is also the
+     * reset.
+     *
+     * "For harder privacy" turns every one of those safety nets off, on
+     * purpose — see [PREF_STRICT]. The switch is held on this screen until Save,
+     * like the fields, so nothing half-applies; turning it on asks first, and
+     * Save repeats back exactly what this phone will and will not contact.
      */
     private fun showServers() {
         clearScreen()
         screen = "servers"
         swipeNav(back = { showDiagnostics() }, forward = null)
 
+        // The screen's own copy of the harder-privacy settings. Written to prefs
+        // on Save only.
+        var strict = strictPrivacy()
+        var turnMode = strictTurnMode()
+        var turnFetch = prefs.getBoolean(PREF_TURN_FETCH, true)
+        var lanPath = prefs.getBoolean(PREF_LAN_PATH, true)
+
         val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
         val col = column(scroll = true)
         col.addView(backLink { showDiagnostics() })
         col.addView(heading(getString(R.string.servers_title), getString(R.string.servers_subtitle)))
-        col.addView(aboutBody(
-            getString(R.string.servers_body)
-        ))
+        val intro = aboutBody(getString(R.string.servers_body))
+        col.addView(intro)
         fun tipCard(title: String, body: String) = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = roundRect(Hue.BG, Hue.LINE, Radius.CARD)
@@ -1611,10 +1627,66 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(WC, WC).also { it.topMargin = dp(6) }
             })
         }
-        col.addView(tipCard(
+        val tailscaleTip = tipCard(
             getString(R.string.servers_tailscale_title),
             getString(R.string.servers_tailscale_body)
-        ))
+        )
+        col.addView(tailscaleTip)
+
+        /** A title, a line saying what it does, and a drawn switch. */
+        fun switchRow(title: String, sub: String, on: Boolean, onFlip: (SwitchMark) -> Unit) =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = pressable(roundRect(0, Color.TRANSPARENT, 0), 0, Hue.BERRY)
+                setPadding(0, dp(12), 0, dp(12))
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+                    addView(TextView(this@MainActivity).apply {
+                        text = title
+                        setTextColor(Hue.TEXT)
+                        textSize = Type.SUB
+                        typeface = uiFontSemi
+                    })
+                    addView(TextView(this@MainActivity).apply {
+                        text = sub
+                        setTextColor(Hue.DIM)
+                        textSize = 12.5f
+                        typeface = uiFont
+                        setLineSpacing(0f, 1.3f)
+                        setPadding(0, dp(2), 0, 0)
+                    })
+                })
+                val knob = SwitchMark(this@MainActivity, on).apply {
+                    layoutParams = LinearLayout.LayoutParams(dp(46), dp(28))
+                        .also { it.leftMargin = dp(12) }
+                }
+                addView(knob)
+                isClickable = true; isFocusable = true
+                contentDescription = title
+                setOnClickListener { haptic(); onFlip(knob) }
+            }
+
+        // ---- the harder-privacy switch, above everything it changes ----------
+        val privacyCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = dp(14); setPadding(p, dp(4), p, p)
+            layoutParams = lp(topMargin = 18)
+        }
+        val privacyState = TextView(this).apply {
+            setTextColor(Hue.LIVE)
+            textSize = 12.5f
+            typeface = uiFontSemi
+            setLineSpacing(0f, 1.35f)
+        }
+        col.addView(privacyCard)
+
+        // Built before the fields so the switch can show and hide them.
+        val strictBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = lp(topMargin = 8)
+        }
 
         // input -> the small red line under it. Populated by field(), read by
         // markInvalid()/clearInvalid() so Save can point at exactly the field
@@ -1689,9 +1761,10 @@ class MainActivity : AppCompatActivity() {
             typeface = uiFontSemi
             layoutParams = lp(topMargin = 28)
         })
-        col.addView(aboutBody(
+        val stunTurnBody = aboutBody(
             getString(R.string.servers_stunturn_body)
-        ).apply { layoutParams = lp(topMargin = 6) })
+        ).apply { layoutParams = lp(topMargin = 6) }
+        col.addView(stunTurnBody)
 
         val stunIn = field(getString(R.string.servers_stun_label), "stun:stun.example.net:3478", PREF_STUN)
         val turnIn = field(getString(R.string.servers_turn_label), "turns:turn.example.net:5349", PREF_TURN)
@@ -1703,21 +1776,138 @@ class MainActivity : AppCompatActivity() {
         val userIn = field(getString(R.string.servers_turn_user_label), getString(R.string.servers_turn_blank_hint), PREF_TURN_USER)
         val passIn = field(getString(R.string.servers_turn_pass_label), getString(R.string.servers_turn_blank_hint), PREF_TURN_PASS, password = true)
 
+        // ---- the controls only harder privacy has ----------------------------
+        strictBox.addView(TextView(this).apply {
+            text = getString(R.string.privacy_controls_title)
+            setTextColor(Hue.TEXT)
+            textSize = Type.SUB
+            typeface = uiFontSemi
+            layoutParams = lp(topMargin = 20)
+        })
+        strictBox.addView(aboutBody(getString(R.string.privacy_controls_body))
+            .apply { layoutParams = lp(topMargin = 6) })
+
+        strictBox.addView(TextView(this).apply {
+            text = getString(R.string.privacy_turn_mode_label)
+            setTextColor(Hue.DIM)
+            textSize = Type.LABEL
+            letterSpacing = 0.1f
+            typeface = uiFontSemi
+            layoutParams = lp(topMargin = 20)
+        })
+        val modeNote = TextView(this).apply {
+            setTextColor(Hue.DIM)
+            textSize = 12.5f
+            typeface = uiFont
+            setLineSpacing(0f, 1.35f)
+            layoutParams = lp(topMargin = 8)
+        }
+        val modeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = lp(topMargin = 8)
+        }
+        val modeLabels = mapOf(
+            "auto" to getString(R.string.privacy_turn_auto),
+            "always" to getString(R.string.privacy_turn_always),
+            "never" to getString(R.string.privacy_turn_never)
+        )
+        val modeNotes = mapOf(
+            "auto" to getString(R.string.privacy_turn_auto_note),
+            "always" to getString(R.string.privacy_turn_always_note),
+            "never" to getString(R.string.privacy_turn_never_note)
+        )
+        val pills = HashMap<String, TextView>()
+        fun paintModes() {
+            for ((m, v) in pills) {
+                val sel = m == turnMode
+                v.background = roundRect(if (sel) Hue.BERRY else Hue.BG, if (sel) Hue.BERRY else Hue.LINE, Radius.CARD)
+                v.setTextColor(if (sel) Hue.ON_ACCENT else Hue.TEXT)
+            }
+            modeNote.text = modeNotes[turnMode]
+        }
+        for (m in TURN_MODES) {
+            val pill = TextView(this).apply {
+                text = modeLabels[m]
+                gravity = Gravity.CENTER
+                textSize = 13.5f
+                typeface = uiFontSemi
+                setPadding(dp(6), dp(11), dp(6), dp(11))
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also {
+                    if (m != TURN_MODES.first()) it.leftMargin = dp(8)
+                }
+                isClickable = true; isFocusable = true
+                setOnClickListener { haptic(); turnMode = m; paintModes() }
+            }
+            pills[m] = pill
+            modeRow.addView(pill)
+        }
+        strictBox.addView(modeRow)
+        strictBox.addView(modeNote)
+        paintModes()
+
+        strictBox.addView(switchRow(
+            getString(R.string.privacy_turn_fetch_title),
+            getString(R.string.privacy_turn_fetch_sub),
+            turnFetch
+        ) { knob -> turnFetch = !turnFetch; knob.on = turnFetch }.apply { layoutParams = lp(topMargin = 12) })
+        strictBox.addView(switchRow(
+            getString(R.string.privacy_lan_title),
+            getString(R.string.privacy_lan_sub),
+            lanPath
+        ) { knob -> lanPath = !lanPath; knob.on = lanPath })
+        col.addView(strictBox)
+
         val note = TextView(this).apply {
             setTextColor(Hue.DIM)
             textSize = 12.5f
             typeface = uiFont
             setLineSpacing(0f, 1.35f)
             layoutParams = lp(topMargin = 14)
-            text = if (customRendezvous().isNotBlank())
-                getString(R.string.servers_using_yours_toast)
-            else getString(R.string.servers_using_tawny_toast) +
-                (if (BuildConfig.RENDEZVOUS_URL.isBlank()) getString(R.string.servers_none_lan_only) else ".")
         }
         col.addView(note)
 
+        /** Everything that reads differently once harder privacy is on. */
+        fun paintStrict() {
+            strictBox.visibility = if (strict) View.VISIBLE else View.GONE
+            tailscaleTip.visibility = if (strict) View.GONE else View.VISIBLE
+            intro.text = getString(if (strict) R.string.privacy_servers_body else R.string.servers_body)
+            stunTurnBody.text = getString(if (strict) R.string.privacy_stunturn_body else R.string.servers_stunturn_body)
+            privacyCard.background = roundRect(Hue.BG, if (strict) Hue.LIVE else Hue.LINE, Radius.CARD)
+            privacyState.text = getString(if (strict) R.string.privacy_state_on else R.string.privacy_state_off)
+            rvIn.hint = if (strict) getString(R.string.privacy_rv_hint) else "wss://relay.example.net"
+            stunIn.hint = if (strict) getString(R.string.privacy_stun_hint) else "stun:stun.example.net:3478"
+            note.text = when {
+                strict -> getString(R.string.privacy_note_on)
+                customRendezvous().isNotBlank() -> getString(R.string.servers_using_yours_toast)
+                else -> getString(R.string.servers_using_tawny_toast) +
+                    (if (BuildConfig.RENDEZVOUS_URL.isBlank()) getString(R.string.servers_none_lan_only) else ".")
+            }
+        }
+
+        privacyCard.addView(switchRow(
+            getString(R.string.privacy_toggle_title),
+            getString(R.string.privacy_toggle_sub),
+            strict
+        ) { knob ->
+            if (strict) {
+                // Off needs no ceremony: it only puts safety nets back.
+                strict = false; knob.on = false; paintStrict()
+            } else {
+                themedDialog(
+                    title = getString(R.string.privacy_confirm_title),
+                    body = getString(R.string.privacy_confirm_body),
+                    primaryLabel = getString(R.string.privacy_confirm_yes),
+                    onPrimary = { strict = true; knob.on = true; paintStrict() },
+                    secondaryLabel = getString(R.string.privacy_confirm_no)
+                )
+            }
+        })
+        privacyCard.addView(privacyState)
+        paintStrict()
+
         col.addView(primary(getString(R.string.common_save)) {
             val rv = rvIn.text.toString().trim()
+            val stunList = stunIn.text.toString().split(',').map { it.trim() }.filter { it.isNotEmpty() }
             val turnList = turnIn.text.toString().split(',').map { it.trim() }.filter { it.isNotEmpty() }
             val userVal = userIn.text.toString().trim()
             val passVal = passIn.text.toString()
@@ -1733,8 +1923,7 @@ class MainActivity : AppCompatActivity() {
 
             if (rv.isNotEmpty() && !RELAY_URL_RE.matches(rv))
                 flag(rvIn, getString(R.string.servers_err_rendezvous))
-            val stunBad = stunIn.text.toString().split(',').map { it.trim() }
-                .filter { it.isNotEmpty() && !STUN_URL_RE.matches(it) }
+            val stunBad = stunList.filterNot { STUN_URL_RE.matches(it) }
             if (stunBad.isNotEmpty())
                 flag(stunIn, getString(R.string.servers_err_stun, stunBad.first()))
             val turnBad = turnList.filterNot { TURN_URL_RE.matches(it) }
@@ -1749,6 +1938,13 @@ class MainActivity : AppCompatActivity() {
                 flag(passIn, getString(R.string.servers_err_turn_pass))
             if (turnList.isEmpty() && (userVal.isNotEmpty() || passVal.isNotEmpty()))
                 flag(turnIn, getString(R.string.servers_err_turn_orphan))
+            // Under harder privacy the only checks left are the ones where the
+            // combination cannot work at all — everything else is the user's
+            // call, including a setup that only works on their own Wi-Fi.
+            if (strict && rv.isEmpty() && !lanPath)
+                flag(rvIn, getString(R.string.privacy_err_no_path))
+            if (strict && turnMode == "always" && turnList.isEmpty() && (!turnFetch || rv.isEmpty()))
+                flag(turnIn, getString(R.string.privacy_err_always_no_turn))
 
             if (issues.isNotEmpty()) {
                 themedDialog(
@@ -1764,12 +1960,25 @@ class MainActivity : AppCompatActivity() {
                 .putString(PREF_TURN, turnIn.text.toString().trim())
                 .putString(PREF_TURN_USER, userVal)
                 .putString(PREF_TURN_PASS, passVal)
+                .putBoolean(PREF_STRICT, strict)
+                .putString(PREF_TURN_MODE, turnMode)
+                .putBoolean(PREF_TURN_FETCH, turnFetch)
+                .putBoolean(PREF_LAN_PATH, lanPath)
                 .apply()
-            Diag.log("shell", "servers saved rv=${rv.ifBlank { "default" }}")
+            Diag.log("shell", "servers saved rv=${rv.ifBlank { "default" }}" +
+                if (strict) " strict turn=$turnMode fetch=$turnFetch lan=$lanPath stun=${stunList.size}" else "")
             // The asset server bakes the allowed relay hosts into its CSP, and
             // the live page has already read the old settings — so both are
             // rebuilt on the next session rather than patched underneath one.
             stopServers()
+            if (strict) {
+                themedDialog(
+                    title = getString(R.string.privacy_saved_title),
+                    body = strictSummary(rv, stunList, turnList, turnMode, turnFetch, lanPath),
+                    primaryLabel = getString(R.string.common_ok), onPrimary = { showDiagnostics() }
+                )
+                return@primary
+            }
             val usingOwn = rv.isNotBlank() || turnList.isNotEmpty() || stunIn.text.toString().isNotBlank()
             themedDialog(
                 title = if (rv.isNotBlank() && rv.startsWith("ws://")) getString(R.string.servers_saved_warning_title) else getString(R.string.servers_saved),
@@ -1777,19 +1986,23 @@ class MainActivity : AppCompatActivity() {
                     getString(R.string.servers_saved_ws_body)
                 else if (usingOwn)
                     getString(R.string.servers_saved_yours_body)
-                else "Back to Tawny's own servers.\n\nTakes effect on the next session.",
+                else getString(R.string.servers_saved_tawny_body),
                 primaryLabel = getString(R.string.common_ok), onPrimary = { showDiagnostics() }
             )
         })
         col.addView(link(getString(R.string.servers_use_tawny)) {
             themedDialog(
                 title = getString(R.string.servers_back_title),
-                body = getString(R.string.servers_back_body),
+                body = getString(
+                    if (strictPrivacy()) R.string.privacy_back_body else R.string.servers_back_body
+                ),
                 primaryLabel = getString(R.string.common_clear),
                 onPrimary = {
                     prefs.edit()
                         .remove(PREF_RENDEZVOUS).remove(PREF_STUN).remove(PREF_TURN)
                         .remove(PREF_TURN_USER).remove(PREF_TURN_PASS)
+                        .remove(PREF_STRICT).remove(PREF_TURN_MODE)
+                        .remove(PREF_TURN_FETCH).remove(PREF_LAN_PATH)
                         .apply()
                     stopServers()
                     toast(getString(R.string.servers_back_toast))
@@ -1801,6 +2014,32 @@ class MainActivity : AppCompatActivity() {
         col.addView(gap(16))
         scroll.addView(col)
         root.addView(scroll)
+    }
+
+    /**
+     * What this phone will contact, and what it no longer will, in plain words.
+     * Shown on Save so the last thing the user reads before leaving is the
+     * whole consequence of the switch, not a generic "Saved".
+     */
+    private fun strictSummary(
+        rv: String, stun: List<String>, turn: List<String>,
+        turnMode: String, turnFetch: Boolean, lanPath: Boolean
+    ): String {
+        val none = getString(R.string.privacy_sum_none)
+        val sb = StringBuilder(getString(R.string.privacy_sum_intro)).append("\n\n")
+        sb.append("• ").append(getString(R.string.privacy_sum_rv, rv.ifBlank { getString(R.string.privacy_sum_rv_none) })).append('\n')
+        sb.append("• ").append(getString(R.string.privacy_sum_stun, if (stun.isEmpty()) none else stun.joinToString(", "))).append('\n')
+        val turnDesc = when {
+            turnMode == "never" -> getString(R.string.privacy_sum_turn_never)
+            else -> (turn + (if (turnFetch && rv.isNotBlank()) listOf(getString(R.string.privacy_sum_turn_from_rv)) else emptyList()))
+                .ifEmpty { listOf(none) }.joinToString(", ") +
+                (if (turnMode == "always") getString(R.string.privacy_sum_turn_always) else "")
+        }
+        sb.append("• ").append(getString(R.string.privacy_sum_turn, turnDesc)).append('\n')
+        sb.append("• ").append(getString(if (lanPath) R.string.privacy_sum_lan_on else R.string.privacy_sum_lan_off)).append("\n\n")
+        if (rv.startsWith("ws://")) sb.append(getString(R.string.privacy_sum_ws)).append("\n\n")
+        sb.append(getString(R.string.privacy_sum_outro))
+        return sb.toString()
     }
 
     /**
@@ -2299,7 +2538,31 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * Harder privacy left this phone with no road to the other one: the Wi-Fi
+     * path is off (or there is no LAN hint) and no rendezvous is set. There is
+     * deliberately nothing to fall back to, so say so and point at the fix.
+     */
+    private fun strictNothingToDial() {
+        Diag.log("shell", "harder privacy: no rendezvous and no Wi-Fi path — nothing to dial")
+        themedDialog(
+            title = getString(R.string.privacy_nothing_title),
+            body = getString(R.string.privacy_nothing_body),
+            primaryLabel = getString(R.string.privacy_open_servers),
+            onPrimary = { showServers() },
+            secondaryLabel = getString(R.string.common_back),
+            onSecondary = { backToSessionsOrWelcome() }
+        )
+    }
+
     private fun withSignalServer(onReady: (Int) -> Unit) {
+        // Harder privacy with the Wi-Fi path off: nothing listens on this phone.
+        // 0 is "no relay" to every caller (the pairing code then has no `h=`).
+        if (!lanPathOn()) {
+            try { signalServer?.stop(800) } catch (e: Exception) {}
+            signalServer = null
+            onReady(0); return
+        }
         signalServer?.let { onReady(it.boundPort); return }
         showBusy(getString(R.string.busy_starting_monitor))
         io.execute {
@@ -4023,6 +4286,36 @@ class MainActivity : AppCompatActivity() {
     private val PREF_TURN_USER = "srvTurnUser"
     private val PREF_TURN_PASS = "srvTurnPass"
 
+    // ---- harder privacy -----------------------------------------------------
+    //
+    // Everything above is built to be forgiving: a relay that does not answer
+    // hands the session to Tawny's, and STUN falls back to the build's public
+    // list. That is the right default and the wrong one for somebody whose
+    // whole reason for being on this screen is that nothing of theirs goes
+    // near a server they did not choose. With this on, the app contacts
+    // exactly what is written here and nothing else — no built-in rendezvous,
+    // no public STUN, no relay adopted from a scanned code, no "Send to
+    // Tawny" — and a wrong address fails instead of being papered over. The
+    // screen says that in as many words before it lets anyone turn it on.
+    private val PREF_STRICT = "srvStrict"
+    /** `auto` (TURN only if nothing direct works), `always` (relay only), `never`. */
+    private val PREF_TURN_MODE = "srvTurnMode"
+    /** Ask the rendezvous's own /turn for credentials. Default true. */
+    private val PREF_TURN_FETCH = "srvTurnFetch"
+    /** The Monitor's own Wi-Fi relay and the `h=` in its codes. Default true. */
+    private val PREF_LAN_PATH = "srvLanPath"
+    private val TURN_MODES = listOf("auto", "always", "never")
+
+    private fun strictPrivacy(): Boolean = prefs.getBoolean(PREF_STRICT, false)
+    private fun strictTurnMode(): String =
+        prefs.getString(PREF_TURN_MODE, "auto").takeIf { it in TURN_MODES } ?: "auto"
+    /** The direct Wi-Fi path is only ever switched off by harder privacy. */
+    private fun lanPathOn(): Boolean = !strictPrivacy() || prefs.getBoolean(PREF_LAN_PATH, true)
+
+    /** The rendezvous this build ships with — none at all under harder privacy. */
+    private fun builtInRendezvous(): String =
+        if (strictPrivacy()) "" else BuildConfig.RENDEZVOUS_URL
+
     /** `wss://host[:port][/path]` — or `ws://` for a relay on your own LAN. */
     private val RELAY_URL_RE = Regex("^wss?://[A-Za-z0-9._~%\\-]+(:\\d{1,5})?(/[^\\s?#]*)?$")
     private val STUN_URL_RE = Regex("^stuns?:[^\\s,]+$")
@@ -4034,7 +4327,7 @@ class MainActivity : AppCompatActivity() {
 
     /** What the page should dial first: the user's relay if they set one. */
     private fun preferredRendezvous(): String =
-        customRendezvous().ifBlank { BuildConfig.RENDEZVOUS_URL }
+        customRendezvous().ifBlank { builtInRendezvous() }
 
     /** Whether this install can reach a Handheld off the LAN, by any route. */
     private val hasRendezvous get() = preferredRendezvous().isNotBlank()
@@ -4059,13 +4352,25 @@ class MainActivity : AppCompatActivity() {
      */
     private fun serversJson(): String {
         val custom = customRendezvous()
-        val turn = csvPref(PREF_TURN, TURN_URL_RE)
+        val strict = strictPrivacy()
+        val turn = if (strict && strictTurnMode() == "never") emptyList()
+                   else csvPref(PREF_TURN, TURN_URL_RE)
         val o = org.json.JSONObject()
-        if (custom.isNotBlank() && BuildConfig.RENDEZVOUS_URL.isNotBlank()) {
-            o.put("fallback", BuildConfig.RENDEZVOUS_URL)
+        if (strict) {
+            // No `fallback` key at all, so fallBackToDefault() has nowhere to
+            // go. STUN is sent even when empty — empty means "none", not "the
+            // build's list" — and the page is told not to trust any default.
+            o.put("strict", true)
+            o.put("stun", org.json.JSONArray(csvPref(PREF_STUN, STUN_URL_RE)))
+            o.put("turnMode", strictTurnMode())
+            o.put("turnFetch", strictTurnMode() != "never" && prefs.getBoolean(PREF_TURN_FETCH, true))
+        } else {
+            if (custom.isNotBlank() && BuildConfig.RENDEZVOUS_URL.isNotBlank()) {
+                o.put("fallback", BuildConfig.RENDEZVOUS_URL)
+            }
+            csvPref(PREF_STUN, STUN_URL_RE).takeIf { it.isNotEmpty() }
+                ?.let { o.put("stun", org.json.JSONArray(it)) }
         }
-        csvPref(PREF_STUN, STUN_URL_RE).takeIf { it.isNotEmpty() }
-            ?.let { o.put("stun", org.json.JSONArray(it)) }
         if (turn.isNotEmpty()) {
             o.put("turn", org.json.JSONArray().put(org.json.JSONObject().apply {
                 put("urls", org.json.JSONArray(turn))
@@ -4148,7 +4453,7 @@ class MainActivity : AppCompatActivity() {
             encodedQuery = uri.encodedQuery,
             encodedFragment = uri.encodedFragment,
             preferredRelayHost = relayHost(preferredRendezvous()),
-            buildRelayHost = relayHost(BuildConfig.RENDEZVOUS_URL),
+            buildRelayHost = relayHost(builtInRendezvous()),
             hasRendezvous = hasRendezvous
         )
     }
@@ -4182,8 +4487,10 @@ class MainActivity : AppCompatActivity() {
         // user can change theirs between sessions — so a cached server whose
         // header no longer lists the right host has to go, or the new relay is
         // blocked before it gets a socket and the failure is invisible.
+        val custom = customRendezvous()
         val hosts = listOfNotNull(
-            relayHost(BuildConfig.RENDEZVOUS_URL), relayHost(customRendezvous())
+            relayHost(builtInRendezvous()),
+            relayHost(custom)?.let { if (custom.startsWith("ws://", ignoreCase = true)) "ws://$it" else it }
         )
         assetServer?.let { if (it.relayHosts == hosts) return it.port else { it.stop(); assetServer = null } }
         return AssetHttpServer(applicationContext, 8809, hosts).also { assetServer = it }.port
@@ -4241,6 +4548,15 @@ class MainActivity : AppCompatActivity() {
     // -------------------------------------------------------- live (webview)
 
     private fun goLive(role: String) {
+        if (role == "station" && !lanPathOn()) {
+            // Harder privacy with the Wi-Fi path off: no local relay is
+            // started, nothing listens on this phone, and the code carries no
+            // `h=`. The user's rendezvous is the only way in — and without one
+            // there is no way in at all, which is said rather than hidden.
+            if (!hasRendezvous) { strictNothingToDial(); return }
+            goLiveWith(role, null)
+            return
+        }
         if (role == "station") {
             withSignalServer { port ->
                 if (port < 0) { relayFailed(); return@withSignalServer }
@@ -4248,8 +4564,11 @@ class MainActivity : AppCompatActivity() {
             }
             return
         }
-        val lan = prefs.getString("signalUrl", null)
-        if (lan == null && !hasRendezvous) return showWelcome()
+        val lan = prefs.getString("signalUrl", null)?.takeIf { lanPathOn() }
+        if (lan == null && !hasRendezvous) {
+            if (strictPrivacy()) { strictNothingToDial(); return }
+            return showWelcome()
+        }
         goLiveWith(role, lan)   // may be null — app.js then uses the rendezvous only
     }
 
@@ -4274,7 +4593,8 @@ class MainActivity : AppCompatActivity() {
         val token = if (role == "station") watcherToken()
                     else prefs.getString("pairToken", null)
         prefs.edit().putString("role", role).apply()
-        val ip = lanIp()      // was enumerated three times in a row, on the UI thread
+        // No LAN address in the code when harder privacy has the Wi-Fi path off.
+        val ip = if (lanPathOn()) lanIp() else null   // was enumerated three times in a row, on the UI thread
         // A Monitor going live mints (or keeps) the code its QR advertises; a
         // Handheld carries the code it scanned, which the Monitor checks once.
         val sigPort = signalServer?.boundPort ?: 0
@@ -4312,6 +4632,10 @@ class MainActivity : AppCompatActivity() {
             loadWithOverviewMode = true
             useWideViewPort = true
             cacheMode = WebSettings.LOAD_DEFAULT
+            // Harder privacy: the WebView's Safe Browsing checks go to Google
+            // from this app's own uid (measured on the emulator). The page is
+            // bundled and served from loopback, so they protect nothing here.
+            safeBrowsingEnabled = !strictPrivacy()
         }
         view.setBackgroundColor(Hue.BG)
         // GUARD: this binding is NOT origin-scoped. Android has no per-origin

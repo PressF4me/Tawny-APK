@@ -75,7 +75,16 @@ private fun connectSrc(lanRelay: String?, relayHosts: List<String>): String = bu
     append("'self'")
     if (lanRelay != null) { append(' '); append(lanRelay) }
     for (h in relayHosts.distinct()) {
-        append(" wss://"); append(h); append(" https://"); append(h)
+        // A `ws://` relay on the user's own LAN is named with its scheme (see
+        // MainActivity.ensureAssetServer); a `wss` source does not admit a `ws`
+        // URL, so without this a cleartext relay the Servers screen accepted was
+        // blocked here and silently never dialled.
+        if (h.startsWith("ws://")) {
+            val bare = h.removePrefix("ws://")
+            append(" ws://"); append(bare); append(" http://"); append(bare)
+        } else {
+            append(" wss://"); append(h); append(" https://"); append(h)
+        }
     }
 }
 

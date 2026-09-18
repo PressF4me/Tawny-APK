@@ -85,6 +85,21 @@ A custom TURN entry goes **ahead of** whatever `/turn` issues rather than
 instead of it, so a wrong one costs nothing. Custom STUN replaces the build's
 list.
 
+**For harder privacy [advanced]** is a switch at the top of the same screen
+(`srvStrict`). Turning it on asks for confirmation first, and it removes every
+safety net above: no built-in rendezvous (not as a fallback, not in the CSP),
+no public STUN (blank means none), no relay adopted from a scanned code, no
+"Send to Tawny", and WebView Safe Browsing off. A relay that doesn't answer
+gets a toast and keeps being redialled; nothing takes over for it. It also adds
+TURN **When needed / Always / Never** (`srvTurnMode`; Always sets
+`iceTransportPolicy: relay`), whether to ask the rendezvous for `/turn`
+credentials (`srvTurnFetch`), and the **Direct Wi-Fi path** (`srvLanPath`).
+Turning that path off means the Monitor starts no LAN relay and its code
+carries no `h=`. Save refuses only combinations that cannot connect at all,
+then lists exactly what the phone will contact. "Use Tawny's servers" clears
+all of it. `ws://` relays are now named with their scheme in the CSP, so a
+cleartext relay on your own LAN actually gets dialled.
+
 Two things that follow the setting and are easy to miss:
 
 - The page's CSP names the hosts it may reach (`connectSrc` in `LocalWeb.kt`).
