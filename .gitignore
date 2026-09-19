@@ -44,3 +44,6 @@ node_modules/
 /tools/tawny-release-notes
 /tools/tawny-reports
 /tools/probes/
+
+# Original chime recordings: not redistributable as loose files (see public/sounds/README.md).
+public/sounds/_src/

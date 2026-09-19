@@ -2,20 +2,25 @@
 # Regenerate the chime clips in public/sounds/.
 #
 #   bark, pspsps, meow, goodboy  — trimmed/normalised from the original
-#                                  recordings in public/sounds/_src/
+#                                  recordings (see below)
 #   bell                         — pure FM synthesis (Chowning), no source
 #
-# The _src/ recordings are the masters; edit those (or the trim windows below)
-# and re-run. _src/ is excluded from the APK by syncWebAssets.
+# The original recordings are the masters; edit those (or the trim windows
+# below) and re-run. They are not in the repository: the stock-library licence
+# covers them inside the app, not as loose files, and one is an internal
+# recording. Keep them in public/sounds/_src/ (git-ignored) or point
+# TAWNY_SOUNDS_SRC at wherever they live. Without them only the bell is rebuilt;
+# the committed .ogg clips are what ships.
 #
 # Usage:   tools/gen-chimes.sh
+#          TAWNY_SOUNDS_SRC=/path/to/recordings tools/gen-chimes.sh
 # Requires: ffmpeg with libvorbis.
 
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="$here/public/sounds"
-src="$out/_src"
+src="${TAWNY_SOUNDS_SRC:-$out/_src}"
 mkdir -p "$out"
 
 command -v ffmpeg >/dev/null || { echo "ffmpeg is required" >&2; exit 1; }
@@ -48,7 +53,7 @@ if [ -d "$src" ]; then
   # loudnorm; -ss/-to picks out the first of the two "psp psp psp" repeats.
   proc pspsps  "pspsps - internal.m4a" anull              -ss 1.0  -to 2.20
 else
-  echo "  (public/sounds/_src/ missing — skipping the recorded clips)" >&2
+  echo "  (no recordings at $src — skipping the recorded clips; set TAWNY_SOUNDS_SRC)" >&2
 fi
 
 # ---------------------------------------------------------------- bell (synth)
