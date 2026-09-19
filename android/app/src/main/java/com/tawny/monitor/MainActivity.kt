@@ -3000,7 +3000,7 @@ class MainActivity : AppCompatActivity() {
     private val LN_ADDRESS = "loustrikes@strike.me"
     private val LN_URI = "lightning:$LN_ADDRESS"
     private val LN_WEB_URL = "https://strike.me/@loustrikes"
-    private val SUPPORT_EMAIL = "tawnyapp.radar137@passinbox.com"
+    private val SUPPORT_EMAIL = "tawnysupport@pm.me"
 
     /** Hand a URL to whatever the user browses with. Never loaded in-app. */
     private fun openExternal(url: String) {

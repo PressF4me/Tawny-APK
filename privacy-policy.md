@@ -1,6 +1,6 @@
 # Tawny — Privacy Policy
 
-_Last updated: 2026-09-18_
+_Last updated: 2026-09-19_
 
 Tawny is a two-way pet monitor. One device (**the Monitor**) stays with your pet
 and sends its camera and microphone; one or more other devices (**Viewers**)
@@ -139,7 +139,7 @@ available to everyone, whether or not anyone ever contributes.
 
 ## Contact
 
-Questions or a data-deletion request: **tawnyapp.radar137@passinbox.com**
+Questions or a data-deletion request: **tawnysupport@pm.me**
 
 This file is the source text. The **published** copy is
 `rendezvous/privacy.js`, which the rendezvous Worker serves at `GET /privacy` —
