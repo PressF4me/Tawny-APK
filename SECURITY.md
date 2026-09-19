@@ -302,5 +302,7 @@ after-the-fact alarm, not a gate.
 
 ## Reporting
 
-Please report security vulnerabilities responsibly to the contact address listed
-on the Play Store listing. Do not file public issues for exploitable bugs.
+Please report security vulnerabilities privately to **tawnysupport@pm.me**
+(also the contact on the Play Store listing). Do not file public issues for
+exploitable bugs. Include what you found, how to reproduce it, and which app
+and version; you will get a reply, and a fix before any details are published.
