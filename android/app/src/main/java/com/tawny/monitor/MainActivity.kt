@@ -2048,6 +2048,11 @@ class MainActivity : AppCompatActivity() {
      * thread; on any failure it hands back to [onFail] (the share sheet) so a
      * report is never simply lost.
      */
+    /** True on a Firebase Test Lab phone (what Play's pre-launch report runs on). */
+    private fun onTestLab(): Boolean = try {
+        android.provider.Settings.System.getString(contentResolver, "firebase.test.lab") == "true"
+    } catch (e: Exception) { false }
+
     private fun sendReport(log: String, onFail: () -> Unit) {
         val base = BuildConfig.RENDEZVOUS_URL
             .replaceFirst(Regex("^ws", RegexOption.IGNORE_CASE), "http")
@@ -2063,6 +2068,11 @@ class MainActivity : AppCompatActivity() {
                     put("android", android.os.Build.VERSION.RELEASE ?: "")
                     put("id", randToken(6))
                     put("log", log)
+                    // Google Play's pre-launch robot taps "Send to Tawny" too.
+                    // Mark its reports so they can be told from real users'.
+                    // Only ever set on Google's test phones: a user's report
+                    // holds nothing new.
+                    if (onTestLab()) put("lab", true)
                 }.toString().toByteArray(Charsets.UTF_8)
                 val conn = (java.net.URL("$base/report").openConnection()
                         as java.net.HttpURLConnection).apply {
@@ -2527,7 +2537,7 @@ class MainActivity : AppCompatActivity() {
             android.content.res.Configuration.UI_MODE_NIGHT_YES
 
     private fun relayFailed() {
-        Diag.log("shell", "signal server failed to bind")
+        Diag.log("shell", "signal server failed to bind, no rendezvous to fall back on")
         themedDialog(
             title = getString(R.string.relay_failed_title),
             body = getString(R.string.relay_failed_body),
@@ -2566,7 +2576,14 @@ class MainActivity : AppCompatActivity() {
         signalServer?.let { onReady(it.boundPort); return }
         showBusy(getString(R.string.busy_starting_monitor))
         io.execute {
-            val port = ensureSignalServer()
+            var port = ensureSignalServer()
+            // The Wi-Fi path is a shortcut, not the only road: with a rendezvous
+            // set, go on without it (0 = no relay, and no `h=` in the code)
+            // instead of stopping the Monitor at an error.
+            if (port < 0 && hasRendezvous) {
+                Diag.log("shell", "signal server unavailable, rendezvous only")
+                port = 0
+            }
             runOnUiThread { if (!isFinishing && !isDestroyed) onReady(port) }
         }
     }
@@ -4426,7 +4443,7 @@ class MainActivity : AppCompatActivity() {
     private fun pairingPayload(ip: String?, sigPort: Int, key: String, name: String, token: String?) =
         buildString {
             append("tawny://pair?k=${Uri.encode(key)}&n=${Uri.encode(name)}")
-            if (ip != null) append("&h=$ip:$sigPort")
+            if (ip != null && sigPort > 0) append("&h=$ip:$sigPort")
             if (token != null) append("&t=${Uri.encode(token)}")
             append("&c=${Uri.encode(currentPairCode())}")
             append("&e=${pairCodeExp / 1000}")
@@ -4504,21 +4521,32 @@ class MainActivity : AppCompatActivity() {
     /** Returns the bound port, or -1 if the relay could not start. */
     private fun ensureSignalServer(): Int {
         signalServer?.let { return it.boundPort }
-        // The relay proves each LAN peer holds the channel key before letting it
-        // into the room; read the key fresh so a re-pair takes effect at once.
-        val s = SignalServer(prefs.getInt("sigPort", 8820)) {
-            prefs.getString("channelKey", null)
-        }.apply {
-            isReuseAddr = true
-            start()
-        }
-        if (!s.ready.await(3, TimeUnit.SECONDS)) {
+        // The saved port first, so earlier Handhelds find it again; then any port
+        // the system will give, since a different port beats no Wi-Fi path.
+        for (want in listOf(prefs.getInt("sigPort", 8820), 0)) {
+            // The relay proves each LAN peer holds the channel key before letting it
+            // into the room; read the key fresh so a re-pair takes effect at once.
+            val s = try {
+                SignalServer(want) { prefs.getString("channelKey", null) }.apply {
+                    isReuseAddr = true
+                    start()
+                }
+            } catch (e: Exception) {
+                Diag.log("shell", "signal server port=$want: ${e.javaClass.simpleName}: ${e.message}")
+                continue
+            }
+            val signalled = s.ready.await(3, TimeUnit.SECONDS)
+            val err = s.startError
+            if (signalled && err == null) {
+                signalServer = s
+                prefs.edit().putInt("sigPort", s.boundPort).apply()
+                return s.boundPort
+            }
+            Diag.log("shell", "signal server port=$want: " +
+                if (err != null) "${err.javaClass.simpleName}: ${err.message}" else "no start after 3s")
             try { s.stop(200) } catch (e: Exception) {}
-            return -1
         }
-        signalServer = s
-        prefs.edit().putInt("sigPort", s.boundPort).apply()
-        return s.boundPort
+        return -1
     }
 
     private fun stopServers() {
@@ -4560,7 +4588,7 @@ class MainActivity : AppCompatActivity() {
         if (role == "station") {
             withSignalServer { port ->
                 if (port < 0) { relayFailed(); return@withSignalServer }
-                goLiveWith(role, "ws://127.0.0.1:$port")
+                goLiveWith(role, if (port > 0) "ws://127.0.0.1:$port" else null)
             }
             return
         }

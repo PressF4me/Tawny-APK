@@ -308,7 +308,11 @@ class SignalServer(
 ) {
 
     val boundPort: Int get() = port
+    /** Counts down once the server is listening, or once it has failed to. */
     val ready = CountDownLatch(1)
+    /** Why the server could not start (bind, selector), or null. */
+    @Volatile var startError: Exception? = null
+        private set
 
     private class Meta(val id: String, val room: String, val role: String, val ip: String)
     /** A socket that has been challenged but has not answered yet. */
@@ -477,6 +481,9 @@ class SignalServer(
 
     override fun onError(conn: WebSocket?, ex: Exception) {
         Log.w("Tawny", "signal server error", ex)
+        // No connection means the server itself failed; before onStart that is
+        // the bind. Release the caller now rather than let it wait out its timeout.
+        if (conn == null && ready.count > 0) { startError = ex; ready.countDown() }
     }
 
     private var sweeper: java.util.concurrent.ScheduledExecutorService? = null
