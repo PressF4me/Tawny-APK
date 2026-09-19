@@ -30,7 +30,7 @@ the job a server would.
 </p>
 
 - **Android app:** [`README-ANDROID.md`](README-ANDROID.md)
-- **Self-hosting (container, relay, rendezvous):** the separate [**Tawny Docker**](https://github.com/PressF4me/tawny) repo
+- **Self-hosting (container, relay, rendezvous):** the separate [**Tawny Docker**](https://github.com/PressF4me/tawny) repo (not yet available, doing a slow rollout)
 - **Security model & residual risk:** [`SECURITY.md`](SECURITY.md)
 
 <p align="center">
