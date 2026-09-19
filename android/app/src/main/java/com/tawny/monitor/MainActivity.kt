@@ -5682,6 +5682,11 @@ class MainActivity : AppCompatActivity() {
                             // own pre-flight refusal, so the ten minutes reads
                             // as one rule wherever it is noticed.
                             obj.optString("reason") == "expired" -> pairingExpired()
+                            // A code-only link at a relay that only admits by
+                            // ticket. Not expired, not offline: the page's own
+                            // sentence says what is actually wrong.
+                            obj.optString("reason") == "noticket" ->
+                                showError(message ?: getString(R.string.err_could_not_start_session))
                             prefs.getString("role", null) == "viewer" -> showMonitorOffline()
                             else -> showError(message ?: getString(R.string.err_could_not_start_session))
                         }
