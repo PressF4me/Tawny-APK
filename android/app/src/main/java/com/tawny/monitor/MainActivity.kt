@@ -142,7 +142,8 @@ object Diag {
     fun init(ctx: Context) {
         if (file != null) return
         file = File(ctx.filesDir, "diag.log")
-        log("app", "── launched v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}), " +
+        log("app", "── launched v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})" +
+            (if (BuildConfig.BUILD_TYPE == "release") "" else " [${BuildConfig.BUILD_TYPE}]") + ", " +
             "android ${android.os.Build.VERSION.SDK_INT} on ${android.os.Build.MODEL}")
     }
 

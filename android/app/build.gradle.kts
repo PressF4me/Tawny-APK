@@ -108,6 +108,17 @@ android {
         debug {
             applicationIdSuffix = ".debug"
         }
+        // The APK attached to GitHub Releases, for phones without Google Play.
+        // Same code and upload key as `release`, but its own app id: Play
+        // re-signs its copy with Google's app-signing key, so an APK signed
+        // with ours could never update (or be updated by) the Play install.
+        // As com.tawny.monitor.github it sits beside it as "Tawny (GitHub)".
+        // `./gradlew :app:assembleGithub`; tools/tawny-github-apk files it.
+        create("github") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".github"
+            matchingFallbacks += listOf("release")
+        }
     }
 
     compileOptions {

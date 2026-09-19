@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Build the GitHub edition APK ("Tawny (GitHub)", com.tawny.monitor.github) and
+# open a DRAFT GitHub Release for it, tagged v<VERSION_NAME>, with the APK and
+# its SHA-256 attached. Nothing is public until you press Publish on GitHub.
+#
+#   tools/tawny-github-apk            build + draft release for the current version
+#   tools/tawny-github-apk --build    build only (APK path printed)
+#
+# Run after tools/tawny-ship-aab for the same version, so Play and GitHub ship
+# the same code. Needs the upload keystore (android/keystore.properties) and gh.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+props="$here/android/version.properties"
+ver=$(sed -n 's/^VERSION_NAME=//p' "$props" | tr -d '[:space:]')
+code=$(sed -n 's/^VERSION_CODE=//p' "$props" | tr -d '[:space:]')
+tag="v$ver"
+
+[ -f "$here/android/keystore.properties" ] || { echo "no android/keystore.properties: the APK would be unsigned" >&2; exit 1; }
+[ -z "$(git -C "$here" status --porcelain)" ] || { echo "commit your changes first: the release must match a commit" >&2; exit 1; }
+
+echo "Building Tawny (GitHub) $ver (build $code)…"
+(cd "$here/android" && ./gradlew -q :app:assembleGithub)
+out="$here/android/app/build/outputs/apk/github"
+apk="$out/tawny-$ver-github.apk"
+cp "$out/app-github.apk" "$apk"
+sum=$(sha256sum "$apk" | cut -d' ' -f1)
+echo "  ✓ $apk"
+echo "  sha256 $sum"
+[ "${1:-}" = "--build" ] && exit 0
+
+notes=$(mktemp)
+cat > "$notes" <<EOF
+**Tawny $ver** (build $code), the same app as on Google Play.
+
+### Which one should I install?
+
+- **You have Google Play:** install Tawny from Google Play instead. It updates by itself.
+- **No Google Play** (de-Googled phone, Huawei, a tablet without Play): download
+  \`tawny-$ver-github.apk\` below and open it. Android will ask you to allow
+  installing apps from your browser or file manager.
+
+This edition installs as **Tawny (GitHub)**, separate from the Play app: the two
+can sit side by side, but their pairings are separate. It does not update itself;
+check Releases for new versions.
+
+SHA-256 of the APK: \`$sum\`
+
+Questions: tawnysupport@pm.me · Privacy policy: https://tawny-rendezvous.tawny1.workers.dev/privacy
+EOF
+gh release create "$tag" "$apk" --draft --target "$(git -C "$here" rev-parse HEAD)" \
+  --title "Tawny $ver" --notes-file "$notes" -R PressF4me/Tawny-Pet-Monitor-APK
+rm -f "$notes"
+echo "  ✓ draft release $tag created. Review it on GitHub and press Publish."
