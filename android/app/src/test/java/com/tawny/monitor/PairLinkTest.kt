@@ -120,6 +120,20 @@ class PairLinkTest {
     }
 
     @Test
+    fun `a Viewer clock hours off does not call a fresh code expired`() {
+        // The Monitor minted this code ten minutes ahead of its own clock; on a
+        // Viewer running two hours fast it reads as long past. The Monitor is
+        // the one that refuses a lapsed code, so this must still dial.
+        val skewed = parse(WEB_LINK)!!.copy(
+            expiresAt = System.currentTimeMillis() - 2 * 60 * 60 * 1000 + 600_000)
+        assertFalse(skewed.expired)
+        // A code more than a day stale is expired on any plausible clock.
+        val stale = parse(WEB_LINK)!!.copy(
+            expiresAt = System.currentTimeMillis() - Pairing.CLOCK_SKEW_MS - 60_000)
+        assertTrue(stale.expired)
+    }
+
+    @Test
     fun `nonsense is refused`() {
         assertNull(parse(""))
         assertNull(parse("not a link at all"))

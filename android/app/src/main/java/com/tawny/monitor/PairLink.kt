@@ -41,7 +41,20 @@ data class Pairing(
      */
     val relayTrusted: Boolean = false
 ) {
-    val expired get() = expiresAt > 0 && System.currentTimeMillis() > expiresAt
+    /**
+     * Stale past any plausible clock disagreement. [expiresAt] was written by
+     * the Monitor's clock and this reads the phone's own, so a Viewer whose
+     * clock was a couple of hours off used to call every fresh code expired
+     * and never dial. Anything closer goes to the Monitor, which refuses a
+     * lapsed code itself (`bye`, reason `expired`) and lands on the same
+     * pairingExpired() screen. Same margin as CLOCK_SKEW_MS in app.js.
+     */
+    val expired get() = expiresAt > 0 && System.currentTimeMillis() > expiresAt + CLOCK_SKEW_MS
+
+    companion object {
+        /** A wrong timezone on a local-time clock is at most ~14 h off. */
+        const val CLOCK_SKEW_MS = 24L * 60 * 60 * 1000
+    }
 }
 
 /**
