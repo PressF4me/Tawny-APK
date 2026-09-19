@@ -49,6 +49,6 @@ SHA-256 of the APK: \`$sum\`
 Questions: tawnysupport@pm.me · Privacy policy: https://tawny-rendezvous.tawny1.workers.dev/privacy
 EOF
 gh release create "$tag" "$apk" --draft --target "$(git -C "$here" rev-parse HEAD)" \
-  --title "Tawny $ver" --notes-file "$notes" -R PressF4me/Tawny-Pet-Monitor-APK
+  --title "Tawny $ver" --notes-file "$notes" -R PressF4me/Tawny-APK
 rm -f "$notes"
 echo "  ✓ draft release $tag created. Review it on GitHub and press Publish."
