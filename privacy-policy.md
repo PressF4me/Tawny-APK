@@ -26,7 +26,7 @@ your information.
 | **Microphone** | The Monitor streams room sound; the Viewer sends your voice when you hold "talk". | Audio is sent, encrypted, only to the paired device(s). Never to us. |
 | **Local network** | To discover and connect your two phones. | Stays on your Wi-Fi. |
 | **Photos you save** ("Snapshot") | Saved to your device's Pictures folder, in a "Tawny" album. | No. |
-| **Diagnostics log** | An optional, deliberately out-of-the-way log (long-press the small version number) for working out why a connection failed. Records hashed room identifiers, never your key. | Only if you tap **Send to Tawny** — see "Sending a diagnostics report" below. Otherwise it stays on your device and is excluded from cloud backup. |
+| **Diagnostics log** | An optional, deliberately out-of-the-way log (long-press the small version number) for working out why a connection failed. Records hashed room identifiers and connection events, never your key or IP addresses. | Only if you tap **Send to Tawny** — see "Sending a diagnostics report" below. Otherwise it stays on your device and is excluded from cloud backup. |
 | **Pairing key** | A random 128-bit key, generated on your device, that identifies your private channel. Stored in the app's private storage. | No — it is never sent to any server. Servers only ever see an irreversible hash of it. |
 
 The app requests camera and microphone access only when you set up a role, and
@@ -94,8 +94,9 @@ a connection failed.
 
 - It is never sent automatically, only when you tap the button.
 - It contains no account, name, email or advertising identifier — there are
-  none in the app — and the log records only hashed room identifiers, never your
-  pairing key.
+  none in the app — and the log records only hashed room identifiers and
+  connection events (for example whether a connection was direct or relayed),
+  never your pairing key or IP addresses.
 - Reports are held for at most 30 days and then deleted automatically.
 - If you would rather not send it through the app, the same screen offers
   "Send another way" (your device's normal share sheet) and "Copy", so you can
@@ -136,6 +137,15 @@ available to everyone, whether or not anyone ever contributes.
   wallet, and never handles a key, an invoice or a payment. If you have no
   wallet installed, the screen simply shows the address and a QR code. Nothing
   about you is sent anywhere by opening this screen.
+
+## If you email us
+
+Mail to **tawnysupport@pm.me** is received by Proton Mail. To help answer it, a
+copy is kept on the developer's own server for up to 30 days and read by an AI
+assistant that runs entirely on the developer's own hardware. Your message is
+not sent to any outside AI or analytics service. The assistant only drafts;
+every reply is written or checked and sent by the developer. Don't include
+pairing codes or passwords in an email.
 
 ## Contact
 
