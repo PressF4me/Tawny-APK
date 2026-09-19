@@ -30,16 +30,14 @@ the job a server would.
 </p>
 
 - **Android app:** [`README-ANDROID.md`](README-ANDROID.md)
-- **Self-hosting (container, relay, rendezvous):** the separate [**Tawny Docker**](https://github.com/PressF4me/Tawny-Docker) repo (not yet available, doing a slow rollout)
+- **Self-hosting (container, relay, rendezvous):** ~~the separate **Tawny Docker** repo~~ — *not public yet*
 - **Security model & residual risk:** [`SECURITY.md`](SECURITY.md)
 
 <p align="center">
-  <a href="https://github.com/PressF4me/Tawny-Docker">
-    <img src="https://img.shields.io/badge/Run_your_own-Tawny_Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Tawny Docker — self-host the relay as a container">
-  </a>
+  <img src="https://img.shields.io/badge/Run_your_own-Tawny_Docker_(not_public_yet)-9e9e9e?style=for-the-badge&logo=docker&logoColor=white" alt="Tawny Docker — self-host the relay as a container; not public yet">
   <br>
-  <sub>Want a viewer with nothing installed? Run <b><a href="https://github.com/PressF4me/Tawny-Docker">Tawny Docker</a></b> on a box at home
-  and watch from any browser on your tailnet.</sub>
+  <sub>Want a viewer with nothing installed? <s>Run <b>Tawny Docker</b> on a box at home
+  and watch from any browser on your tailnet.</s> Not public yet.</sub>
 </p>
 
 ## 😌 Supporting it
@@ -107,7 +105,7 @@ SECURITY.md              threat model, hardening, residual risk
 
 The self-host relay (`server.js`), the rendezvous Worker, and the container —
 automatic HTTPS over Tailscale and an optional bundled TURN relay — live in the
-separate [**Tawny Docker**](https://github.com/PressF4me/Tawny-Docker) repo, which vendors
+separate ~~**Tawny Docker**~~ repo (not public yet), which vendors
 `public/` from here.
 
 No CDN, no web fonts fetched at runtime, no analytics — the app works on a
