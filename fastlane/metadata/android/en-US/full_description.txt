@@ -1,0 +1,42 @@
+Tawny turns two phones into a cosy little pet monitor.
+
+Leave one phone with your pet — an old handset on a charger is perfect. It
+becomes the Monitor: it points its camera at the room, sends the picture and
+the sound, and answers on its own. Keep the other phone with you as the Viewer:
+watch, listen in, hold a button to talk back, or play a gentle chime.
+
+SETTING UP IS A PHOTO
+The Monitor shows a code. Point the other phone's camera at it. That's the
+whole setup — no account, no sign-up, no cloud login, no address to type.
+
+IT STAYS PRIVATE
+On your home Wi-Fi nothing leaves the house: one of your own phones does the
+job a server would. Video and audio travel straight between your devices,
+encrypted end to end. Tawny has no ads, no analytics, and no tracking of any
+kind. We never see your video, your sound, or your pairing key.
+
+WHEN YOU'RE OUT
+Tawny can introduce the two phones over the internet the same way — nothing to
+configure and no ports to open. The service that introduces them only ever sees
+a one-way hash of your key, never the key, and never your video. Some mobile
+networks won't let two phones connect directly; when that happens Tawny falls
+back to an encrypted relay, which forwards the stream without being able to read
+it. Wi-Fi at either end is still the lightest path.
+
+WHAT YOU GET
+• Live video and two-way audio
+• Hold-to-talk, so the room isn't listening to your whole day
+• Call your pet over with a squeaky toy, a meow, a psp-psp-psp, a "good boy", or a bell
+• Dim mode — glance at a blacked-out screen and still read the room's noise
+• Front and rear camera, mute, zoom, snapshot
+• Turn on the monitor phone's light from your own to see into a dark room
+• Up to three Viewers watching one Monitor
+• A short safety code to compare each time you connect from away
+• Light and dark themes, or follow your phone’s setting
+• A quick walkthrough for new users, plus in-app help and feedback
+
+GOOD TO KNOW
+Tawny streams only while the app is open on both phones. Keep the Monitor on a
+charger with its screen on — dim mode is fine, and it stops the phone dozing
+off. Tawny is a pet monitor: please don't rely on it as a baby monitor or as a
+safety or security device.

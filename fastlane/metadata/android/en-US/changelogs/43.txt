@@ -1,0 +1,2 @@
+• First release on F-Droid.
+• The F-Droid build leaves out Google Play's review library.

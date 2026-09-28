@@ -301,10 +301,8 @@ private const val COACH_SEEN = "coachSeen"
 private const val TOUR_SEEN = "tourSeen"
 
 /** The rating prompt's bookkeeping: sessions used for real, times asked, and
- *  when last. See MainActivity.maybeAskForReview. */
+ *  when last. */
 private const val GOOD_SESSIONS = "goodSessions"
-private const val REVIEW_ASKS = "reviewAsks"
-private const val REVIEW_LAST = "reviewLast"
 
 /** The Play listing the rating row and the review fallback open. Not
  *  packageName: a debug build carries a ".debug" suffix that has no listing. */
@@ -2967,7 +2965,6 @@ class MainActivity : AppCompatActivity() {
         root.addView(scroll)
         root.addView(themeToggleView())
         root.addView(languageToggleView())
-        maybeAskForReview()
     }
 
     // ---------------------------------------------------------- about
@@ -3698,43 +3695,6 @@ class MainActivity : AppCompatActivity() {
         prefs.edit().putInt(GOOD_SESSIONS, prefs.getInt(GOOD_SESSIONS, 0) + 1).apply()
     }
 
-    /**
-     * The in-app rating prompt, through Google Play's own review sheet.
-     *
-     * Asked of everyone the same way, whatever their experience: no "Do you
-     * like Tawny?" gate in front of it, which Play's policy forbids and which
-     * would skew the ratings anyway. It waits until Tawny has been used for
-     * real — three sessions of a minute or more — and lands on a home screen
-     * between calls, never during one or in the middle of setting up. Play
-     * itself decides whether the sheet actually appears (it has its own quota),
-     * so this asks at most three times, a month apart, and moves on.
-     */
-    private fun maybeAskForReview() {
-        val sessions = prefs.getInt(GOOD_SESSIONS, 0)
-        val asks = prefs.getInt(REVIEW_ASKS, 0)
-        val last = prefs.getLong(REVIEW_LAST, 0L)
-        if (sessions < 3 || asks >= 3) return
-        if (System.currentTimeMillis() - last < 30L * 24 * 3600 * 1000) return
-        if (sessions < 3 * (asks + 1)) return
-        val shownOn = screen
-        root.postDelayed({
-            if (isFinishing || isDestroyed || screen != shownOn || isLive) return@postDelayed
-            prefs.edit()
-                .putInt(REVIEW_ASKS, asks + 1)
-                .putLong(REVIEW_LAST, System.currentTimeMillis())
-                .apply()
-            val manager = com.google.android.play.core.review.ReviewManagerFactory.create(this)
-            manager.requestReviewFlow().addOnCompleteListener { req ->
-                if (!req.isSuccessful || isFinishing || isDestroyed) {
-                    Diag.log("review", "flow unavailable: ${req.exception?.javaClass?.simpleName}")
-                    return@addOnCompleteListener
-                }
-                manager.launchReviewFlow(this, req.result)
-                    .addOnCompleteListener { Diag.log("review", "flow finished") }
-            }
-        }, 1500L)
-    }
-
     // ----------------------------------------------------------- theme row
 
     /**
@@ -3871,7 +3831,6 @@ class MainActivity : AppCompatActivity() {
         col.addView(link(getString(R.string.handheld_connect_different)) { onHandheld() })
         col.addView(link(getString(R.string.meta_help)) { showHelp(from = "handheld") })
         mountCentered(col)
-        maybeAskForReview()
 
         // Same reasoning as showRole(): keep the trail off the actual content,
         // recomputed on layout/scroll since mountCentered's ScrollView can

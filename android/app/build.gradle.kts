@@ -138,10 +138,6 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.webkit:webkit:1.12.1")
 
-    // Google Play's in-app review sheet, for the rating prompt. Ships its own
-    // consumer R8 rules; on a phone without Play it simply never shows.
-    implementation("com.google.android.play:review:2.0.2")
-
     // QR: encode the pairing code on the Watcher, decode it on the Handheld.
     implementation("com.google.zxing:core:3.5.3")
 
