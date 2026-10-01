@@ -1,0 +1,5 @@
+• The diagnostics log no longer records IP addresses.
+• A phone paired over the internet no longer starts as a second monitor after going back to the welcome screen.
+• Opening a pairing link no longer asks again after changing theme or language.
+• The QR scanner no longer leaves the camera on if you back out quickly.
+• Spanish: several screens and messages that still showed English are translated.

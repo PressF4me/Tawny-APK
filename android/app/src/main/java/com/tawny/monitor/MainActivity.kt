@@ -321,12 +321,8 @@ private const val COACH_SEEN = "coachSeen"
 /** The native walkthrough was finished or skipped once. */
 private const val TOUR_SEEN = "tourSeen"
 
-/** The rating prompt's bookkeeping: sessions used for real, times asked, and
- *  when last. */
-private const val GOOD_SESSIONS = "goodSessions"
-
-/** The Play listing the rating row and the review fallback open. Not
- *  packageName: a debug build carries a ".debug" suffix that has no listing. */
+/** The Play listing the rating row opens. Not packageName: a debug build
+ *  carries a ".debug" suffix that has no listing. */
 private const val PLAY_PACKAGE = "com.tawny.monitor"
 
 /**
@@ -359,8 +355,6 @@ class MainActivity : AppCompatActivity() {
     private var viewersNow = 0
     private var viewersMax = MAX_VIEWERS
     private var isLive = false
-    /** When the current live session began, for [countSession]. */
-    private var liveSince = 0L
     /** Live only while this phone is the Monitor: forwards its battery to the
      *  page, which mirrors it to every Handheld. */
     private var batteryRx: BroadcastReceiver? = null
@@ -3711,15 +3705,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * A session counts toward the rating prompt once it has actually been used
-     * — a minute or more live — not every time a screen was opened and closed.
-     */
-    private fun countSession(ms: Long) {
-        if (ms < 60_000L) return
-        prefs.edit().putInt(GOOD_SESSIONS, prefs.getInt(GOOD_SESSIONS, 0) + 1).apply()
-    }
-
     // ----------------------------------------------------------- theme row
 
     /**
@@ -5952,7 +5937,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun beginLive() {
         isLive = true
-        liveSince = System.currentTimeMillis()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         acquireSessionLocks()
         if (prefs.getString("role", null) == "station") {
@@ -5979,7 +5963,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun endLive() {
-        if (isLive) countSession(System.currentTimeMillis() - liveSince)
         isLive = false
         stopBatteryMirror()
         stopChimeAudio()
