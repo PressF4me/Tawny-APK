@@ -3996,7 +3996,7 @@ async function start(role, opts = {}) {
   } catch (err) {
     return bail(err.name === 'NotAllowedError'
       ? TawnyT.t('w_bail_cam_mic_blocked')
-      : `Could not open the camera or microphone (${err.name}).`);
+      : TawnyT.t('w_bail_cam_mic_failed', err.name));
   }
   // Attach the preview now, so frames start flowing at once — the shaping
   // itself waits until the station UI below has the preview on screen, because

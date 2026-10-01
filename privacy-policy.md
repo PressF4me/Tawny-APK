@@ -1,6 +1,6 @@
 # Tawny — Privacy Policy
 
-_Last updated: 2026-09-19_
+_Last updated: 2026-10-01_
 
 Tawny is a two-way pet monitor. One device (**the Monitor**) stays with your pet
 and sends its camera and microphone; one or more other devices (**Viewers**)
@@ -26,6 +26,7 @@ your information.
 | **Microphone** | The Monitor streams room sound; the Viewer sends your voice when you hold "talk". | Audio is sent, encrypted, only to the paired device(s). Never to us. |
 | **Local network** | To discover and connect your two phones. | Stays on your Wi-Fi. |
 | **Photos you save** ("Snapshot") | Saved to your device's Pictures folder, in a "Tawny" album. | No. |
+| **Video clips you save** ("Record") | Short clips, up to 20 seconds, saved to your device's Movies folder, in a "Tawny" album. | No. |
 | **Diagnostics log** | An optional, deliberately out-of-the-way log (long-press the small version number) for working out why a connection failed. Records hashed room identifiers and connection events, never your key or IP addresses. | Only if you tap **Send to Tawny** — see "Sending a diagnostics report" below. Otherwise it stays on your device and is excluded from cloud backup. |
 | **Pairing key** | A random 128-bit key, generated on your device, that identifies your private channel. Stored in the app's private storage. | No — it is never sent to any server. Servers only ever see an irreversible hash of it. |
 
@@ -109,10 +110,10 @@ information from them.
 
 ## Security
 
-Media is encrypted in transit (DTLS-SRTP). Every connection made over the
-internet to a monitor shows a short safety code on both screens for you to
-compare, which detects a tampered relay. A fresh code is drawn for each
-connection, so compare it each time rather than expecting the same one twice.
+Media is encrypted in transit (DTLS-SRTP). The first time a phone connects to
+a monitor over the internet, both screens show a short safety code for you to
+compare, which detects a tampered relay. You are asked once per phone: after you
+confirm the codes match, that phone is not asked again.
 Pairing codes are like a key to your channel — only share them
 with devices you own, and re-pair if a code may have leaked.
 
