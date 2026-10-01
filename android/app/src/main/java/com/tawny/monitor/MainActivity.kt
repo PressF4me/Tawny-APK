@@ -147,9 +147,27 @@ object Diag {
             "android ${android.os.Build.VERSION.SDK_INT} on ${android.os.Build.MODEL}")
     }
 
+    /**
+     * Any IPv4 address in a line, replaced by what kind of address it was. The
+     * privacy policy promises this log never holds an IP address, and lines
+     * arrive from all over the shell and the page (`lan=…`, `dial lan …`), so
+     * the promise is kept here, once, rather than at every call site. Whether
+     * an address was on the home network or not is all a bug report needs.
+     */
+    private val IPV4 = Regex("(?<![\\d.])(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})(?![\\d.])")
+
+    private fun redact(s: String): String = IPV4.replace(s) { m ->
+        when {
+            m.groupValues.drop(1).any { (it.toIntOrNull() ?: 256) > 255 } -> m.value
+            m.value == "127.0.0.1" -> m.value      // this phone's own loopback
+            PairLink.isPrivateHostPort("${m.value}:0") -> "<lan-ip>"
+            else -> "<ip>"
+        }
+    }
+
     @Synchronized
     fun log(tag: String, msg: String) {
-        val line = "${stamp.format(java.util.Date())}  $tag  $msg"
+        val line = "${stamp.format(java.util.Date())}  $tag  ${redact(msg)}"
         Log.d("TawnyDiag", line)
         val f = file ?: return
         try {
@@ -160,8 +178,9 @@ object Diag {
         } catch (e: Exception) { /* diagnostics must never break the app */ }
     }
 
+    /** Redacted again on the way out, for lines written by a build that did not. */
     @Synchronized fun dump(): String =
-        try { file?.takeIf { it.exists() }?.readText().orEmpty() } catch (e: Exception) { "" }
+        try { redact(file?.takeIf { it.exists() }?.readText().orEmpty()) } catch (e: Exception) { "" }
 
     @Synchronized fun clear() {
         try { file?.writeText("") } catch (e: Exception) {}
@@ -292,6 +311,9 @@ private const val MAX_VIEWERS = 3
  * silently as "this one screen ignores the setting".
  */
 private const val STILL_MODE = "stillMode"
+
+/** The channel's role, set aside by the welcome screen; see resumeSession(). */
+private const val PARKED_ROLE = "parkedRole"
 
 /** Roles ("viewer" / "station") whose first-call walkthrough has been shown. */
 private const val COACH_SEEN = "coachSeen"
@@ -654,7 +676,11 @@ class MainActivity : AppCompatActivity() {
         if (key.isNullOrBlank()) return false
         // A Handheld has a saved role of "viewer", or a LAN signalUrl; anything
         // else with a channel key is a Watcher (it owns the channel it made).
-        val isViewer = prefs.getString("role", null) == "viewer" ||
+        // The welcome screen parks the role rather than forgetting it: an
+        // internet-only Handheld has no signalUrl, so without the parked role it
+        // was read as a Watcher and started a second Monitor on its own channel.
+        val role = prefs.getString("role", null) ?: prefs.getString(PARKED_ROLE, null)
+        val isViewer = role == "viewer" ||
             !prefs.getString("signalUrl", null).isNullOrBlank()
         if (isViewer) {
             prefs.edit().putString("role", "viewer").apply()
@@ -3762,8 +3788,12 @@ class MainActivity : AppCompatActivity() {
         clearScreen()
         screen = "welcome"
         // Not committed to a role here — don't let onCreate auto-resume into one.
-        // Also mark onboarding as seen so a cold start never lands here again.
-        prefs.edit().remove("role").putBoolean("seenWelcome", true).apply()
+        // The role is parked, not dropped, so resumeSession() can still tell a
+        // Handheld from a Watcher. Also mark onboarding as seen so a cold start
+        // never lands here again.
+        prefs.edit()
+            .apply { prefs.getString("role", null)?.let { putString(PARKED_ROLE, it) } }
+            .remove("role").putBoolean("seenWelcome", true).apply()
         swipeNav(back = null, forward = { if (!resumeSession()) showRole() })
         val col = column(scroll = false)
         scene = PetSceneView(this).also {
@@ -5482,7 +5512,7 @@ class MainActivity : AppCompatActivity() {
                 // onboarding again.
                 prefs.edit()
                     .remove("channelKey").remove("channelName")
-                    .remove("role").remove("myToken").remove("pairToken")
+                    .remove("role").remove(PARKED_ROLE).remove("myToken").remove("pairToken")
                     .remove("signalUrl")
                     .apply()
                 stopServers()

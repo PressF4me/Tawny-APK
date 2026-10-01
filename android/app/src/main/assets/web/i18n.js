@@ -114,6 +114,7 @@
       // --- bail() messages that surface in the native error dialog ---
       w_bail_cam_mic_generic: 'Tawny could not get to the camera and microphone on this phone. Close Tawny and open it again.',
       w_bail_cam_mic_blocked: 'Camera and microphone access was blocked. Allow it for this site, then try again.',
+      w_bail_cam_mic_failed: 'Could not open the camera or microphone ({0}).',
       w_bail_not_on_wifi: 'This phone is not on Wi-Fi yet. Connect it to Wi-Fi and try again.',
       w_bail_wifi_only_code: 'This code only works on the same Wi-Fi as the other phone. Put both phones on the same Wi-Fi and try again.',
       w_bail_already_running: 'This monitor is already running on another phone.',
@@ -221,6 +222,7 @@
       w_sas_note_default: 'Revisa que este código coincida con el del otro teléfono:',
       w_bail_cam_mic_generic: 'Tawny no pudo acceder a la cámara y el micrófono de este teléfono. Cierra Tawny y ábrelo de nuevo.',
       w_bail_cam_mic_blocked: 'Se bloqueó el acceso a la cámara y el micrófono. Permítelo para este sitio e inténtalo de nuevo.',
+      w_bail_cam_mic_failed: 'No se pudo abrir la cámara o el micrófono ({0}).',
       w_bail_not_on_wifi: 'Este teléfono aún no está en Wi-Fi. Conéctalo a Wi-Fi e inténtalo de nuevo.',
       w_bail_wifi_only_code: 'Este código solo funciona en la misma red Wi-Fi que el otro teléfono. Pon los dos teléfonos en la misma Wi-Fi e inténtalo de nuevo.',
       w_bail_already_running: 'Este monitor ya se está ejecutando en otro teléfono.',
