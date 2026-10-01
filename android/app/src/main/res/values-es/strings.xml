@@ -293,7 +293,6 @@
 
     <!-- ========================== help & feedback ======================== -->
     <string name="meta_help">Ayuda y comentarios</string>
-    <string name="meta_rate">Valorar Tawny</string>
     <string name="help_title">Ayuda y comentarios</string>
     <string name="help_subtitle">Respuestas a preguntas frecuentes y una línea directa con nosotros.</string>
     <string name="help_replay_tour">Ver el recorrido otra vez</string>
@@ -302,7 +301,6 @@
     <string name="help_eyebrow_tell_us">Cuéntanos</string>
     <string name="help_feedback">Enviar comentarios</string>
     <string name="help_feedback_sub">Un error, una idea o cualquier otra cosa</string>
-    <string name="help_rate_sub">En Google Play — ayuda a otros dueños de mascotas a encontrar Tawny</string>
     <string name="help_diagnostics">Diagnóstico de conexión</string>
     <string name="help_diagnostics_sub">El registro para enviarnos si la conexión no se mantiene</string>
 

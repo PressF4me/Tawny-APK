@@ -321,10 +321,6 @@ private const val COACH_SEEN = "coachSeen"
 /** The native walkthrough was finished or skipped once. */
 private const val TOUR_SEEN = "tourSeen"
 
-/** The Play listing the rating row opens. Not packageName: a debug build
- *  carries a ".debug" suffix that has no listing. */
-private const val PLAY_PACKAGE = "com.tawny.monitor"
-
 /**
  * Whether the user has asked this app to hold still, read straight from the
  * prefs file for the benefit of the drawn scenes.
@@ -2969,7 +2965,6 @@ class MainActivity : AppCompatActivity() {
             metaRow("bolt", getString(R.string.meta_tip_bitcoin), Hue.SKY, "›") {
                 lnFromAbout = false; showLightningTip()
             },
-            metaRow("star", getString(R.string.meta_rate), Hue.TEXT, "↗") { openStoreListing() },
         ))
         // Settings and help, apart from the asks above: a change of subject.
         col.addView(metaPanel(
@@ -3100,7 +3095,6 @@ class MainActivity : AppCompatActivity() {
             themeRow { showAbout() },
             motionRow { showAbout() },
             metaRow("help", getString(R.string.meta_help), Hue.TEXT, "›") { showHelp(from = "about") },
-            metaRow("star", getString(R.string.meta_rate), Hue.TEXT, "↗") { openStoreListing() },
         ))
 
         col.addView(eyebrow(getString(R.string.about_eyebrow_keeping)))
@@ -3436,7 +3430,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Help & feedback: the common questions answered on the phone itself, and
-     * every way of telling us something — a note, a diagnostics log, a rating.
+     * every way of telling us something — a note or a diagnostics log.
      *
      * The answers are what the listing, the battery tip and the support inbox
      * already say, gathered in one place; keep them in step with those when
@@ -3487,8 +3481,6 @@ class MainActivity : AppCompatActivity() {
         col.addView(metaPanel(
             metaRow("chat", getString(R.string.help_feedback), Hue.TEXT, "›",
                 sub = getString(R.string.help_feedback_sub)) { showFeedback() },
-            metaRow("star", getString(R.string.meta_rate), Hue.TEXT, "↗",
-                sub = getString(R.string.help_rate_sub)) { openStoreListing() },
             metaRow("info", getString(R.string.help_diagnostics), Hue.TEXT, "›",
                 sub = getString(R.string.help_diagnostics_sub)) { diagFromHelp = true; showDiagnostics() },
         ).apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(10) })
@@ -3691,19 +3683,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---------------------------------------------------------- rating
-
-    /** The Play listing, in the Play Store app if there is one. */
-    private fun openStoreListing() {
-        try {
-            startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$PLAY_PACKAGE"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        } catch (e: Exception) {
-            openExternal("https://play.google.com/store/apps/details?id=$PLAY_PACKAGE")
-        }
-    }
+    // No rating rows in the F-Droid edition: F-Droid has no ratings, and
+    // sending its users to Google Play to leave one made no sense.
 
     // ----------------------------------------------------------- theme row
 

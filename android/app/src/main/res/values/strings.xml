@@ -292,7 +292,6 @@
 
     <!-- ========================== help & feedback ======================== -->
     <string name="meta_help">Help &amp; feedback</string>
-    <string name="meta_rate">Rate Tawny</string>
     <string name="help_title">Help &amp; feedback</string>
     <string name="help_subtitle">Answers to common questions, and a direct line to us.</string>
     <string name="help_replay_tour">Take the tour again</string>
@@ -301,7 +300,6 @@
     <string name="help_eyebrow_tell_us">Tell us</string>
     <string name="help_feedback">Send feedback</string>
     <string name="help_feedback_sub">A bug, an idea, or anything else</string>
-    <string name="help_rate_sub">On Google Play — it helps other pet owners find Tawny</string>
     <string name="help_diagnostics">Connection diagnostics</string>
     <string name="help_diagnostics_sub">The log to send us if a connection won’t hold</string>
 
