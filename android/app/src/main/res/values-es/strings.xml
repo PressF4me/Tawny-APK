@@ -23,8 +23,6 @@
     <string name="common_clear">Borrar</string>
     <string name="common_got_it">Entendido</string>
     <string name="common_paste_a_link">Pegar un enlace</string>
-    <string name="switch_on">Sí</string>
-    <string name="switch_off">No</string>
     <string name="default_pet_name">tu mascota</string>
     <string name="pet_monitor">Monitor para mascotas</string>
 
@@ -183,7 +181,6 @@
     <string name="about_eyebrow_keeping">Mantenerlo en marcha</string>
     <string name="about_keeping_body">Tawny es gratis, y así se queda: toda la app, para todos. Para monitorear desde fuera de casa, Tawny usa un pequeño relé que yo mantengo, y ese relé acumula una factura de datos cada mes. Si Tawny se gana un lugar en tu día, un poco para esa factura significa mucho. Aportar no desbloquea nada extra: sin insignias, sin funciones ocultas. Eso es a propósito.</string>
     <string name="about_contact_body">Ese último correo es para cualquier cosa: una pregunta, un error, algo que se rompió. Si una conexión no aguanta, primero mantén pulsado el número de versión en cualquier pantalla y envía el pequeño registro de diagnóstico junto con tu mensaje.</string>
-    <string name="about_sound_credits">Créditos de sonido</string>
     <string name="about_no_email">No hay app de correo; se copió la dirección</string>
     <string name="about_email_chooser">Correo de soporte de Tawny</string>
 
@@ -232,14 +229,12 @@
     <string name="pairchip_show_code">Mostrar el código de vinculación</string>
     <string name="pairchip_add_phone">Agregar otro teléfono</string>
     <string name="pairsheet_scan_or_link">Escanea para ver, o comparte el enlace de abajo</string>
-    <string name="pairsheet_show_as_link">Mostrar como enlace</string>
     <string name="pairsheet_rename">Renombrar</string>
     <string name="pairsheet_link_copied">Enlace copiado</string>
     <string name="pair_code_refreshes">El código se renueva en <xliff:g id="mm">%1$d</xliff:g>:<xliff:g id="ss">%2$02d</xliff:g></string>
 
     <!-- ========================= cargando / conectando ========= -->
     <string name="busy_starting_monitor">Iniciando el monitor</string>
-    <string name="live_connecting">Conectando</string>
 
     <!-- =========================== falló el relé =============== -->
     <string name="relay_failed_title">No se pudo iniciar el monitor</string>
@@ -269,7 +264,6 @@
     <!-- =============================== a11y ================== -->
     <string name="a11y_theme_toggle">Tema — <xliff:g id="mode" example="Según el sistema">%1$s</xliff:g>. Pulsa para cambiar</string>
     <string name="a11y_app_version">Versión de la app; mantén pulsado para el diagnóstico</string>
-    <string name="a11y_back">Atrás</string>
     <string name="a11y_animations">Animaciones</string>
 
     <!-- ============================== theme ============================== -->

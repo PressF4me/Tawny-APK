@@ -143,13 +143,14 @@ launch with `-camera-back virtualscene`.
 
 - The Monitor path is fully reachable on one device: welcome → The Monitor →
   allow → name → QR screen.
-- On the pairing screen, **Show as link** reveals the `tawny://pair?…` text.
-  Feed it to a Viewer with **Paste a link instead**, or from a shell:
+- On the pairing sheet, tap the link row under the QR to copy the
+  `tawny://pair?…` text. Feed it to a Viewer with **Paste a link instead**, or
+  from a shell:
   ```sh
   adb shell "am start -a android.intent.action.VIEW -d 'tawny://pair?k=KEY&n=Pet%20camera&h=IP:PORT&c=CODE&e=UNIXSECS'"
   ```
   (single-quote the URL so the device shell doesn't eat `&`). Copy the whole
-  thing from **Show as link** — `c` and `e` are the pairing code and its
+  link — `c` and `e` are the pairing code and its
   deadline, and a link without a `c` the Monitor is currently showing is refused
   as expired. The code rotates every ten minutes, so re-copy it if the test
   drags on.
@@ -200,10 +201,12 @@ capture path plus the Play `camera|microphone` FGS declaration — not in 1.0.
 ```
 android/settings.gradle.kts                 project layout (rootProject "Tawny")
 android/app/build.gradle.kts                SDK levels, deps, signing, R8, syncWebAssets
-android/app/src/main/AndroidManifest.xml    4 permissions, launcher + tawny://pair filter
+android/app/src/main/AndroidManifest.xml    5 permissions, launcher + tawny://pair filter
 android/app/src/main/java/com/tawny/monitor/
     MainActivity.kt                         all screens, pairing, lifecycle, WebView bridge
     LocalWeb.kt                             AssetHttpServer + SignalServer (LAN relay)
+    PairLink.kt                             pairing-link parsing + relay trust rules (no Android types)
+android/app/src/test/.../PairLinkTest.kt    JVM unit tests for PairLink — ./gradlew test
 android/app/src/main/res/                   theme, colours, adaptive icon, network config
 android/app/proguard-rules.pro             release keeps (@JavascriptInterface is load-bearing)
 ```
