@@ -60,7 +60,7 @@ else asking for money in Tawny's name isn't us.
 | Situation | Path | Server involved |
 |---|---|---|
 | Both phones on the same Wi-Fi | The Monitor runs a tiny signalling relay on the LAN; the Viewer connects straight to it. | none — it's the Monitor phone |
-| Phones on different networks *(optional build)* | Both phones dial **out** to a small **rendezvous** service that only introduces them. If they can't reach each other directly, an encrypted **TURN** relay forwards the media (it can't read it). | one small always-on service you deploy — see `rendezvous/` |
+| Phones on different networks *(optional build)* | Both phones dial **out** to a small **rendezvous** service that only introduces them. If they can't reach each other directly, an encrypted **TURN** relay forwards the media (it can't read it). | one small always-on service — the Play build uses the developer's; self-hosting it lives in the Tawny Docker repo (not public yet) |
 
 No inbound ports are opened on either phone in any configuration.
 

@@ -22,8 +22,6 @@
     <string name="common_clear">Clear</string>
     <string name="common_got_it">Got it</string>
     <string name="common_paste_a_link">Paste a link</string>
-    <string name="switch_on">On</string>
-    <string name="switch_off">Off</string>
     <string name="default_pet_name">your pet</string>
     <string name="pet_monitor">Pet Monitor</string>
 
@@ -182,7 +180,6 @@
     <string name="about_eyebrow_keeping">Keeping it running</string>
     <string name="about_keeping_body">Tawny is free, and it stays that way — every part of it, for everyone. Looking in from outside the house hops through a small relay I run, and that relay adds up a bandwidth bill every month. If Tawny earns a place in your day, a little toward that bill means a lot. Chipping in unlocks nothing extra — no badge, no hidden features. That part is on purpose.</string>
     <string name="about_contact_body">That last one is for anything at all — a question, a bug, something that broke. If a connection will not hold, long-press the version number on any screen first and send the little diagnostics log along with your note.</string>
-    <string name="about_sound_credits">Sound credits</string>
     <string name="about_no_email">No email app — address copied</string>
     <string name="about_email_chooser">Tawny support email</string>
 
@@ -231,14 +228,12 @@
     <string name="pairchip_show_code">Show the pairing code</string>
     <string name="pairchip_add_phone">Add another phone</string>
     <string name="pairsheet_scan_or_link">Scan to watch, or share the link below</string>
-    <string name="pairsheet_show_as_link">Show as link</string>
     <string name="pairsheet_rename">Rename</string>
     <string name="pairsheet_link_copied">Link copied</string>
     <string name="pair_code_refreshes">Code refreshes in <xliff:g id="mm">%1$d</xliff:g>:<xliff:g id="ss">%2$02d</xliff:g></string>
 
     <!-- ========================= busy / connecting =============== -->
     <string name="busy_starting_monitor">Starting the monitor</string>
-    <string name="live_connecting">Connecting</string>
 
     <!-- =========================== relay failed ================= -->
     <string name="relay_failed_title">Could not start the monitor</string>
@@ -268,7 +263,6 @@
     <!-- =============================== a11y ==================== -->
     <string name="a11y_theme_toggle">Theme — <xliff:g id="mode" example="Follow system">%1$s</xliff:g>. Tap to change</string>
     <string name="a11y_app_version">App version — long-press for diagnostics</string>
-    <string name="a11y_back">Back</string>
     <string name="a11y_animations">Animations</string>
 
     <!-- ============================== theme ============================== -->

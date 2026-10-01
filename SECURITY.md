@@ -31,7 +31,7 @@ cannot be reversed to the key or the name, and cannot be enumerated.
 Pairing carries the key in a QR / `tawny://pair` link:
 `tawny://pair?k=<key>&n=<name>&h=<lan-ip:port>&t=<ticket>&c=<code>&e=<expiry>`.
 
-- `h` is the Monitor's home-LAN address. `parsePairing` accepts it **only** if it
+- `h` is the Monitor's home-LAN address. `PairLink.parse` accepts it **only** if it
   is an RFC1918 / link-local address; a public IP in a pairing link is dropped
   (and, if that leaves nothing to dial, the link is rejected). `h` is omitted
   entirely when the Monitor has no Wi-Fi.
@@ -41,7 +41,9 @@ Pairing carries the key in a QR / `tawny://pair` link:
 - The **in-app scanner** joins immediately — the user aimed the camera on
   purpose. Any **externally-supplied** link (`ACTION_VIEW`, exported + BROWSABLE
   intent-filter) is gated by a "Connect to '<name>'?" dialog that names the
-  target and its address and warns when it would replace an existing pairing.
+  target and the network it would connect over (Wi-Fi or the internet —
+  deliberately not the raw address) and warns when it would replace an existing
+  pairing.
   `handlePairLink` never acts silently.
 
 ## Pairing codes expire after ten minutes
@@ -91,8 +93,10 @@ live for the life of the channel.
 ## Signaling admission — the `hello` handshake
 
 Every relay (LAN and hosted) uses the same addressed message set —
-`offer/answer/ice/bye/chime/chime-ack/talking`, each requiring a `to` naming a
-peer in the same room; the server stamps `from`. No broadcast primitive exists.
+`offer/answer/ice/bye/chime/chime-ack/talking/cameras/meta/camera-control/torch/battery`
+(`RELAY` in `LocalWeb.kt` and `rendezvous/protocol.js`), each requiring a `to`
+naming a peer in the same room; the server stamps `from`. No broadcast primitive
+exists.
 
 On the **hosted** path (`rendezvous/room.js`, `rendezvous/deno/main.ts`,
 `server.js`) a socket is not joined to the room or told about anyone until it has
@@ -196,8 +200,9 @@ UID boundary, so any other app on the device with `INTERNET` can reach it.
   (`addJavascriptInterface` exposes it to every frame). Neither is reachable
   today — the WebView loads only bundled first-party assets and has no iframes —
   but the controls are host-level, not true origin isolation.
-- cloud-backup rules exclude the prefs file (channel key + tickets) and the
-  WebView data directory; device-to-device transfer keeps them.
+- cloud-backup rules exclude the prefs file (channel key + tickets), the
+  WebView data directory and the diagnostics log; device-to-device transfer
+  carries the prefs file only.
 
 ## Short authentication string (SAS)
 
@@ -208,8 +213,9 @@ fingerprints are read from `getStats()` — the *negotiated* certificate, not th
 SDP text, so a relay cannot hide a real fingerprint behind a decoy
 session-level `a=fingerprint` line. Because the channel key is mixed in and no
 relay holds it, a relay that swapped certificates produces a **different** code
-on each screen. If the code cannot be computed the Viewer shows a "connection
-may be tampered with" warning rather than proceeding silently.
+on each screen. If the code cannot be computed on a connection that is still
+due its review (below), both ends show a "connection may be tampered with"
+warning rather than proceeding silently.
 
 **One code per connection.** The code is derived from the DTLS certificates of
 one `RTCPeerConnection`, so a Monitor with three Handhelds on the cloud path has
@@ -226,15 +232,22 @@ legitimately differs on every call — it cannot degrade to "the same code as la
 time". An earlier build re-showed it on every connect and warned that the code
 had CHANGED whenever it failed to match, which from the second session onward was
 every time; that false alarm only trained users to dismiss it. Now the review
-card is shown on the **first** cloud connection to a channel — on the Handheld,
-and on the Monitor — and once that user answers "Looks right" it never returns
-for that channel. The acknowledgement is a per-channel `tawny.sasok.<id>` flag in
-`localStorage`, cleared when the channel is deleted. The trade-off is explicit
-and the same on both ends: a certificate swap attempted *after* that first review
-is not surfaced unless it also stops the code from being computed at all — in
-which case the "connection may be tampered with" warning still fires on every
-affected call. In particular, a *new* outside Handheld joining a channel whose
-code has already been vouched for is not re-reviewed.
+card is shown once:
+
+- on a **Handheld**, on its first cloud connection to a channel. "Looks right"
+  sets a per-channel `tawny.sasok.<id>` flag in `localStorage`, and the card
+  never returns on that phone for that channel;
+- on the **Monitor**, once per Handheld *device* — keyed by the `pid` bond id the
+  Handheld sends with every offer (`tawny.sasok.<id>.<pid>`). A new phone is
+  asked about on its first cloud connection even on a channel whose other phones
+  were vouched for; a Handheld that sends no `pid` is asked every time.
+
+Both flags are cleared when the channel is deleted. The trade-off is explicit:
+once a phone has been reviewed, nothing more is surfaced for it — not a
+certificate swap on a later reconnect, and not a code that fails to compute at
+all. That last one used to keep raising the tamper warning on every affected
+call, but it fired on ordinary reconnect hiccups far more often than on attacks
+and taught users to ignore it; it is still written to the diagnostics log.
 
 **Limitations, stated plainly:** the SAS assumes the user can compare two
 screens. On a genuinely remote session the user is not in the room with the
@@ -246,10 +259,10 @@ after-the-fact alarm, not a gate.
 
 - **A compromised rendezvous can attempt a certificate swap.** The SAS detects it
   only if the user actually compares codes; on a one-screen remote session that
-  is weak. Both ends also review the code only on the first connection to a
-  channel, so a swap on a later reconnect — or against a new outside phone on an
-  already-vouched channel — is not surfaced unless the code cannot be computed at
-  all. This is the softest point of the remote path.
+  is weak. The code is also reviewed only on a phone's first cloud connection,
+  so a swap on any later reconnect of an already-vouched phone is not surfaced
+  at all — not even when the code cannot be computed. This is the softest point
+  of the remote path.
 - **Pairing codes are bearer credentials, for ten minutes.** A code now stops
   admitting new phones ten minutes after the Monitor shows it (above), so an old
   photograph of a QR or a link left in a chat thread no longer pairs. Inside

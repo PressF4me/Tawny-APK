@@ -169,12 +169,6 @@ object Diag {
 }
 
 /**
- * Palette, resolved from res/values(-night)/colors.xml so it tracks light/dark.
- * Light = "strawberry cheesecake"; dark = "brushed leather" with a warm-bronze
- * accent. Mirrors public/style.css. Call [load] before building any UI.
- * (Field names are roles, not literal hues — BERRY is bronze in dark mode.)
- */
-/**
  * The type scale.
  *
  * There were seventeen distinct text sizes in this file and five different ones
@@ -188,7 +182,7 @@ object Type {
     const val TITLE = 27f        // screen title
     const val PILL = 17f         // button label
     const val CARD_TITLE = 20f   // title inside a card
-    const val DIALOG = 22f       // title inside a card
+    const val DIALOG = 22f       // title inside a dialog
     const val BODY = 16f
     const val SUB = 15f          // supporting line under a title; also links
     const val LABEL = 13f        // tracked-out small caps
@@ -198,7 +192,6 @@ object Type {
     const val LEAD_TIGHT = 1.2f  // for headings
 }
 
-/** One radius language. 3-4dp "equipment panel" everywhere; nothing rounder. */
 /**
  * One radius language, three tiers.
  *
@@ -219,6 +212,12 @@ object Radius {
     const val CHIP = 7      // dp — small overlays sitting on top of the camera
 }
 
+/**
+ * Palette, resolved from res/values(-night)/colors.xml so it tracks light/dark.
+ * Light = "strawberry cheesecake"; dark = "brushed leather" with a warm-bronze
+ * accent. Mirrors public/style.css. Call [load] before building any UI.
+ * (Field names are roles, not literal hues — BERRY is bronze in dark mode.)
+ */
 object Hue {
     var BG = 0; var PANEL = 0; var RAISE = 0; var LINE = 0
     var TEXT = 0; var DIM = 0; var BERRY = 0; var SKY = 0
@@ -544,7 +543,10 @@ class MainActivity : AppCompatActivity() {
             else -> showWelcome()
         }
 
-        handlePairLink(intent)
+        // Only on a real launch. A recreate (theme or language flip) hands the
+        // same launch intent back, and with it the "Connect to …?" dialog for a
+        // link that was already answered.
+        if (savedInstanceState == null) handlePairLink(intent)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -628,7 +630,7 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
-    /** Register this screen's swipe-left (back) and swipe-right (forward) actions. */
+    /** Register this screen's swipe-right (back) and swipe-left (forward) actions. */
     private fun swipeNav(back: (() -> Unit)?, forward: (() -> Unit)?) {
         onSwipeBack = back
         onSwipeForward = forward
@@ -1049,11 +1051,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * An on-theme replacement for the stock Material AlertDialog: the same
-     * parchment "equipment panel" card the rest of the app uses.
-     */
-    /**
-     * The one dialog in the app.
+     * The one dialog in the app, on the same parchment card the rest of the app
+     * uses rather than the stock Material AlertDialog.
      *
      * There used to be four: this card, two stock Material `AlertDialog`s (one
      * of them built on the *framework* class rather than the AppCompat one used
@@ -1486,7 +1485,7 @@ class MainActivity : AppCompatActivity() {
         screen = "diag"
         val diagBack = { if (diagFromHelp) showHelp() else afterSession() }
         swipeNav(back = diagBack, forward = null)
-        val report = Diag.dump().ifBlank { "(nothing recorded yet)" }
+        val report = Diag.dump().ifBlank { getString(R.string.diag_none) }
 
         val outer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2043,17 +2042,17 @@ class MainActivity : AppCompatActivity() {
         return sb.toString()
     }
 
+    /** True on a Firebase Test Lab phone (what Play's pre-launch report runs on). */
+    private fun onTestLab(): Boolean = try {
+        android.provider.Settings.System.getString(contentResolver, "firebase.test.lab") == "true"
+    } catch (e: Exception) { false }
+
     /**
      * POST the diagnostics log to the rendezvous Worker's /report endpoint,
      * where it is stacked in KV for the developer to pull. Runs off the UI
      * thread; on any failure it hands back to [onFail] (the share sheet) so a
      * report is never simply lost.
      */
-    /** True on a Firebase Test Lab phone (what Play's pre-launch report runs on). */
-    private fun onTestLab(): Boolean = try {
-        android.provider.Settings.System.getString(contentResolver, "firebase.test.lab") == "true"
-    } catch (e: Exception) { false }
-
     private fun sendReport(log: String, onFail: () -> Unit) {
         val base = BuildConfig.RENDEZVOUS_URL
             .replaceFirst(Regex("^ws", RegexOption.IGNORE_CASE), "http")
@@ -2318,21 +2317,6 @@ class MainActivity : AppCompatActivity() {
         mountCentered(col)
     }
 
-    /**
-     * Bring the LAN relay up without blocking the UI thread.
-     *
-     * Starting it inline meant a `CountDownLatch.await(3, SECONDS)` plus up to
-     * fifty blocking socket binds ran on the main thread from a tap — well
-     * inside ANR territory on a cold device. The server is usually already up
-     * by the time this is called a second time, so the fast path stays sync.
-     */
-    /** The LAN relay would not bind. Offer a retry that re-enters as a Monitor. */
-    /**
-     * Go edge-to-edge for a call and back to the framed layout afterwards. The
-     * bars stay visible (people need the clock and the battery on a monitor
-     * that is left running) but they float over the video instead of cutting
-     * it, and their icons flip to light because the video behind them is dark.
-     */
     /** True when the video itself is what is under the system bars — which,
      *  with the pairing sheet now a transparent-top overlay rather than a
      *  full-screen cream one, is simply whenever a call is live. */
@@ -2522,6 +2506,12 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * Go edge-to-edge for a call and back to the framed layout afterwards. The
+     * bars stay visible (people need the clock and the battery on a monitor
+     * that is left running) but they float over the video instead of cutting
+     * it, and their icons flip to light because the video behind them is dark.
+     */
     private fun refreshSystemBars() {
         val over = videoIsBehindBars()
         val light = !over && !isNightMode()
@@ -2537,6 +2527,7 @@ class MainActivity : AppCompatActivity() {
         (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
 
+    /** The LAN relay would not bind. Offer a retry that re-enters as a Monitor. */
     private fun relayFailed() {
         Diag.log("shell", "signal server failed to bind, no rendezvous to fall back on")
         themedDialog(
@@ -2566,6 +2557,14 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * Bring the LAN relay up without blocking the UI thread.
+     *
+     * Starting it inline meant a `CountDownLatch.await(3, SECONDS)` plus up to
+     * fifty blocking socket binds ran on the main thread from a tap — well
+     * inside ANR territory on a cold device. The server is usually already up
+     * by the time this is called a second time, so the fast path stays sync.
+     */
     private fun withSignalServer(onReady: (Int) -> Unit) {
         // Tighter privacy with the Wi-Fi path off: nothing listens on this phone.
         // 0 is "no relay" to every caller (the pairing code then has no `h=`).
@@ -3092,10 +3091,10 @@ class MainActivity : AppCompatActivity() {
             getString(R.string.about_keeping_body)
         ))
         col.addView(metaPanel(
-            metaRow("heart", "Support Tawny", Hue.BERRY, "↗", sub = "ko-fi.com/tawnyone") {
+            metaRow("heart", getString(R.string.meta_support), Hue.BERRY, "↗", sub = "ko-fi.com/tawnyone") {
                 openExternal(SUPPORT_URL)
             },
-            metaRow("bolt", "Tip in Bitcoin", Hue.SKY, "›", sub = LN_ADDRESS) {
+            metaRow("bolt", getString(R.string.meta_tip_bitcoin), Hue.SKY, "›", sub = LN_ADDRESS) {
                 lnFromAbout = true; showLightningTip()
             },
             metaRow("mail", getString(R.string.meta_email_us), Hue.TEXT, "↗", sub = SUPPORT_EMAIL) {
@@ -3181,7 +3180,7 @@ class MainActivity : AppCompatActivity() {
         }
         col.addView(bolt)
         col.addView(heading(
-            "Lightning tip",
+            getString(R.string.tip_title),
             getString(R.string.tip_wallet_body),
             center = true,
         ))
@@ -4021,11 +4020,6 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    /**
-     * Name the spot the Watcher is aimed at; the Handheld shows "<name> monitor".
-     * Built as a bare equipment-panel card so it matches the rest of the app
-     * rather than the stock Material dialog.
-     */
     /** A single-line text field styled for [themedDialog]'s content slot. */
     private fun dialogInput(hint: String, initial: String) = EditText(this).apply {
         this.hint = hint
@@ -4078,6 +4072,7 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /** Name the spot the Watcher is aimed at; the Handheld shows "<name> monitor". */
     private fun promptRoomName(onName: (String) -> Unit) {
         val current = prefs.getString("channelName", "")
             ?.takeUnless { it == "Pet camera" || it == getString(R.string.default_pet_name) }.orEmpty()
@@ -4191,6 +4186,10 @@ class MainActivity : AppCompatActivity() {
         scannerStop = { exec.shutdown() }
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
+            // The user left the scanner before the camera provider was ready:
+            // clearScreen() already ran scannerStop, which shut exec down. Binding
+            // now would leave the camera running behind whatever screen is up.
+            if (exec.isShutdown) return@addListener
             val provider = try { future.get() } catch (e: Exception) {
                 exec.shutdown()
                 cameraUnavailable()
@@ -4455,9 +4454,6 @@ class MainActivity : AppCompatActivity() {
     // up in a JVM test, and every decision a stranger's QR code is allowed to
     // make about this phone is taken in that file.
 
-    /** RFC1918 / link-local only — `h` in a pairing link is always a home-LAN address. */
-    private fun isPrivateHost(hostPort: String): Boolean = PairLink.isPrivateHostPort(hostPort)
-
     /**
      * Split the link with the platform's URI parser, then hand the pieces to
      * PairLink, which holds the rules and the anchors this install trusts.
@@ -4517,9 +4513,9 @@ class MainActivity : AppCompatActivity() {
     /**
      * The Watcher's signaling relay, reachable on the LAN. The port is kept
      * stable across restarts so a Handheld paired earlier can still reconnect
-     * (as long as the Watcher keeps the same Wi-Fi address).
+     * (as long as the Watcher keeps the same Wi-Fi address). Returns the bound
+     * port, or -1 if the relay could not start.
      */
-    /** Returns the bound port, or -1 if the relay could not start. */
     private fun ensureSignalServer(): Int {
         signalServer?.let { return it.boundPort }
         // The saved port first, so earlier Handhelds find it again; then any port
@@ -4902,7 +4898,7 @@ class MainActivity : AppCompatActivity() {
         }
         nameRow.addView(pencil)
         val renameHint = TextView(this).apply {
-            text = "  Rename"
+            text = "  " + getString(R.string.pairsheet_rename)
             setTextColor(Hue.BERRY)
             textSize = Type.SUB
             typeface = uiFont
@@ -5306,17 +5302,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * The little pencil beside the pet's name, drawn rather than typed.
-     *
-     * The obvious character for it, ✎ (U+270E), is not in Mukta, so it fell
-     * through to whichever symbol font the device happens to carry: thin
-     * outline clip-art on a Pixel, and on any phone whose fallback for that
-     * block is the colour emoji font, a blue-and-yellow emoji that ignores
-     * setTextColor outright. Twelve lines of Canvas is the same mark on every
-     * device, in the palette's own colour, and this file draws everything else
-     * that way already.
-     */
-    /**
      * The switch on the Animations row.
      *
      * The row used to end in the word "On" or "Off", set in the same weight as
@@ -5370,6 +5355,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * The little pencil beside the pet's name, drawn rather than typed.
+     *
+     * The obvious character for it, ✎ (U+270E), is not in Mukta, so it fell
+     * through to whichever symbol font the device happens to carry: thin
+     * outline clip-art on a Pixel, and on any phone whose fallback for that
+     * block is the colour emoji font, a blue-and-yellow emoji that ignores
+     * setTextColor outright. Twelve lines of Canvas is the same mark on every
+     * device, in the palette's own colour, and this file draws everything else
+     * that way already.
+     */
     private class PencilMark(ctx: Context) : View(ctx) {
         private val p = Paint(Paint.ANTI_ALIAS_FLAG)
         private val tip = Path()
@@ -5515,7 +5511,7 @@ class MainActivity : AppCompatActivity() {
         val role = prefs.getString("role", "viewer") ?: "viewer"
         themedDialog(
             title = getString(R.string.err_title),
-            body = "$message\n\nTry restarting the app, or check that this phone has a network connection.",
+            body = getString(R.string.err_body, message),
             primaryLabel = getString(R.string.common_retry),
             onPrimary = { goLive(role) },
             secondaryLabel = getString(R.string.err_start_over),
@@ -5638,8 +5634,6 @@ class MainActivity : AppCompatActivity() {
                         if (prefs.getString("role", null) == "station") stopServers()
                         afterSession()
                     }
-                    // Monitor: a Viewer connected / all disconnected — show or
-                    // hide the pairing-QR overlay over the live view.
                     // Monitor: the number of Handhelds watching changed. The
                     // page sends this on every change of count — not once, on
                     // the first Viewer, which is what used to strand the user
@@ -6292,19 +6286,6 @@ class MainActivity : AppCompatActivity() {
 // ============================================================ custom views
 
 /**
- * Flat, rounded camera / phone glyph for the role cards — same soft filled
- * language as the owlet mascot. Body in the accent colour, details punched in
- * the card colour behind it, one tiny accent highlight.
- */
-/**
- * @param behind the colour actually behind this icon. The cut-out details are
- *   painted in it, so they read as holes. It used to be hard-coded to
- *   Hue.PANEL, which is right on a card but wrong on the two screens that put
- *   the icon straight onto Hue.BG — in dark mode the phone's "screen" and
- *   "home bar" rendered as visibly lighter brown rectangles and the icon just
- *   looked broken.
- */
-/**
  * A one-line label that, on press, sweeps an accent fill left-to-right and
  * reveals a second string underneath it — then wipes back. Used only on the
  * sessions-home "Support Tawny" row: base text says what it is, the wipe shows
@@ -6382,6 +6363,18 @@ private class WipeLabel(
     }
 }
 
+/**
+ * Flat, rounded camera / phone glyph for the role cards — same soft filled
+ * language as the owlet mascot. Body in the accent colour, details punched in
+ * the card colour behind it, one tiny accent highlight.
+ *
+ * @param behind the colour actually behind this icon. The cut-out details are
+ *   painted in it, so they read as holes. It used to be hard-coded to
+ *   Hue.PANEL, which is right on a card but wrong on the two screens that put
+ *   the icon straight onto Hue.BG — in dark mode the phone's "screen" and
+ *   "home bar" rendered as visibly lighter brown rectangles and the icon just
+ *   looked broken.
+ */
 private class IconView(
     ctx: Context,
     private val kind: String,
@@ -7069,11 +7062,10 @@ private abstract class CritterScene(ctx: Context) : View(ctx) {
         c.drawOval(RectF(cx - w / 2f, cy - w * 0.11f, cx + w / 2f, cy + w * 0.11f), cast)
     }
 
-    /** Dark bean eye with a catch-light; [open] 1..0 squashes it shut, [look]
-     *  shifts the whole eye toward what it's watching. */
-    /** [look] aims the eye sideways, [lookY] up (negative) or down. The catch
-     *  light stays put while the eye moves under it, which is what stops an
-     *  aimed eye reading as the whole head having turned. */
+    /** Dark bean eye with a catch-light; [open] 1..0 squashes it shut. [look]
+     *  aims the eye sideways, [lookY] up (negative) or down. The catch light
+     *  stays put while the eye moves under it, which is what stops an aimed
+     *  eye reading as the whole head having turned. */
     protected fun eye(
         c: Canvas, cx: Float, cy: Float, r: Float, open: Float,
         look: Float = 0f, lookY: Float = 0f,

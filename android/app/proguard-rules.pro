@@ -1,7 +1,8 @@
 # Tawny — R8 / ProGuard rules for the release build.
 
 # --- WebView JS bridge ------------------------------------------------------
-# Bridge.post() / Bridge.saveImage() are called from public/app.js by name.
+# Bridge.post() / setDimmed() / saveImage() / saveVideo() are called from
+# public/app.js by name.
 # Without this R8 renames or strips them and the native bridge goes dead.
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;

@@ -124,11 +124,13 @@ class AssetHttpServer(
     // Bounded, not newCachedThreadPool(): any other app on the device holding
     // INTERNET can open sockets to loopback, and an unbounded pool would let it
     // spawn threads until the process dies. Binding to 127.0.0.1 is not a UID
-    // boundary.
+    // boundary. A connection the pool has no room for is refused in loop(),
+    // which closes its socket — DiscardPolicy dropped the task silently and
+    // left the accepted socket open behind it.
     private val pool = java.util.concurrent.ThreadPoolExecutor(
         2, 8, 30, java.util.concurrent.TimeUnit.SECONDS,
         java.util.concurrent.ArrayBlockingQueue(32),
-        java.util.concurrent.ThreadPoolExecutor.DiscardPolicy(),
+        java.util.concurrent.ThreadPoolExecutor.AbortPolicy(),
     )
     @Volatile private var running = true
 
@@ -149,9 +151,13 @@ class AssetHttpServer(
     private fun loop() {
         while (running) {
             val sock = try { server.accept() } catch (e: Exception) { break }
-            pool.submit {
-                try { handle(sock) } catch (e: Exception) { /* client went away */ }
-                finally { try { sock.close() } catch (e: Exception) {} }
+            try {
+                pool.execute {
+                    try { handle(sock) } catch (e: Exception) { /* client went away */ }
+                    finally { try { sock.close() } catch (e: Exception) {} }
+                }
+            } catch (e: java.util.concurrent.RejectedExecutionException) {
+                try { sock.close() } catch (e2: Exception) {}
             }
         }
     }
@@ -503,9 +509,10 @@ class SignalServer(
         // "camera-control" (lens picker, remote zoom, pet-name sync), and then
         // "torch", which is why the Viewer's Light key sat greyed out on a phone
         // whose LED works perfectly — the Monitor's "I have a light" never
-        // arrived, and the press never got back. Add the type here, in
-        // rendezvous/room.js and in server.js together, or it works on one
-        // transport and mysteriously not the others.
+        // arrived, and the press never got back. Add the type here and to RELAY
+        // in rendezvous/protocol.js (which room.js, deno/main.ts and server.js
+        // all import) together, or it works on one transport and mysteriously
+        // not the others. tools/probes/relay-allowlists.mjs checks the two match.
         private val RELAY = setOf(
             "offer", "answer", "ice", "bye", "chime", "chime-ack", "talking",
             "cameras", "meta", "camera-control", "torch", "battery"

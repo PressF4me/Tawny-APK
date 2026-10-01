@@ -123,6 +123,7 @@
       w_bail_monitor_offline: 'The monitor is not online yet. Open Tawny on the monitor phone or computer and press Start, then scan again.',
       w_bail_code_only: 'The server is not set up for code-only pairing. This code has no ticket for it, so it only works directly on the Monitor’s Wi-Fi. Pair on that Wi-Fi, or turn the Monitor’s relay back on in Servers.',
       w_msg_expired: 'That pairing code has expired. Show a new code on the monitor phone and scan it again.',
+      w_msg_full: 'This monitor is full ({0} phones). Close Tawny on one of the other phones, then try this code again.',
     },
 
     es: {
@@ -226,6 +227,7 @@
       w_bail_monitor_offline: 'El monitor aún no está en línea. Abre Tawny en el teléfono o la computadora del monitor y pulsa Iniciar, luego vuelve a escanear.',
       w_bail_code_only: 'El servidor no está configurado para emparejar solo con código. Este código no trae ticket para él, así que solo funciona directamente en el Wi-Fi del monitor. Empareja en ese Wi-Fi o vuelve a activar el relé del monitor en Servidores.',
       w_msg_expired: 'Ese código de vinculación caducó. Muestra un código nuevo en el teléfono monitor y escanéalo otra vez.',
+      w_msg_full: 'Este monitor está lleno ({0} teléfonos). Cierra Tawny en uno de los otros teléfonos y vuelve a probar este código.',
     },
   };
 
