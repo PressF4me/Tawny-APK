@@ -2,6 +2,16 @@
 
 Newest first. Linux AppImage and Flatpak.
 
+## 0.1.5
+
+Changes since 0.1.4.
+
+**Fixed**
+- The update board did not show after an update if Tawny had never been set up
+  on this computer: it was taken for a fresh install. The app now tells the
+  page when an earlier run's profile is already on disk, and the board shows
+  over the welcome screen.
+
 ## 0.1.4
 
 Changes since 0.1.3.
