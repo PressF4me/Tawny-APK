@@ -2,13 +2,18 @@
 
 Newest first. The self-hosted server image (`ghcr.io/pressf4me/tawny`).
 
-## 2.2.5
+## 2.2.6
 
-Changes since 2.2.4.
+Changes since 2.2.5.
 
 **New**
 - An update board in the web client after each update: what changed, a link to
-  this page, and a thank-you.
+  this page, and a thank-you with the Ko-fi and Bitcoin tips. It shows once per
+  version, and not on a fresh install.
+
+## 2.2.5
+
+Changes since 2.2.4.
 
 **Web client**
 - "Switch role" on a channel goes straight to the other role instead of showing
