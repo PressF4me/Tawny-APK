@@ -2,7 +2,7 @@
 
 Newest first. Google Play builds.
 
-## 1.0.0 (build 44)
+## 1.0.1 (build 44)
 
 Changes since build 42, the first production release.
 
