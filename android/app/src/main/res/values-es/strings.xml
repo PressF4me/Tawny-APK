@@ -390,10 +390,7 @@
     <string name="whatsnew_eyebrow">Actualizado a v%1$s</string>
     <string name="whatsnew_title">Tawny ahora es mejor</string>
     <string-array name="whatsnew_notes">
-        <item>El Handheld por internet ya no se reinicia como Monitor</item>
-        <item>La cámara se apaga si sales antes del escáner QR</item>
-        <item>Los diagnósticos nunca guardan una dirección IP</item>
-        <item>Más partes de la app están en español</item>
+        <item>Este panel ahora aparece tras cada actualización, incluso en un teléfono sin configurar</item>
     </string-array>
     <string name="whatsnew_changelog">Ver el registro de cambios</string>
     <string name="whatsnew_thanks">Gracias por apoyar Tawny. Sigue siendo gratis para todos gracias a personas como tú.</string>

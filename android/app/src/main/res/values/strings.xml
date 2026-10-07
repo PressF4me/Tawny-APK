@@ -389,10 +389,7 @@
     <string name="whatsnew_eyebrow">Updated to v%1$s</string>
     <string name="whatsnew_title">Tawny just got better</string>
     <string-array name="whatsnew_notes">
-        <item>Internet Handhelds no longer restart as a Monitor</item>
-        <item>The camera turns off if you leave the QR scanner early</item>
-        <item>Diagnostics never record an IP address</item>
-        <item>More of the app is in Spanish</item>
+        <item>This board now shows after every update, even on a phone that is not set up yet</item>
     </string-array>
     <string name="whatsnew_changelog">Read the full changelog</string>
     <string name="whatsnew_thanks">Thank you for supporting Tawny. It stays free for everyone because of people like you.</string>

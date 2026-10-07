@@ -2,6 +2,16 @@
 
 Newest first. Google Play builds.
 
+## 1.0.2 (build 45)
+
+Changes since 1.0.1.
+
+**Fixed**
+- The update board did not show on a phone that was updated before it was ever
+  set up: it was taken for a fresh install. Tawny now asks Android whether it
+  was installed or updated, and also shows the board on the welcome and role
+  screens.
+
 ## 1.0.1 (build 44)
 
 Changes since build 42, the first production release.
