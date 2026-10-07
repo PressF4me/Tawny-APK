@@ -1,0 +1,27 @@
+# Tawny Desktop — changelog
+
+Newest first. Linux AppImage and Flatpak.
+
+## 0.1.3
+
+Changes since 0.1.2.
+
+**New**
+- An update board after each update: what changed, a link to this page, and a
+  thank-you.
+
+**Fixed**
+- The AppImage no longer crashes at launch on distributions with a newer NSS
+  than the build machine (Arch, CachyOS, Fedora). It bundles the NSS modules it
+  loads at runtime, including the root-certificate store.
+- A `ws://` rendezvous server (on a LAN or for testing) can now be reached.
+  Before, the page's security policy blocked it.
+- "Switch role" on a channel goes straight to the other role instead of showing
+  both role cards again.
+- Pairing links that name a `wss://` relay are accepted.
+- The "paste this relay address" hint is hidden when the address is the default
+  rendezvous, which a stock Tawny app already uses.
+
+**Spanish**
+- The "monitor full", "code expired" and camera/microphone failure messages are
+  translated.

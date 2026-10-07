@@ -321,6 +321,10 @@ private const val COACH_SEEN = "coachSeen"
 /** The native walkthrough was finished or skipped once. */
 private const val TOUR_SEEN = "tourSeen"
 
+/** The last VERSION_CODE whose update board was shown (or skipped as a fresh
+ *  install). See MainActivity.maybeShowWhatsNew. */
+private const val WHATSNEW_SEEN = "whatsNewSeen"
+
 /** The rating prompt's bookkeeping: sessions used for real, times asked, and
  *  when last. See MainActivity.maybeAskForReview. */
 private const val GOOD_SESSIONS = "goodSessions"
@@ -533,6 +537,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         onBackPressedDispatcher.addCallback(this, backHandler)
+        seedWhatsNew()
 
         // Land on a real screen first, so declining a pairing link below leaves
         // the user somewhere sensible instead of on a blank activity.
@@ -2992,7 +2997,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(scroll)
         root.addView(themeToggleView())
         root.addView(languageToggleView())
-        maybeAskForReview()
+        if (!maybeShowWhatsNew()) maybeAskForReview()
     }
 
     // ---------------------------------------------------------- about
@@ -3760,6 +3765,173 @@ class MainActivity : AppCompatActivity() {
         }, 1500L)
     }
 
+    // ------------------------------------------------------- update board
+
+    /** Where the update board's changelog link points. */
+    private val CHANGELOG_URL = "https://github.com/PressF4me/Tawny-APK/blob/master/docs/changelog/android.md"
+
+    /**
+     * A fresh install has nothing to be "new" against, so it is marked as
+     * having seen this build's board before any screen is up. Anyone with a
+     * trace of an earlier build — a finished tour, a role, a saved session —
+     * is left unmarked and gets the board on their next home screen.
+     */
+    private fun seedWhatsNew() {
+        if (prefs.contains(WHATSNEW_SEEN)) return
+        val upgraded = prefs.getBoolean(TOUR_SEEN, false) ||
+            prefs.contains("role") || loadRecentSessions().isNotEmpty()
+        if (!upgraded) prefs.edit().putInt(WHATSNEW_SEEN, BuildConfig.VERSION_CODE).apply()
+    }
+
+    /**
+     * The update board, once per build, on a home screen between calls — the
+     * same quiet spot [maybeAskForReview] waits for, and instead of it, so the
+     * two never stack. Returns whether it is going up.
+     */
+    private fun maybeShowWhatsNew(): Boolean {
+        if (prefs.getInt(WHATSNEW_SEEN, 0) >= BuildConfig.VERSION_CODE) return false
+        val shownOn = screen
+        root.postDelayed({
+            if (isFinishing || isDestroyed || screen != shownOn || isLive) return@postDelayed
+            prefs.edit().putInt(WHATSNEW_SEEN, BuildConfig.VERSION_CODE).apply()
+            showWhatsNew()
+        }, 450L)
+        return true
+    }
+
+    /**
+     * "Tawny just got better": what changed in a line or three, where the
+     * whole changelog lives, a thank-you, and the same two ways to chip in as
+     * About. Nothing on it unlocks anything — see [SUPPORT_URL].
+     *
+     * Its own full-window dialog rather than [themedDialog]: the confetti has
+     * to fall across the whole screen, not inside the card, so the scrim is
+     * drawn here instead of by the window's dim.
+     */
+    private fun showWhatsNew() {
+        Diag.log("app", "update board shown for ${BuildConfig.VERSION_CODE}")
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = roundRect(Hue.PANEL, Hue.LINE, Radius.CARD)
+            val p = dp(22); setPadding(p, dp(26), p, dp(14))
+            isClickable = true                     // taps on the card stay on it
+        }
+        card.addView(IconView(this, "star", behind = Hue.PANEL, tint = Hue.BERRY).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(46), dp(46))
+        })
+        card.addView(TextView(this).apply {
+            text = getString(R.string.whatsnew_eyebrow, BuildConfig.VERSION_NAME).uppercase()
+            setTextColor(Hue.DIM)
+            textSize = Type.LABEL
+            letterSpacing = 0.16f
+            typeface = uiFontSemi
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, 0)
+        })
+        card.addView(TextView(this).apply {
+            text = getString(R.string.whatsnew_title)
+            setTextColor(Hue.TEXT)
+            textSize = Type.WORDMARK_SM
+            typeface = titleFont
+            gravity = Gravity.CENTER
+            setLineSpacing(0f, Type.LEAD_TIGHT)
+            setPadding(0, dp(4), 0, 0)
+        })
+
+        val notes = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundRect(Hue.BG, Hue.LINE, Radius.CONTROL)
+            val p = dp(14); setPadding(p, dp(10), p, dp(10))
+            layoutParams = LinearLayout.LayoutParams(MP, WC).also { it.topMargin = dp(16) }
+        }
+        resources.getStringArray(R.array.whatsnew_notes).forEach { note ->
+            notes.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dp(5), 0, dp(5))
+                addView(TextView(this@MainActivity).apply {
+                    text = "✦"
+                    setTextColor(Hue.BERRY)
+                    textSize = Type.SUB
+                    layoutParams = LinearLayout.LayoutParams(dp(22), WC)
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = note
+                    setTextColor(Hue.TEXT)
+                    textSize = Type.SUB
+                    typeface = uiFont
+                    setLineSpacing(0f, 0.95f)
+                    layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+                })
+            })
+        }
+        card.addView(notes)
+        card.addView(link(getString(R.string.whatsnew_changelog) + "  ↗") {
+            openExternal(CHANGELOG_URL)
+        }.apply {
+            setTextColor(Hue.BERRY)
+            layoutParams = lp(topMargin = 4, centerH = true)
+        })
+
+        card.addView(TextView(this).apply {
+            text = getString(R.string.whatsnew_thanks)
+            setTextColor(Hue.DIM)
+            textSize = Type.SUB
+            typeface = uiFont
+            gravity = Gravity.CENTER
+            setLineSpacing(0f, 1.05f)
+            setPadding(dp(4), dp(6), dp(4), 0)
+        })
+        card.addView(metaPanel(
+            metaRow("heart", getString(R.string.meta_support), Hue.BERRY, "↗", sub = "ko-fi.com/tawnyone") {
+                openExternal(SUPPORT_URL)
+            },
+            metaRow("bolt", getString(R.string.meta_tip_bitcoin), Hue.SKY, "›", sub = LN_ADDRESS) {
+                whatsNewDialog?.dismiss(); lnFromAbout = false; showLightningTip()
+            },
+        ).apply {
+            background = roundRect(Hue.BG, Hue.LINE, Radius.CARD)
+            layoutParams = LinearLayout.LayoutParams(MP, WC).also { it.topMargin = dp(14) }
+        })
+        card.addView(primary(getString(R.string.whatsnew_done)) { whatsNewDialog?.dismiss() }.apply {
+            layoutParams = LinearLayout.LayoutParams(MP, WC).also { it.topMargin = dp(18) }
+        })
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+            addView(FrameLayout(this@MainActivity).apply {
+                val m = dp(20); setPadding(m, m, m, m)
+                addView(card, FrameLayout.LayoutParams(MP, WC, Gravity.CENTER).also {
+                    // The same reading-width cap as column(), for tablets.
+                    it.width = minOf(resources.displayMetrics.widthPixels - 2 * m, dp(420))
+                })
+            })
+        }
+        val wrap = FrameLayout(this).apply {
+            setBackgroundColor(Color.argb(208, 0, 0, 0))
+            addView(scroll, FrameLayout.LayoutParams(MP, MP))
+            setOnClickListener { whatsNewDialog?.dismiss() }
+            (scroll.getChildAt(0)).setOnClickListener { whatsNewDialog?.dismiss() }
+            if (animScale > 0f) addView(
+                ConfettiView(this@MainActivity, animScale),
+                FrameLayout.LayoutParams(MP, MP)
+            )
+        }
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_Translucent_NoTitleBar)
+            .setView(wrap).setCancelable(true).create()
+        whatsNewDialog = dialog
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            setLayout(MP, MP)
+            setDimAmount(0f)
+        }
+        dialog.setOnDismissListener { whatsNewDialog = null }
+        dialog.show()
+        dialog.window?.setLayout(MP, MP)
+    }
+    private var whatsNewDialog: AlertDialog? = null
+
     // ----------------------------------------------------------- theme row
 
     /**
@@ -3900,7 +4072,7 @@ class MainActivity : AppCompatActivity() {
         col.addView(link(getString(R.string.handheld_connect_different)) { onHandheld() })
         col.addView(link(getString(R.string.meta_help)) { showHelp(from = "handheld") })
         mountCentered(col)
-        maybeAskForReview()
+        if (!maybeShowWhatsNew()) maybeAskForReview()
 
         // Same reasoning as showRole(): keep the trail off the actual content,
         // recomputed on layout/scroll since mountCentered's ScrollView can
@@ -6405,6 +6577,75 @@ private class WipeLabel(
  *   "home bar" rendered as visibly lighter brown rectangles and the icon just
  *   looked broken.
  */
+/**
+ * One burst of confetti for the update board: a few seconds of paper falling
+ * across the whole window, then nothing — it stops drawing for good and never
+ * takes a touch. Only mounted when animations are on; [speed] is the system
+ * animator scale, so a slowed-down system gets slowed-down paper.
+ */
+private class ConfettiView(ctx: Context, private val speed: Float) : View(ctx) {
+    private class Bit(
+        var x: Float, var y: Float, val vx: Float, var vy: Float,
+        var rot: Float, val spin: Float, val w: Float, val h: Float,
+        val color: Int, val round: Boolean, val phase: Float,
+    )
+    private val bits = ArrayList<Bit>()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rnd = java.util.Random()
+    private val d = ctx.resources.displayMetrics.density
+    private var last = 0L
+    private var age = 0f
+    private val life = 3.6f
+
+    init { isClickable = false; isFocusable = false }
+
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        if (bits.isNotEmpty() || w == 0) return
+        val palette = intArrayOf(Hue.BERRY, Hue.SKY, Hue.LIVE, 0xFFE8B04B.toInt(), 0xFFF29BB0.toInt())
+        repeat(110) {
+            bits += Bit(
+                x = rnd.nextFloat() * w,
+                y = -rnd.nextFloat() * h * 0.55f - 10 * d,
+                vx = (rnd.nextFloat() - 0.5f) * 60 * d,
+                vy = (120 + rnd.nextFloat() * 160) * d,
+                rot = rnd.nextFloat() * 360f,
+                spin = (rnd.nextFloat() - 0.5f) * 540f,
+                w = (5 + rnd.nextFloat() * 6) * d,
+                h = (3 + rnd.nextFloat() * 4) * d,
+                color = palette[rnd.nextInt(palette.size)],
+                round = rnd.nextInt(4) == 0,
+                phase = rnd.nextFloat() * 6.28f,
+            )
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val now = System.nanoTime()
+        val dt = if (last == 0L) 0f else ((now - last) / 1e9f).coerceAtMost(0.05f) / speed.coerceAtLeast(0.1f)
+        last = now
+        age += dt
+        val fade = ((life - age) / 0.8f).coerceIn(0f, 1f)
+        for (b in bits) {
+            b.vy += 90 * d * dt
+            b.x += (b.vx + sin(age * 3f + b.phase) * 40 * d) * dt
+            b.y += b.vy * dt
+            b.rot += b.spin * dt
+            paint.color = b.color
+            paint.alpha = (255 * fade).toInt()
+            canvas.save()
+            canvas.translate(b.x, b.y)
+            canvas.rotate(b.rot)
+            // Paper turning over: the width breathes, so it reads as flat stock.
+            val sx = 0.35f + 0.65f * kotlin.math.abs(cos(age * 5f + b.phase))
+            canvas.scale(sx, 1f)
+            if (b.round) canvas.drawCircle(0f, 0f, b.h * 0.7f, paint)
+            else canvas.drawRect(-b.w / 2, -b.h / 2, b.w / 2, b.h / 2, paint)
+            canvas.restore()
+        }
+        if (age < life) postInvalidateOnAnimation()
+    }
+}
+
 private class IconView(
     ctx: Context,
     private val kind: String,

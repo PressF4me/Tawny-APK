@@ -384,4 +384,17 @@
     <string name="privacy_nothing_title">Nothing to connect through</string>
     <string name="privacy_nothing_body">Tighter privacy is on, and this phone has no way to reach the other one: no rendezvous is set, and there is no direct Wi-Fi path (it is turned off, or this pairing has no Wi-Fi address).\n\nThis is deliberate. With every fallback off, Tawny will not pick a server for you. Add your rendezvous, or turn the Wi-Fi path back on, in Servers.</string>
     <string name="privacy_open_servers">Open Servers</string>
+
+    <!-- Update board: shown once per build, after an update. Notes stay short — a line each. -->
+    <string name="whatsnew_eyebrow">Updated to v%1$s</string>
+    <string name="whatsnew_title">Tawny just got better</string>
+    <string-array name="whatsnew_notes">
+        <item>Internet Handhelds no longer restart as a Monitor</item>
+        <item>The camera turns off if you leave the QR scanner early</item>
+        <item>Diagnostics never record an IP address</item>
+        <item>More of the app is in Spanish</item>
+    </string-array>
+    <string name="whatsnew_changelog">Read the full changelog</string>
+    <string name="whatsnew_thanks">Thank you for supporting Tawny. It stays free for everyone because of people like you.</string>
+    <string name="whatsnew_done">Let\'s go</string>
 </resources>
