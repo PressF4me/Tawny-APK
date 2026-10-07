@@ -2,13 +2,18 @@
 
 Newest first. Linux AppImage and Flatpak.
 
-## 0.1.3
+## 0.1.4
 
-Changes since 0.1.2.
+Changes since 0.1.3.
 
 **New**
 - An update board after each update: what changed, a link to this page, and a
-  thank-you.
+  thank-you with the Ko-fi and Bitcoin tips. It shows once per version, and not
+  on a fresh install.
+
+## 0.1.3
+
+Changes since 0.1.2.
 
 **Fixed**
 - The AppImage no longer crashes at launch on distributions with a newer NSS
