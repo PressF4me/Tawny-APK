@@ -321,9 +321,11 @@ private const val COACH_SEEN = "coachSeen"
 /** The native walkthrough was finished or skipped once. */
 private const val TOUR_SEEN = "tourSeen"
 
-/** The last VERSION_CODE whose update board was shown (or skipped as a fresh
- *  install). See MainActivity.maybeShowWhatsNew. */
-private const val WHATSNEW_SEEN = "whatsNewSeen"
+/** The last VERSION_NAME whose update board was shown (or skipped as a fresh
+ *  install). Keyed by name, not code, so a rebuild of the same version (a new
+ *  build number, same notes) does not show the same board twice. See
+ *  MainActivity.maybeShowWhatsNew. */
+private const val WHATSNEW_SEEN = "whatsNewSeenVersion"
 
 /**
  * Whether the user has asked this app to hold still, read straight from the
@@ -3700,28 +3702,35 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * A fresh install has nothing to be "new" against, so it is marked as
-     * having seen this build's board before any screen is up. Anyone with a
-     * trace of an earlier build — a finished tour, a role, a saved session —
-     * is left unmarked and gets the board on their next home screen.
+     * having seen this build's board before any screen is up. An update is
+     * left unmarked and gets the board on its next calm screen.
+     *
+     * Android's own install times decide which is which: an update moves
+     * lastUpdateTime past firstInstallTime, and a reinstall resets both. This
+     * used to guess from traces of use (a finished tour, a role, a saved
+     * session), which called a phone updated before it was ever set up a
+     * fresh install, so it never saw the board.
      */
     private fun seedWhatsNew() {
         if (prefs.contains(WHATSNEW_SEEN)) return
-        val upgraded = prefs.getBoolean(TOUR_SEEN, false) ||
-            prefs.contains("role") || loadRecentSessions().isNotEmpty()
-        if (!upgraded) prefs.edit().putInt(WHATSNEW_SEEN, BuildConfig.VERSION_CODE).apply()
+        val upgraded = try {
+            val p = packageManager.getPackageInfo(packageName, 0)
+            p.lastUpdateTime > p.firstInstallTime
+        } catch (e: Exception) { false }
+        if (!upgraded) prefs.edit().putString(WHATSNEW_SEEN, BuildConfig.VERSION_NAME).apply()
     }
 
     /**
-     * The update board, once per build, on a home screen between calls —
-     * never during one or in the middle of setting up. Returns whether it is
-     * going up.
+     * The update board, once per version, on a calm screen between calls —
+     * the home screens, and the welcome and role screens a phone not set up
+     * yet opens on. Returns whether it is going up.
      */
     private fun maybeShowWhatsNew(): Boolean {
-        if (prefs.getInt(WHATSNEW_SEEN, 0) >= BuildConfig.VERSION_CODE) return false
+        if (prefs.getString(WHATSNEW_SEEN, null) == BuildConfig.VERSION_NAME) return false
         val shownOn = screen
         root.postDelayed({
             if (isFinishing || isDestroyed || screen != shownOn || isLive) return@postDelayed
-            prefs.edit().putInt(WHATSNEW_SEEN, BuildConfig.VERSION_CODE).apply()
+            prefs.edit().putString(WHATSNEW_SEEN, BuildConfig.VERSION_NAME).apply()
             showWhatsNew()
         }, 450L)
         return true
@@ -3737,7 +3746,7 @@ class MainActivity : AppCompatActivity() {
      * drawn here instead of by the window's dim.
      */
     private fun showWhatsNew() {
-        Diag.log("app", "update board shown for ${BuildConfig.VERSION_CODE}")
+        Diag.log("app", "update board shown for ${BuildConfig.VERSION_NAME}")
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -3965,6 +3974,7 @@ class MainActivity : AppCompatActivity() {
         mountCentered(col)
         root.addView(themeToggleView())
         root.addView(languageToggleView())
+        maybeShowWhatsNew()
     }
 
     // -------------------------------------------------------- handheld home
@@ -4054,6 +4064,7 @@ class MainActivity : AppCompatActivity() {
         col.addView(link(getString(R.string.role_how_it_works)) { showTour(0, from = "role") })
         scroll.addView(col)
         root.addView(scroll)
+        maybeShowWhatsNew()
 
         // The trail has to steer around the cards *and* the header, in the paw
         // view's own coordinates — recomputed on every layout pass and every

@@ -1,0 +1,1 @@
+• After an update, Tawny shows what changed, with a link to the full changelog and a thank-you. It appears once per version, also on a phone that was not set up yet.
