@@ -391,6 +391,7 @@
     <string name="whatsnew_title">Tawny ahora es mejor</string>
     <string-array name="whatsnew_notes">
         <item>Este panel ahora aparece tras cada actualización, incluso en un teléfono sin configurar</item>
+        <item>Configurar o vincular una cámara ya no falla en teléfonos con un Android System WebView antiguo</item>
     </string-array>
     <string name="whatsnew_changelog">Ver el registro de cambios</string>
     <string name="whatsnew_thanks">Gracias por apoyar Tawny. Sigue siendo gratis para todos gracias a personas como tú.</string>

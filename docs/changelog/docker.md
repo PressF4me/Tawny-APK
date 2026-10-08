@@ -2,6 +2,15 @@
 
 Newest first. The self-hosted server image (`ghcr.io/pressf4me/tawny`).
 
+## 2.2.7
+
+Changes since 2.2.6.
+
+**Fixed**
+- Adding or pairing a camera in the web client failed when the page was opened
+  over plain `http://` (not `localhost`) or in a browser older than Chrome 92 /
+  Firefox 95 / Safari 15.4: Tawny used a browser call those pages do not get.
+
 ## 2.2.6
 
 Changes since 2.2.5.

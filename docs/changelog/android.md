@@ -11,6 +11,9 @@ Changes since 1.0.1.
   set up: it was taken for a fresh install. Tawny now asks Android whether it
   was installed or updated, and also shows the board on the welcome and role
   screens.
+- Setting up or pairing a camera failed on phones whose Android System
+  WebView is older than Chrome 92 (seen on Android 11): Tawny used a browser
+  call those versions do not have.
 
 ## 1.0.1 (build 44)
 

@@ -2,6 +2,16 @@
 
 Newest first. Linux AppImage and Flatpak.
 
+## 0.1.6
+
+Changes since 0.1.5.
+
+**Fixed**
+- The web client shared with the Android app no longer depends on a browser
+  call that older web engines lack (it broke camera setup on some Android 11
+  phones). Tawny Desktop's own engine already had it, so nothing changes in
+  how the app behaves here.
+
 ## 0.1.5
 
 Changes since 0.1.4.
