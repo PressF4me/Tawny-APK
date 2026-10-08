@@ -388,8 +388,7 @@
     <string name="whatsnew_eyebrow">Actualizado a v%1$s</string>
     <string name="whatsnew_title">Tawny ahora es mejor</string>
     <string-array name="whatsnew_notes">
-        <item>Tras una actualización, Tawny ahora muestra qué cambió</item>
-        <item>Cada actualización enlaza a su registro de cambios completo</item>
+        <item>Configurar o vincular una cámara ya no falla en teléfonos con un Android System WebView antiguo</item>
     </string-array>
     <string name="whatsnew_changelog">Ver el registro de cambios</string>
     <string name="whatsnew_thanks">Gracias por apoyar Tawny. Sigue siendo gratis para todos gracias a personas como tú.</string>

@@ -1,0 +1,1 @@
+• Setting up or pairing a camera no longer fails on phones whose Android System WebView is older than Chrome 92 (seen on Android 11).
