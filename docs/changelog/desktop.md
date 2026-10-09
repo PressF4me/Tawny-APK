@@ -2,6 +2,15 @@
 
 Newest first. Linux AppImage and Flatpak.
 
+## 0.1.8
+
+Changes since 0.1.7.
+
+**Fixed**
+- A camera with no name was shown in its Monitor's language ("your pet",
+  "Pet camera"), so a Spanish-language Tawny Desktop read English. It now
+  shows in this computer's language.
+
 ## 0.1.7
 
 Changes since 0.1.6. Same web client as Tawny for Android 1.0.2 (build 45).

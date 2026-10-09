@@ -15,6 +15,8 @@ Changes since 2.2.7. Same web client as Tawny for Android 1.0.2 (build 45).
 **Fixed**
 - Computers are listed as Linux PC, Windows PC, Mac or Chromebook, not as
   phones.
+- A camera with no name was shown in its Monitor's language ("your pet",
+  "Pet camera"); it now shows in the browser's own language.
 
 ## 2.2.7
 
