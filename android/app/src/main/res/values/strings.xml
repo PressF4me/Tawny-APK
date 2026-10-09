@@ -115,6 +115,17 @@
     <string name="motion_still">The pets hold still — lighter on older phones</string>
     <string name="motion_on">The pets potter about</string>
 
+    <!-- ========================= announce viewers row ================== -->
+    <string name="announce_title">Announce viewers</string>
+    <string name="announce_on">As the Monitor, play a sound each time a phone starts watching</string>
+    <string name="announce_off">Off — phones can start watching without a sound</string>
+
+    <!-- ============================ your name ========================== -->
+    <string name="myname_title">What should the others call you?</string>
+    <string name="myname_body">Everyone on this camera sees it in the list of who\'s here, next to this phone (%1$s). You can change it there any time.</string>
+    <string name="myname_hint">Your name</string>
+    <string name="myname_skip">Not now</string>
+
     <!-- ============================= diagnostics ====================== -->
     <string name="diag_title">Diagnostics</string>
     <string name="diag_subtitle">The last few sessions, as the app saw them.</string>
@@ -387,7 +398,9 @@
     <string name="whatsnew_eyebrow">Updated to v%1$s</string>
     <string name="whatsnew_title">Tawny just got better</string>
     <string-array name="whatsnew_notes">
-        <item>Setting up or pairing a camera no longer fails on phones with an older Android System WebView</item>
+        <item>Who\'s here: give yourself a name and tap the viewer count to see who is watching</item>
+        <item>Announce viewers: the Monitor can play a sound when someone starts watching (off until you turn it on)</item>
+        <item>In landscape, the buttons at the top no longer hide under the navigation bar</item>
     </string-array>
     <string name="whatsnew_changelog">Read the full changelog</string>
     <string name="whatsnew_thanks">Thank you for supporting Tawny. It stays free for everyone because of people like you.</string>

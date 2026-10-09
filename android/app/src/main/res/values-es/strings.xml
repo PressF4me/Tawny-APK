@@ -116,6 +116,17 @@
     <string name="motion_still">Las mascotas se quedan quietas; más ligero en teléfonos viejos</string>
     <string name="motion_on">Las mascotas se mueven un poco</string>
 
+    <!-- ========================= announce viewers row ================== -->
+    <string name="announce_title">Avisar al mirar</string>
+    <string name="announce_on">Como monitor, suena cada vez que un teléfono empieza a mirar</string>
+    <string name="announce_off">Desactivado: los teléfonos pueden mirar sin que suene nada</string>
+
+    <!-- ============================ your name ========================== -->
+    <string name="myname_title">¿Cómo quieres que te llamen?</string>
+    <string name="myname_body">Todos los que usan esta cámara lo ven en la lista de quién está, junto a este teléfono (%1$s). Puedes cambiarlo ahí cuando quieras.</string>
+    <string name="myname_hint">Tu nombre</string>
+    <string name="myname_skip">Ahora no</string>
+
     <!-- ============================= diagnóstico ================= -->
     <string name="diag_title">Diagnóstico</string>
     <string name="diag_subtitle">Las últimas sesiones, tal como las vio la app.</string>
@@ -388,7 +399,9 @@
     <string name="whatsnew_eyebrow">Actualizado a v%1$s</string>
     <string name="whatsnew_title">Tawny ahora es mejor</string>
     <string-array name="whatsnew_notes">
-        <item>Configurar o vincular una cámara ya no falla en teléfonos con un Android System WebView antiguo</item>
+        <item>Quién está: ponte un nombre y toca el contador de espectadores para ver quién está mirando</item>
+        <item>Avisar al mirar: el Monitor puede sonar cuando alguien empieza a mirar (desactivado hasta que lo actives)</item>
+        <item>En horizontal, los botones de arriba ya no quedan debajo de la barra de navegación</item>
     </string-array>
     <string name="whatsnew_changelog">Ver el registro de cambios</string>
     <string name="whatsnew_thanks">Gracias por apoyar Tawny. Sigue siendo gratis para todos gracias a personas como tú.</string>

@@ -1,0 +1,4 @@
+• Who's here: the first time you go live or start watching, Tawny asks what the others should call you. Tap the viewer count to see who is watching.
+• Announce viewers: a Monitor can play a short sound each time a phone starts watching. Off by default; Viewers cannot trigger it.
+• In landscape with three-button navigation, the badges along the top no longer sit under the navigation bar.
+• Computers are listed as Linux PC, Windows PC, Mac or Chromebook, not as phones.
