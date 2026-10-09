@@ -1,0 +1,2 @@
+• With Announce viewers on, everyone already watching hears the sound when someone new joins, not just the Monitor.
+• The first-call tour shows where to tap to see who's here.

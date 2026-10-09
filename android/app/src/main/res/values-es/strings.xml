@@ -399,10 +399,8 @@
     <string name="whatsnew_eyebrow">Actualizado a v%1$s</string>
     <string name="whatsnew_title">Tawny ahora es mejor</string>
     <string-array name="whatsnew_notes">
-        <item>Quién está: ponte un nombre y toca el contador de espectadores para ver quién está mirando</item>
-        <item>Avisar al mirar: el Monitor puede sonar cuando alguien empieza a mirar (desactivado hasta que lo actives)</item>
-        <item>Una mascota sin nombre aparece como «tu mascota» en tu idioma, aunque el Monitor use otro</item>
-        <item>En horizontal, los botones de arriba ya no quedan debajo de la barra de navegación</item>
+        <item>Con Avisar al mirar activado, todos los que ya están mirando oyen el sonido cuando alguien nuevo se une, no solo el Monitor</item>
+        <item>El recorrido de la primera llamada muestra dónde tocar para ver quién está</item>
     </string-array>
     <string name="whatsnew_changelog">Ver el registro de cambios</string>
     <string name="whatsnew_thanks">Gracias por apoyar Tawny. Sigue siendo gratis para todos gracias a personas como tú.</string>
