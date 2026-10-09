@@ -401,7 +401,7 @@
     <string name="whatsnew_title">Tawny just got better</string>
     <string-array name="whatsnew_notes">
         <item>Who\'s here: give yourself a name and tap the viewer count to see who is watching</item>
-        <item>Announce viewers: the Monitor can play a sound when someone starts watching (off until you turn it on)</item>
+        <item>Announce viewers: when someone starts watching, the Monitor and everyone already watching hear a sound (off until the Monitor turns it on)</item>
         <item>A pet with no name shows as "your pet" in your own language, even when the Monitor uses another</item>
         <item>In landscape, the buttons at the top no longer hide under the navigation bar</item>
         <item>This board now shows after every update, even on a phone that is not set up yet</item>

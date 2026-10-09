@@ -6034,6 +6034,9 @@ class MainActivity : AppCompatActivity() {
                         .putBoolean(NAME_ASKED, true).apply()
                     "viewer-on" -> if (announceViewers() &&
                         prefs.getString("role", null) == "station") playViewerSound()
+                    // Viewer: the Monitor says another phone just joined (its
+                    // own switch decided that). Same sound, on the call stream.
+                    "join-sound" -> if (prefs.getString("role", null) == "viewer") playViewerSound()
                     // Theme changed from the in-session web toggle.
                     "theme" -> {
                         val mode = obj.optString("mode")

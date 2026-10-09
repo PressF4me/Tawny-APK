@@ -2,6 +2,18 @@
 
 Newest first. Linux AppImage and Flatpak.
 
+## 0.1.9
+
+Changes since 0.1.8. Same web client as Tawny for Android 1.0.2 (build 45).
+
+**New**
+- Hear who joins: when the Monitor has Announce viewers on, this computer
+  plays the same short sound the Monitor does each time another phone or
+  computer starts watching, so everyone sharing a camera knows when someone new
+  is looking in.
+- The first-call walkthrough points at the viewer count, where the list of
+  who's here opens.
+
 ## 0.1.8
 
 Changes since 0.1.7.

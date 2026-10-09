@@ -2,6 +2,18 @@
 
 Newest first. The self-hosted server image (`ghcr.io/pressf4me/tawny`).
 
+## 2.2.9
+
+Changes since 2.2.8. Same web client as Tawny for Android 1.0.2 (build 45).
+
+**New**
+- Hear who joins: when the Monitor has Announce viewers on, every browser
+  already watching plays the same short sound the Monitor does when someone new
+  starts watching. Rides the existing relay messages; the rendezvous needs no
+  change.
+- The first-call walkthrough points at the viewer count, where the list of
+  who's here opens.
+
 ## 2.2.8
 
 Changes since 2.2.7. Same web client as Tawny for Android 1.0.2 (build 45).

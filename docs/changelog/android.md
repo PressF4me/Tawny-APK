@@ -15,6 +15,10 @@ Changes since 1.0.1.
   watching, so nobody looks in unannounced. It is off by default; turn it on
   from the Monitor's home or About screen, or when naming the Monitor. A bell
   badge in the corner shows while it is on. Viewers cannot trigger it.
+  Everyone already watching hears the same sound on their own phone, so the
+  people sharing a camera know when someone new has joined.
+- The first-call walkthrough now points at the viewer count, where the list of
+  who's here opens.
 
 **Fixed**
 - In landscape with three-button navigation, the badges along the top sat under
