@@ -2,6 +2,20 @@
 
 Newest first. The self-hosted server image (`ghcr.io/pressf4me/tawny`).
 
+## 2.2.8
+
+Changes since 2.2.7. Same web client as Tawny for Android 1.0.2 (build 45).
+
+**New**
+- Who's here: the first time a browser goes live or starts watching, Tawny asks
+  what the others should call you. Tap the viewer count to see everyone on
+  that camera, and rename yourself from there. Rides the existing relay
+  messages, so the rendezvous needs no change.
+
+**Fixed**
+- Computers are listed as Linux PC, Windows PC, Mac or Chromebook, not as
+  phones.
+
 ## 2.2.7
 
 Changes since 2.2.6.

@@ -2,6 +2,18 @@
 
 Newest first. Linux AppImage and Flatpak.
 
+## 0.1.7
+
+Changes since 0.1.6. Same web client as Tawny for Android 1.0.2 (build 45).
+
+**New**
+- Who's here: the first time you start watching, Tawny asks what the others
+  should call you. Tap the viewer count to see everyone on that camera and
+  rename yourself.
+
+**Fixed**
+- This computer is listed as a Linux PC or Windows PC, not as a phone.
+
 ## 0.1.6
 
 Changes since 0.1.5.
