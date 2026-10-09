@@ -6,7 +6,21 @@ Newest first. Google Play builds.
 
 Changes since 1.0.1.
 
+**New**
+- Who's here: the first time you go live or start watching, Tawny asks what the
+  others should call you. Tap the viewer count on the Monitor or a Viewer to
+  see everyone on that camera (the Monitor, each Viewer, and which one is you),
+  and rename yourself from there.
+- Announce viewers: a Monitor can play a short sound each time a phone starts
+  watching, so nobody looks in unannounced. It is off by default; turn it on
+  from the Monitor's home or About screen, or when naming the Monitor. A bell
+  badge in the corner shows while it is on. Viewers cannot trigger it.
+
 **Fixed**
+- In landscape with three-button navigation, the badges along the top sat under
+  the navigation bar and could not be tapped.
+- The device list names computers properly (Linux PC, Windows PC, Mac,
+  Chromebook) instead of calling every one a phone.
 - The update board did not show on a phone that was updated before it was ever
   set up: it was taken for a fresh install. Tawny now asks Android whether it
   was installed or updated, and also shows the board on the welcome and role

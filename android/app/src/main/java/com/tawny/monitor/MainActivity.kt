@@ -311,6 +311,12 @@ private const val MAX_VIEWERS = 3
  * silently as "this one screen ignores the setting".
  */
 private const val STILL_MODE = "stillMode"
+/** Monitor: play a sound each time a phone starts watching. Off by default. */
+private const val ANNOUNCE_VIEWERS = "announceViewers"
+/** What this phone's person asked to be called, shown to everyone on the camera. */
+private const val MY_NAME = "myName"
+/** The name question has been put once (answered or skipped); never asked again. */
+private const val NAME_ASKED = "nameAsked"
 
 /** The channel's role, set aside by the welcome screen; see resumeSession(). */
 private const val PARKED_ROLE = "parkedRole"
@@ -534,6 +540,7 @@ class MainActivity : AppCompatActivity() {
             if (videoIsBehindBars()) v.setPadding(0, 0, 0, 0)
             else v.setPadding(0, b.top, 0, b.bottom)
             lastInsets = b.top to b.bottom
+            lastSideInsets = b.left to b.right
             pushSafeInsets()
             insets
         }
@@ -1083,6 +1090,56 @@ class MainActivity : AppCompatActivity() {
         setOnClickListener { haptic(); onClick() }
     }
 
+    private fun myName() = prefs.getString(MY_NAME, "").orEmpty()
+
+    /** Same rule as the page's cleanName: any script, no control characters. */
+    private fun cleanName(v: String) = v
+        .replace(Regex("[\\u0000-\\u001F\\u007F-\\u009F\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u206F\\uFEFF]"), "")
+        .replace(Regex("\\s+"), " ").trim().take(24)
+
+    /**
+     * Asked once, before this phone's first live session in either role: what
+     * the others on the camera should call its person. Everyone on the camera
+     * sees the answer in the "who's here" list, beside the phone's own model.
+     * Skipping is fine — the list then shows just the phone — and the name can
+     * be changed from that list at any time.
+     *
+     * A Monitor also gets the Announce viewers switch here. Off by default, it
+     * used to live only under About on a fresh install, where nobody found it.
+     */
+    private fun askMyName(role: String, then: () -> Unit) {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val input = dialogInput(getString(R.string.myname_hint), myName()).apply {
+            filters = arrayOf(android.text.InputFilter.LengthFilter(24))
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS or
+                InputType.TYPE_TEXT_VARIATION_PERSON_NAME
+        }
+        box.addView(input)
+        if (role == "station") {
+            box.addView(announceRow {}.apply {
+                background = roundRect(Hue.BG, Hue.LINE, Radius.CARD)
+                layoutParams = lp(topMargin = 14)
+            })
+        }
+        fun done(save: Boolean) {
+            prefs.edit().apply {
+                if (save) putString(MY_NAME, cleanName(input.text.toString()))
+                putBoolean(NAME_ASKED, true)
+            }.apply()
+            then()
+        }
+        themedDialog(
+            title = getString(R.string.myname_title),
+            body = getString(R.string.myname_body, android.os.Build.MODEL ?: ""),
+            primaryLabel = getString(R.string.common_save),
+            onPrimary = { done(true) },
+            secondaryLabel = getString(R.string.myname_skip),
+            onSecondary = { done(false) },
+            cancelable = false,
+            content = box,
+        )
+    }
+
     /**
      * The one dialog in the app, on the same parchment card the rest of the app
      * uses rather than the stock Material AlertDialog.
@@ -1444,6 +1501,69 @@ class MainActivity : AppCompatActivity() {
             haptic()
             knob.on = stillMode()          // about to become the new value
             prefs.edit().putBoolean(STILL_MODE, !stillMode()).apply()
+            rebuild()
+        }
+    }
+
+    private fun announceViewers() = prefs.getBoolean(ANNOUNCE_VIEWERS, false)
+
+    /**
+     * The Monitor's "Announce viewers" switch: when on, this phone plays a
+     * sound each time a phone starts watching it, and its live screen shows a
+     * bell saying so. Asked for by people who keep a camera somewhere other
+     * people share — the chime lets a Viewer announce themselves, but only if
+     * they choose to; this does it every time, and anyone in the room can check
+     * it on the Monitor itself. Lives on the Monitor and nowhere else: no
+     * message from a Viewer can turn it off. Same construction as [motionRow].
+     */
+    private fun announceRow(rebuild: () -> Unit) = LinearLayout(this).apply {
+        var announceSub: TextView? = null
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = pressable(roundRect(0, Color.TRANSPARENT, 0), 0, Hue.BERRY)
+        val ph = dp(16); val pv = dp(15)
+        setPadding(ph, pv, ph, pv)
+        minimumHeight = dp(54)
+        addView(IconView(this@MainActivity, "bell", behind = Hue.PANEL, tint = Hue.DIM).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(19), dp(19))
+        })
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(13) }
+            addView(TextView(this@MainActivity).apply {
+                text = getString(R.string.announce_title)
+                setTextColor(Hue.TEXT)
+                textSize = Type.SUB
+                typeface = uiFontSemi
+                letterSpacing = 0.01f
+                maxLines = 1
+            })
+            addView(TextView(this@MainActivity).apply {
+                announceSub = this
+                text = if (announceViewers()) getString(R.string.announce_on)
+                else getString(R.string.announce_off)
+                setTextColor(Hue.DIM)
+                textSize = 12.5f
+                typeface = uiFont
+                setPadding(0, dp(2), 0, 0)
+            })
+        })
+        val knob = SwitchMark(this@MainActivity, announceViewers()).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(46), dp(28))
+                .also { it.leftMargin = dp(12) }
+        }
+        addView(knob)
+        isClickable = true; isFocusable = true
+        contentDescription = getString(R.string.announce_title)
+        setOnClickListener {
+            haptic()
+            knob.on = !announceViewers()
+            prefs.edit().putBoolean(ANNOUNCE_VIEWERS, !announceViewers()).apply()
+            // Heard once on the way on, so whoever flips it knows what the room
+            // will hear.
+            if (announceViewers()) previewViewerSound()
+            announceSub?.text = if (announceViewers()) getString(R.string.announce_on)
+            else getString(R.string.announce_off)
             rebuild()
         }
     }
@@ -2518,6 +2638,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var lastInsets: Pair<Int, Int> = 0 to 0
+    /** Left and right: a landscape phone with button navigation keeps its bar on a side. */
+    private var lastSideInsets: Pair<Int, Int> = 0 to 0
 
     /**
      * Hand the page the real window insets.
@@ -2532,9 +2654,14 @@ class MainActivity : AppCompatActivity() {
         val (top, bottom) = lastInsets
         val t = if (videoIsBehindBars()) (top / d).toInt() else 0
         val b = if (videoIsBehindBars()) (bottom / d).toInt() else 0
+        val (left, right) = lastSideInsets
+        val l = if (videoIsBehindBars()) (left / d).toInt() else 0
+        val r = if (videoIsBehindBars()) (right / d).toInt() else 0
         w.evaluateJavascript(
             "document.documentElement.style.setProperty('--safe-t','${t}px');" +
-                "document.documentElement.style.setProperty('--safe-b','${b}px');",
+                "document.documentElement.style.setProperty('--safe-b','${b}px');" +
+                "document.documentElement.style.setProperty('--safe-l','${l}px');" +
+                "document.documentElement.style.setProperty('--safe-r','${r}px');",
             null
         )
     }
@@ -2990,6 +3117,7 @@ class MainActivity : AppCompatActivity() {
         col.addView(metaPanel(
             themeRow { showSessionsHome() },
             motionRow { showSessionsHome() },
+            announceRow { showSessionsHome() },
             metaRow("help", getString(R.string.meta_help), Hue.TEXT, "›") { showHelp(from = "home") },
             metaRow("info", getString(R.string.meta_about), Hue.TEXT, "›") { showAbout() },
         ).apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(14) })
@@ -3115,6 +3243,7 @@ class MainActivity : AppCompatActivity() {
         col.addView(metaPanel(
             themeRow { showAbout() },
             motionRow { showAbout() },
+            announceRow { showAbout() },
             metaRow("help", getString(R.string.meta_help), Hue.TEXT, "›") { showHelp(from = "about") },
             metaRow("star", getString(R.string.meta_rate), Hue.TEXT, "↗") { openStoreListing() },
         ))
@@ -4787,6 +4916,7 @@ class MainActivity : AppCompatActivity() {
     // -------------------------------------------------------- live (webview)
 
     private fun goLive(role: String) {
+        if (!prefs.getBoolean(NAME_ASKED, false)) { askMyName(role) { goLive(role) }; return }
         if (role == "station" && !lanPathOn()) {
             // Tighter privacy with the Wi-Fi path off: no local relay is
             // started, nothing listens on this phone, and the code carries no
@@ -4954,6 +5084,8 @@ class MainActivity : AppCompatActivity() {
                         // setting, which is the one thing this switch exists to
                         // be independent of — so it has to be told.
                         "motion:${jsStr(if (stillMode()) "off" else "on")}," +
+                        "announce:${jsStr(if (announceViewers()) "on" else "off")}," +
+                        "myName:${jsStr(myName())}," +
                         "lang:${jsStr(currentLang())}," +
                         "pairCode:${pairCodeArg?.let { jsStr(it) } ?: "null"}," +
                         "pairExp:$pairCodeExpArg,servers:${serversJson()}})",
@@ -5881,6 +6013,14 @@ class MainActivity : AppCompatActivity() {
                     // A Viewer pressed a chime. Play it on the call's audio
                     // stream, where the page's own WebAudio cannot reach.
                     "chime" -> playChimeNative(obj.optString("slug"))
+                    // A Viewer's picture just connected. Announced only if
+                    // this Monitor's own switch says so; the page has no say.
+                    // The name was changed from the page's "who's here" list.
+                    "myname" -> prefs.edit()
+                        .putString(MY_NAME, cleanName(obj.optString("name")))
+                        .putBoolean(NAME_ASKED, true).apply()
+                    "viewer-on" -> if (announceViewers() &&
+                        prefs.getString("role", null) == "station") playViewerSound()
                     // Theme changed from the in-session web toggle.
                     "theme" -> {
                         val mode = obj.optString("mode")
@@ -6306,7 +6446,7 @@ class MainActivity : AppCompatActivity() {
                 sp.play(sampleId, 0.95f, 0.95f, 1, 0, 1f)
             }
         }
-        for (slug in chimeSlugs) {
+        for (slug in chimeSlugs + viewerSlug) {
             try {
                 val fd = assets.openFd("web/sounds/$slug.ogg")
                 chimeFds.add(fd)
@@ -6316,6 +6456,35 @@ class MainActivity : AppCompatActivity() {
             }
         }
         chimePool = pool
+    }
+
+    /** The "someone started watching" sound. Kept out of [chimeSlugs] so a
+     *  Viewer can never send it as a chime and pass for the announcement. */
+    private val viewerSlug = "viewer"
+
+    private fun playViewerSound() {
+        val pool = chimePool ?: run { startChimeAudio(); chimePool } ?: return
+        val id = chimeIds[viewerSlug] ?: return
+        val stream = pool.play(id, 0.95f, 0.95f, 2, 0, 1f)
+        if (stream == 0) {
+            pendingChime = viewerSlug
+            pendingChimeAt = SystemClock.elapsedRealtime()
+        }
+        Diag.log("shell", "viewer announced" + if (stream == 0) " (queued — loading)" else "")
+    }
+
+    /** One play of the announcement from the settings row, outside a session. */
+    private fun previewViewerSound() {
+        runCatching {
+            val mp = android.media.MediaPlayer()
+            assets.openFd("web/sounds/$viewerSlug.ogg").use {
+                mp.setDataSource(it.fileDescriptor, it.startOffset, it.length)
+            }
+            mp.setOnCompletionListener { p -> p.release() }
+            mp.setOnErrorListener { p, _, _ -> p.release(); true }
+            mp.prepare()
+            mp.start()
+        }.onFailure { Diag.log("shell", "announce preview failed: ${it.message}") }
     }
 
     private fun playChimeNative(slugRaw: String) {
@@ -6831,6 +7000,23 @@ private class IconView(
                 rr(canvas, 8f, 15.5f, 40f, 20.5f, 2.5f, body)
                 rr(canvas, 16f, 24.5f, 40f, 29.5f, 2.5f, body)
                 rr(canvas, 24f, 33.5f, 40f, 38.5f, 2.5f, body)
+            }
+            "bell" -> {
+                // The Announce viewers row: a bell, the same mark as the badge
+                // the live Monitor shows when the setting is on.
+                val b = Path().apply {
+                    moveTo(11f, 34f)
+                    lineTo(11f, 22f)
+                    cubicTo(11f, 14f, 16.5f, 8.5f, 24f, 8.5f)
+                    cubicTo(31.5f, 8.5f, 37f, 14f, 37f, 22f)
+                    lineTo(37f, 34f)
+                    lineTo(41f, 38f)
+                    lineTo(7f, 38f)
+                    close()
+                }
+                canvas.drawPath(b, body)
+                canvas.drawCircle(24f, 41.5f, 4f, body)          // clapper
+                rr(canvas, 21.5f, 4f, 26.5f, 10f, 2.5f, body)    // crown
             }
             "plus" -> {
                 // Drawn rather than typed: a "+" set in the UI font sits a
