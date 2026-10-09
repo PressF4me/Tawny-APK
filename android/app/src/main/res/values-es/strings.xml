@@ -403,6 +403,7 @@
     <string-array name="whatsnew_notes">
         <item>Quién está: ponte un nombre y toca el contador de espectadores para ver quién está mirando</item>
         <item>Avisar al mirar: el Monitor puede sonar cuando alguien empieza a mirar (desactivado hasta que lo actives)</item>
+        <item>Una mascota sin nombre aparece como «tu mascota» en tu idioma, aunque el Monitor use otro</item>
         <item>En horizontal, los botones de arriba ya no quedan debajo de la barra de navegación</item>
         <item>Este panel ahora aparece tras cada actualización, incluso en un teléfono sin configurar</item>
         <item>Configurar o vincular una cámara ya no falla en teléfonos con un Android System WebView antiguo</item>

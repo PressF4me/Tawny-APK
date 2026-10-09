@@ -313,6 +313,8 @@ private const val MAX_VIEWERS = 3
 private const val STILL_MODE = "stillMode"
 /** Monitor: play a sound each time a phone starts watching. Off by default. */
 private const val ANNOUNCE_VIEWERS = "announceViewers"
+/** Every language's fallback pet name (default_pet_name) plus the web's "Pet camera". */
+private val DEFAULT_PET_NAMES = setOf("your pet", "tu mascota", "pet camera", "cámara de mascota")
 /** What this phone's person asked to be called, shown to everyone on the camera. */
 private const val MY_NAME = "myName"
 /** The name question has been put once (answered or skipped); never asked again. */
@@ -2920,7 +2922,7 @@ class MainActivity : AppCompatActivity() {
         sessions.forEach { session ->
             val key = session.optString("channelKey")
             val role = session.optString("role")
-            val petName = session.optString("petName", getString(R.string.default_pet_name))
+            val petName = shownPetName(session.optString("petName"))
             val roleLabel = if (role == "station") getString(R.string.sessions_role_monitor) else getString(R.string.sessions_role_viewer)
             val timeStr = relativeTime(session.optLong("timestamp", 0L))
 
@@ -4192,7 +4194,7 @@ class MainActivity : AppCompatActivity() {
         swipeNav(back = { showWelcome() }, forward = { goLive("viewer") })
         val pawView = PawTrailView(this)
         root.addView(pawView, FrameLayout.LayoutParams(MP, MP))
-        val name = prefs.getString("channelName", getString(R.string.default_pet_name)) ?: getString(R.string.default_pet_name)
+        val name = shownPetName(prefs.getString("channelName", null))
         val col = column(scroll = false)
         col.addView(IconView(this, "phone", behind = Hue.BG).apply {
             layoutParams = LinearLayout.LayoutParams(dp(60), dp(60)).also {
@@ -4416,9 +4418,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Name the spot the Watcher is aimed at; the Handheld shows "<name> monitor". */
+    /**
+     * The pet's name as this phone shows it. A skipped name prompt stores the
+     * fallback in that phone's language and the pairing link carries it, so a
+     * Spanish phone paired to an English Monitor read "Ver a your pet ahora".
+     * Any known fallback is shown in this phone's language; the stored name and
+     * what other phones are sent stay as they are.
+     */
+    private fun shownPetName(raw: String?): String {
+        val n = raw?.trim().orEmpty()
+        return if (n.isEmpty() || n.lowercase() in DEFAULT_PET_NAMES) getString(R.string.default_pet_name) else n
+    }
+
     private fun promptRoomName(onName: (String) -> Unit) {
         val current = prefs.getString("channelName", "")
-            ?.takeUnless { it == "Pet camera" || it == getString(R.string.default_pet_name) }.orEmpty()
+            ?.takeUnless { it.trim().lowercase() in DEFAULT_PET_NAMES }.orEmpty()
         askName(
             title = getString(R.string.name_ask_title),
             body = "",
@@ -5887,8 +5901,7 @@ class MainActivity : AppCompatActivity() {
         screen = "offline"
         if (isFinishing) return
         Diag.log("shell", "showMonitorOffline — handheld gave up reaching the monitor")
-        val petName = prefs.getString("channelName", null)
-            ?.takeUnless { it.isBlank() } ?: getString(R.string.default_pet_name)
+        val petName = shownPetName(prefs.getString("channelName", null))
         clearScreen()
         swipeNav(back = { showHandheldHome() }, forward = null)
         val col = column(scroll = false)

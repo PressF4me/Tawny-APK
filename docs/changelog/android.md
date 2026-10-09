@@ -19,6 +19,9 @@ Changes since 1.0.1.
 **Fixed**
 - In landscape with three-button navigation, the badges along the top sat under
   the navigation bar and could not be tapped.
+- A pet with no name was shown in the Monitor's language: a Spanish phone
+  paired to an English Monitor read "Ver a your pet ahora". Unnamed pets now
+  show as "your pet" / "tu mascota" in each phone's own language.
 - The device list names computers properly (Linux PC, Windows PC, Mac,
   Chromebook) instead of calling every one a phone.
 - The update board did not show on a phone that was updated before it was ever
