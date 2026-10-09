@@ -904,7 +904,9 @@ $('#setup-handheld').addEventListener('click', () => {
 $('#wp-start').addEventListener('click', () => {
   clearInterval(wpTicker);
   wpTicker = null;
-  if (S.role === 'station' && S.local) { show(el.live); openPair(); }
+  // The Monitor went live behind this screen (stayPut), so start() skipped
+  // the name question; ask it now, over the pairing sheet, as start() would.
+  if (S.role === 'station' && S.local) { show(el.live); openPair(); maybeAskMyName(); }
   else start('station');
 });
 
