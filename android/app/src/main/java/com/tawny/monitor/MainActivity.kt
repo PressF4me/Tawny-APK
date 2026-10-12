@@ -15,6 +15,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PathMeasure
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -954,6 +955,7 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) { 1f }
 
     private fun clearScreen() {
+        stopTipListener()
         scene?.stop(); scene = null
         playScene?.stop(); playScene = null
         scannerStop?.invoke(); scannerStop = null
@@ -3325,81 +3327,57 @@ class MainActivity : AppCompatActivity() {
      *   that does have a wallet, and the web page is one tap away.
      */
     private fun showLightningTip(noWallet: Boolean = false) {
+        if (FULL_TIP_FLOW) { showTipFlow(); return }
         clearScreen()
         screen = "lntip"
         val back = { if (lnFromAbout) showAbout() else afterSession() }
         swipeNav(back = back, forward = null)
 
         val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
-        val col = column(scroll = true).apply { gravity = Gravity.CENTER_HORIZONTAL }
+        val col = column(scroll = true)
         col.addView(backLink { back() })
-
-        // The same glyph as the row that got you here, at size — and it takes
-        // the same zap when you press the button.
-        val bolt = IconView(this, "bolt", behind = Hue.BG, tint = Hue.SKY).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).also {
-                it.topMargin = dp(10)
-                it.gravity = Gravity.CENTER_HORIZONTAL
-            }
-        }
-        col.addView(bolt)
-        col.addView(heading(
-            getString(R.string.tip_title),
-            getString(R.string.tip_wallet_body),
-            center = true,
-        ))
+        // The same header, buttons and code card as the full flow (showTipFlow),
+        // without the amounts: here the wallet asks for the amount.
+        col.addView(tipHeader(getString(R.string.tip_wallet_body)))
 
         if (!noWallet) {
-            col.addView(pill(getString(R.string.tip_open_wallet), Hue.ON_ACCENT, Hue.SKY, Hue.SKY) {
-                bolt.strike(animScale)
-                openLightning()
-            })
+            col.addView(primary(getString(R.string.tip_open_wallet)) { openLightning() }
+                .also { (it.layoutParams as LinearLayout.LayoutParams).topMargin = dp(22) })
         } else {
-            col.addView(body(
-                getString(R.string.tip_no_wallet_body),
-                maxW = 320,
-            ))
-        }
-
-        col.addView(TextView(this).apply {
-            text = LN_ADDRESS
-            typeface = Typeface.MONOSPACE
-            textSize = 14f
-            setTextColor(Hue.TEXT)
-            gravity = Gravity.CENTER
-            letterSpacing = 0.02f
-            setTextIsSelectable(true)
-            background = roundRect(Hue.PANEL, Hue.LINE, Radius.CARD)
-            setPadding(dp(14), dp(13), dp(14), dp(13))
-            layoutParams = lp(topMargin = 18)
-        })
-        col.addView(link(getString(R.string.tip_copy_address)) {
-            copyToClipboard("Tawny Lightning address", LN_ADDRESS)
-            toast(getString(R.string.tip_copied, LN_ADDRESS))
-        })
-
-        if (noWallet) {
-            val qr = ImageView(this).apply {
-                val s = dp(190)
-                layoutParams = LinearLayout.LayoutParams(s, s).also {
-                    it.topMargin = dp(6)
-                    it.gravity = Gravity.CENTER_HORIZONTAL
-                }
-            }
-            col.addView(qr)
+            // A phone with no wallet: the address as a QR for one that has one.
+            val qrSize = minOf(dp(220), (resources.displayMetrics.widthPixels * 0.62).toInt())
+            val qr = ImageView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+            col.addView(FrameLayout(this).apply {
+                background = roundRect(Color.WHITE, Hue.LINE, Radius.CARD)
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                layoutParams = LinearLayout.LayoutParams(qrSize, qrSize).also { it.topMargin = dp(20); it.gravity = Gravity.CENTER_HORIZONTAL }
+                addView(qr)
+            })
             // Encoding is not free and this is a plain navigation, so keep it
             // off the UI thread like the pairing QR does.
             io.execute {
-                val bmp = try { qrBitmap(LN_URI, 480) } catch (e: Exception) { null }
+                val bmp = try { qrBitmap(LN_URI.uppercase(), 480) } catch (e: Exception) { null }
                 runOnUiThread { if (bmp != null && qr.isAttachedToWindow) qr.setImageBitmap(bmp) }
             }
-            col.addView(link(getString(R.string.tip_open_strike)) { openExternal(LN_WEB_URL) })
+            col.addView(body(getString(R.string.tip_no_wallet_body), maxW = 320).also { it.layoutParams = lp(topMargin = 12) })
+            col.addView(pill(getString(R.string.tip_pay_strike), Hue.TEXT, 0, Hue.LINE) { openExternal(LN_WEB_URL) })
         }
 
-        col.addView(body(
-            getString(R.string.tip_body),
-            maxW = 320,
-        ))
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            layoutParams = lp(topMargin = 10)
+            addView(TextView(this@MainActivity).apply {
+                text = LN_ADDRESS; typeface = Typeface.MONOSPACE; textSize = 13.5f; setTextColor(Hue.DIM)
+                setTextIsSelectable(true); maxLines = 1
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+            })
+            addView(link(getString(R.string.tip_copy_address)) {
+                copyToClipboard("Tawny Lightning address", LN_ADDRESS)
+                toast(getString(R.string.tip_copied, LN_ADDRESS))
+            }.also { it.layoutParams = LinearLayout.LayoutParams(WC, WC) })
+        })
+        col.addView(body(getString(R.string.tip_body), maxW = 320).also { it.layoutParams = lp(topMargin = 10) })
+        col.addView(link(getString(R.string.tip_not_now)) { back() })
         col.addView(gap(16))
 
         scroll.addView(col)
@@ -3419,6 +3397,320 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             copyToClipboard("Tawny Lightning address", LN_ADDRESS)
             toast(getString(R.string.tip_no_wallet_open_failed))
+        }
+    }
+
+    // ---------------------------------------------------- tip in bitcoin, full flow
+
+    /**
+     * Which tip flow this build shows. Play ("release") keeps the hand-off
+     * above: Play's Payments policy only tolerates an outside contribution
+     * that the app merely points at, so there the wallet picks the amount and
+     * Tawny never sees an invoice. The GitHub APK (and debug) get the same flow
+     * as the web builds: an amount, an invoice from the tip address, a QR or
+     * "Open wallet", and a thank-you when the zap receipt arrives (TipZap.kt).
+     */
+    private val FULL_TIP_FLOW = BuildConfig.BUILD_TYPE != "release"
+    private val TIP_USD = intArrayOf(2, 5, 10)
+    private val TIP_SATS_OFFLINE = longArrayOf(2000, 5000, 10000)
+    private var tipPrice: Double? = null
+    private var tipPick = 0
+    private var tipTicket = 0
+    private var tipInvoice = ""
+    private var tipListener: TipZap.Listener? = null
+
+    private fun stopTipListener() {
+        tipTicket++
+        tipListener?.stop()
+        tipListener = null
+    }
+
+    private fun tipSats(n: Long) = getString(R.string.tip_sats, java.text.NumberFormat.getIntegerInstance().format(n))
+    private fun tipUsd(u: Double) = if (u % 1.0 == 0.0) "$" + u.toLong() else "$" + String.format(java.util.Locale.US, "%.2f", u)
+    private fun tipSatsFor(usd: Double): Long = tipPrice?.let { maxOf(1L, Math.round(usd / it * 1e8)) } ?: 0L
+
+    /** The bolt in a soft sky tile, "Tip in Bitcoin" and one line beside it. */
+    private fun tipHeader(sub: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = lp(topMargin = 6)
+        addView(FrameLayout(this@MainActivity).apply {
+            background = roundRect(androidx.core.graphics.ColorUtils.blendARGB(Hue.PANEL, Hue.SKY, 0.14f), Color.TRANSPARENT)
+            layoutParams = LinearLayout.LayoutParams(dp(46), dp(46)).also { it.marginEnd = dp(14) }
+            addView(IconView(this@MainActivity, "bolt", behind = Hue.BG, tint = Hue.SKY).apply {
+                layoutParams = FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER)
+            })
+        })
+        addView(heading(getString(R.string.tip_full_title), sub).apply {
+            layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+        })
+    }
+
+    private fun showTipFlow() {
+        clearScreen()
+        screen = "lntip"
+        val back = { stopTipListener(); if (lnFromAbout) showAbout() else afterSession() }
+        swipeNav(back = back, forward = null)
+
+        val scroll = ScrollView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+        val col = column(scroll = true)
+        col.addView(backLink { back() })
+
+        col.addView(tipHeader(getString(R.string.tip_full_sub)))
+
+        // amounts: $2 / $5 / $10 / Other
+        val chips = mutableListOf<LinearLayout>()
+        val chipSub = mutableListOf<TextView>()
+        val chipMain = mutableListOf<TextView>()
+        val amounts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; layoutParams = lp(topMargin = 20) }
+        for (i in 0..3) {
+            val main = TextView(this).apply { textSize = 17f; typeface = uiFontSemi; setTextColor(Hue.TEXT); gravity = Gravity.CENTER }
+            val sub = TextView(this).apply { textSize = 11.5f; typeface = uiFont; setTextColor(Hue.DIM); gravity = Gravity.CENTER; maxLines = 1 }
+            val chip = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                minimumHeight = dp(60)
+                setPadding(dp(2), dp(8), dp(2), dp(8))
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { if (i > 0) it.marginStart = dp(7) }
+                addView(main); addView(sub)
+                isClickable = true
+            }
+            chips += chip; chipMain += main; chipSub += sub
+            amounts.addView(chip)
+        }
+        col.addView(amounts)
+
+        val otherInput = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            hint = getString(R.string.tip_amount_hint)
+            textSize = 17f
+            typeface = uiFont
+            setTextColor(Hue.TEXT); setHintTextColor(Hue.DIM)
+            background = roundRect(Hue.PANEL, Hue.LINE)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+            setSingleLine()
+        }
+        val otherRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = lp(topMargin = 12)
+            visibility = View.GONE
+            addView(TextView(this@MainActivity).apply { text = "$"; textSize = 17f; setTextColor(Hue.DIM); setPadding(0, 0, dp(8), 0) })
+            addView(otherInput)
+        }
+        col.addView(otherRow)
+
+        // the code
+        val qrSize = minOf(dp(240), (resources.displayMetrics.widthPixels * 0.66).toInt())
+        val qrImg = ImageView(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+        val spin = ProgressBar(this).apply {
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(Hue.SKY)
+            layoutParams = LinearLayout.LayoutParams(dp(30), dp(30)).also { it.gravity = Gravity.CENTER_HORIZONTAL }
+        }
+        val qrMsg = TextView(this).apply {
+            textSize = 14f; typeface = uiFont; setTextColor(0xFF5A5364.toInt()); gravity = Gravity.CENTER
+            setPadding(dp(16), dp(10), dp(16), 0)
+        }
+        val retry = TextView(this).apply {
+            text = getString(R.string.tip_retry); textSize = 15f; typeface = uiFontSemi
+            setTextColor(0xFF41708F.toInt()); gravity = Gravity.CENTER; setPadding(dp(12), dp(12), dp(12), dp(12))
+            visibility = View.GONE
+        }
+        val qrState = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(MP, MP)
+            addView(spin); addView(qrMsg); addView(retry)
+        }
+        col.addView(FrameLayout(this).apply {
+            background = roundRect(Color.WHITE, Hue.LINE, Radius.CARD)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            layoutParams = LinearLayout.LayoutParams(qrSize, qrSize).also { it.topMargin = dp(18); it.gravity = Gravity.CENTER_HORIZONTAL }
+            addView(qrImg); addView(qrState)
+        })
+        col.addView(TextView(this).apply {
+            text = getString(R.string.tip_scan); textSize = 14.5f; typeface = uiFont; setTextColor(Hue.TEXT)
+            gravity = Gravity.CENTER; layoutParams = lp(topMargin = 12)
+        })
+        val waiting = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+            layoutParams = lp(topMargin = 4)
+            visibility = View.INVISIBLE
+            addView(ProgressBar(this@MainActivity).apply {
+                indeterminateTintList = android.content.res.ColorStateList.valueOf(Hue.SKY)
+                layoutParams = LinearLayout.LayoutParams(dp(14), dp(14)).also { it.marginEnd = dp(7) }
+            })
+            addView(TextView(this@MainActivity).apply { text = getString(R.string.tip_waiting); textSize = 13.5f; typeface = uiFont; setTextColor(Hue.DIM) })
+        }
+        col.addView(waiting)
+        // debug builds only: see the thank-you without paying
+        if (BuildConfig.DEBUG) waiting.setOnLongClickListener { showTipThanks(2.0, 2000); true }
+
+        val walletBtn = pill(getString(R.string.tip_open_wallet), Hue.ON_ACCENT, Hue.BERRY, Hue.BERRY) {
+            if (tipInvoice.isEmpty()) return@pill
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("lightning:$tipInvoice")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (e: android.content.ActivityNotFoundException) {
+                toast(getString(R.string.tip_no_wallet_body))
+            } catch (e: Exception) { }
+        }.also { it.layoutParams = lp(topMargin = 16) }
+        col.addView(walletBtn)
+        col.addView(pill(getString(R.string.tip_pay_strike), Hue.TEXT, 0, Hue.LINE) { openExternal(LN_WEB_URL) })
+        val code = TextView(this).apply {
+            text = "—"; typeface = Typeface.MONOSPACE; textSize = 12.5f; setTextColor(Hue.DIM)
+            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+        }
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            layoutParams = lp(topMargin = 6)
+            addView(code)
+            addView(link(getString(R.string.tip_copy_invoice)) {
+                if (tipInvoice.isNotEmpty()) { copyToClipboard("Tawny Lightning invoice", tipInvoice); toast(getString(R.string.tip_invoice_copied)) }
+            }.also { it.layoutParams = LinearLayout.LayoutParams(WC, WC) })
+        })
+        col.addView(body(getString(R.string.tip_body), maxW = 320).also { (it.layoutParams as LinearLayout.LayoutParams).topMargin = dp(10) })
+        col.addView(link(getString(R.string.tip_not_now)) { back() })
+        col.addView(gap(16))
+
+        scroll.addView(col)
+        root.addView(scroll)
+
+        fun setState(state: String, msg: String = "") {   // loading | qr | error | empty
+            qrImg.visibility = if (state == "qr") View.VISIBLE else View.INVISIBLE
+            qrState.visibility = if (state == "qr") View.GONE else View.VISIBLE
+            spin.visibility = if (state == "loading") View.VISIBLE else View.GONE
+            retry.visibility = if (state == "error") View.VISIBLE else View.GONE
+            qrMsg.text = msg
+            waiting.visibility = if (state == "qr" && tipListener != null) View.VISIBLE else View.INVISIBLE
+            walletBtn.alpha = if (state == "qr") 1f else 0.5f
+            if (state != "qr") { tipInvoice = ""; code.text = "—" }
+        }
+
+        fun drawChips() {
+            for (i in 0..3) {
+                val on = tipPick == i
+                chips[i].background = pressable(
+                    roundRect(if (on) androidx.core.graphics.ColorUtils.blendARGB(Hue.PANEL, Hue.SKY, 0.11f) else Hue.PANEL, if (on) Hue.SKY else Hue.LINE),
+                    tint = Hue.SKY)
+                if (i < 3) {
+                    val usd = TIP_USD[i].toDouble()
+                    val sats = tipPrice?.let { tipSatsFor(usd) } ?: TIP_SATS_OFFLINE[i]
+                    chipMain[i].text = if (tipPrice != null) tipUsd(usd) else tipSats(sats)
+                    chipSub[i].text = if (tipPrice != null) tipSats(sats) else ""
+                } else {
+                    chipMain[i].text = getString(R.string.tip_other)
+                    chipSub[i].text = getString(R.string.tip_any)
+                }
+            }
+            otherRow.visibility = if (tipPick == 3) View.VISIBLE else View.GONE
+        }
+
+        fun make(usd: Double?, sats: Long) {
+            stopTipListener()
+            val mine = tipTicket
+            setState("loading", getString(R.string.tip_making))
+            io.execute {
+                val result = try {
+                    val inv = TipZap.invoice(sats)
+                    inv to qrBitmap("lightning:${inv.pr}".uppercase(), 600)
+                } catch (e: Exception) {
+                    Diag.log("shell", "tip: invoice failed: ${e.message}")
+                    null
+                }
+                runOnUiThread {
+                    if (mine != tipTicket || screen != "lntip") return@runOnUiThread
+                    if (result == null) { setState("error", getString(R.string.tip_error)); return@runOnUiThread }
+                    val (inv, bmp) = result
+                    tipInvoice = inv.pr
+                    qrImg.setImageBitmap(bmp)
+                    code.text = inv.pr
+                    inv.watch?.let { w ->
+                        tipListener = TipZap.Listener(w, log = { Diag.log("shell", it) }) {
+                            runOnUiThread { if (mine == tipTicket && screen == "lntip") showTipThanks(usd, sats) }
+                        }.start()
+                    }
+                    setState("qr")
+                }
+            }
+        }
+
+        fun choose(i: Int) {
+            tipPick = i
+            drawChips()
+            if (i == 3) {
+                stopTipListener()
+                setState("empty", getString(R.string.tip_type_amount))
+                otherInput.requestFocus()
+                (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)?.showSoftInput(otherInput, 0)
+                return
+            }
+            val usd = TIP_USD[i].toDouble()
+            make(if (tipPrice != null) usd else null, if (tipPrice != null) tipSatsFor(usd) else TIP_SATS_OFFLINE[i])
+        }
+
+        fun makeOther() {
+            val v = otherInput.text.toString().replace(',', '.').toDoubleOrNull()?.let { Math.round(it * 100) / 100.0 } ?: return
+            if (v <= 0) return
+            (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)?.hideSoftInputFromWindow(otherInput.windowToken, 0)
+            if (tipPrice != null) make(v, tipSatsFor(v)) else make(null, Math.round(v))
+        }
+
+        otherInput.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+        otherInput.setOnEditorActionListener { _, _, _ -> makeOther(); true }
+        otherRow.addView(pill(getString(R.string.tip_create), Hue.TEXT, 0, Hue.LINE) { makeOther() }.also {
+            it.layoutParams = LinearLayout.LayoutParams(WC, WC).also { l -> l.marginStart = dp(8) }
+            it.setPadding(dp(14), dp(12), dp(14), dp(12))
+        })
+        chips.forEachIndexed { i, c -> c.setOnClickListener { choose(i) } }
+        retry.setOnClickListener { choose(tipPick) }
+
+        if (tipPick == 3) tipPick = 0
+        drawChips()
+        setState("loading", getString(R.string.tip_making))
+        val mine = tipTicket
+        io.execute {
+            if (tipPrice == null) tipPrice = TipZap.btcUsd()
+            runOnUiThread { if (mine == tipTicket && screen == "lntip") choose(tipPick) }
+        }
+    }
+
+    /** The tip landed: a check that draws itself, a few hearts, and Done. */
+    private fun showTipThanks(usd: Double?, sats: Long) {
+        clearScreen()
+        screen = "lntip_thanks"
+        val back = { if (lnFromAbout) showAbout() else afterSession() }
+        swipeNav(back = back, forward = null)
+        val frame = FrameLayout(this).apply { layoutParams = FrameLayout.LayoutParams(MP, MP) }
+        val col = column(scroll = false)
+        val check = TipCheckView(this, Hue.BERRY).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(76), dp(76)).also { it.gravity = Gravity.CENTER_HORIZONTAL }
+        }
+        col.addView(check)
+        col.addView(heading(
+            getString(R.string.tip_thanks_title),
+            if (usd != null) getString(R.string.tip_thanks_got, tipUsd(usd), tipSats(sats)) else getString(R.string.tip_thanks_got_sats, tipSats(sats)),
+            center = true,
+        ).also { (it.layoutParams as LinearLayout.LayoutParams).topMargin = dp(14) })
+        col.addView(body(getString(R.string.tip_thanks_body), maxW = 300))
+        col.addView(primary(getString(R.string.tip_done)) { back() }.also { (it.layoutParams as LinearLayout.LayoutParams).topMargin = dp(26) })
+        frame.addView(col)
+        root.addView(frame)
+        check.start(animScale)
+        if (animScale > 0f) {
+            val rnd = java.util.Random()
+            repeat(7) {
+                val h = TextView(this).apply {
+                    text = "\u2665\uFE0E"; setTextColor(Hue.BERRY)   // text glyph, not the emoji; textSize = 14f + rnd.nextInt(7); alpha = 0f
+                    layoutParams = FrameLayout.LayoutParams(WC, WC, Gravity.CENTER).also { l ->
+                        l.leftMargin = dp(rnd.nextInt(160) - 80); l.topMargin = -dp(40)
+                    }
+                }
+                frame.addView(h)
+                h.animate().setStartDelay((rnd.nextInt(900) * animScale).toLong()).setDuration((2600 * animScale).toLong())
+                    .translationY(-dp(130).toFloat()).alpha(0.5f)
+                    .withEndAction { h.animate().alpha(0f).setDuration((400 * animScale).toLong()).start() }.start()
+            }
         }
     }
 
@@ -8757,5 +9049,47 @@ private class CritterSilhouetteView(ctx: Context, private val kind: String) : Cr
         if (loll > 0.5f)
             c.drawRoundRect(hx - 2.4f, hy + 10.4f, hx + 2.4f, hy + 10.4f + loll, 2.4f, 2.4f, tongue)
         c.restore()
+    }
+}
+
+/** A circle that draws itself, then a check inside it: the tip's thank-you. */
+private class TipCheckView(c: Context, tint: Int) : View(c) {
+    private var t = 0f
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; color = tint }
+
+    fun start(scale: Float) {
+        if (scale <= 0f) { t = 1f; invalidate(); return }
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = (900 * scale).toLong()
+            addUpdateListener { t = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    private val oval = RectF()
+    private val tickPath = Path()
+    private val part = Path()
+    private val measure = PathMeasure()
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        val s = w / 52f
+        oval.set(2 * s, 2 * s, 50 * s, 50 * s)
+        tickPath.reset()
+        tickPath.moveTo(15 * s, 27 * s); tickPath.lineTo(22 * s, 34 * s); tickPath.lineTo(37 * s, 18 * s)
+        measure.setPath(tickPath, false)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val s = width / 52f
+        paint.strokeWidth = 2.5f * s
+        val ring = (t / 0.6f).coerceAtMost(1f)
+        canvas.drawArc(oval, -90f, 360f * ring, false, paint)
+        val tick = ((t - 0.5f) / 0.5f).coerceIn(0f, 1f)
+        if (tick > 0f) {
+            paint.strokeWidth = 3.5f * s
+            part.reset()
+            measure.getSegment(0f, measure.length * tick, part, true)
+            canvas.drawPath(part, paint)
+        }
     }
 }

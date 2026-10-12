@@ -196,15 +196,36 @@
     <string name="about_email_chooser">Correo de soporte de Tawny</string>
 
     <!-- ============================ propina Lightning =========== -->
-    <string name="tip_title">Propina Lightning</string>
     <string name="tip_copy_address">Copiar dirección</string>
     <string name="tip_copied">Copiado: <xliff:g id="address">%1$s</xliff:g></string>
-    <string name="tip_open_strike">Abrir strike.me en el navegador</string>
     <string name="tip_body">Dar propina no desbloquea nada: sin insignias, sin funciones, nada. Va para el relé que te deja ver desde fuera de la casa.</string>
     <string name="tip_open_wallet">Abrir en la billetera</string>
     <string name="tip_wallet_body">Abre tu billetera Lightning. Sin cuenta, y los sats van directo a Tawny.</string>
     <string name="tip_no_wallet_body">No hay billetera Lightning en este teléfono. Copia la dirección en una, o escanea esto desde un teléfono que tenga una.</string>
     <string name="tip_no_wallet_open_failed">No se pudo abrir una billetera; se copió la dirección</string>
+    <!-- Propina en Bitcoin, flujo completo (GitHub/F-Droid; TipZap.kt) -->
+    <string name="tip_full_title">Propina en Bitcoin</string>
+    <string name="tip_full_sub">Por Lightning, con cualquier billetera. Tawny sigue siendo gratis igual.</string>
+    <string name="tip_other">Otro</string>
+    <string name="tip_any">el que quieras</string>
+    <string name="tip_amount_hint">Monto</string>
+    <string name="tip_create">Crear código</string>
+    <string name="tip_type_amount">Escribe un monto y toca “Crear código”.</string>
+    <string name="tip_making">Creando tu código…</string>
+    <string name="tip_error">No se pudo conectar con el servicio de propinas.</string>
+    <string name="tip_retry">Intentar de nuevo</string>
+    <string name="tip_scan">Escanéalo con cualquier billetera de Bitcoin, o abre una en este teléfono</string>
+    <string name="tip_waiting">Esperando el pago…</string>
+    <string name="tip_pay_strike">Pagar en strike.me</string>
+    <string name="tip_copy_invoice">Copiar factura</string>
+    <string name="tip_invoice_copied">Factura copiada</string>
+    <string name="tip_not_now">Ahora no</string>
+    <string name="tip_sats"><xliff:g id="sats">%1$s</xliff:g> sats</string>
+    <string name="tip_thanks_title">¡Gracias!</string>
+    <string name="tip_thanks_got">Llegó tu propina de <xliff:g id="usd">%1$s</xliff:g> · <xliff:g id="sats">%2$s</xliff:g></string>
+    <string name="tip_thanks_got_sats">Llegó tu propina · <xliff:g id="sats">%1$s</xliff:g></string>
+    <string name="tip_thanks_body">Haces Tawny mejor para todos.</string>
+    <string name="tip_done">Listo</string>
 
     <!-- ============================== varios / enlaces ========== -->
     <string name="no_browser_copied">No hay navegador para abrir <xliff:g id="url">%1$s</xliff:g>; se copió</string>
@@ -401,12 +422,7 @@
     <string name="whatsnew_eyebrow">Actualizado a v%1$s</string>
     <string name="whatsnew_title">Tawny ahora es mejor</string>
     <string-array name="whatsnew_notes">
-        <item>Quién está: ponte un nombre y toca el contador de espectadores para ver quién está mirando</item>
-        <item>Avisar al mirar: cuando alguien empieza a mirar, suena en el Monitor y en los teléfonos que ya están mirando (desactivado hasta que el Monitor lo active)</item>
-        <item>Una mascota sin nombre aparece como «tu mascota» en tu idioma, aunque el Monitor use otro</item>
-        <item>En horizontal, los botones de arriba ya no quedan debajo de la barra de navegación</item>
-        <item>Este panel ahora aparece tras cada actualización, incluso en un teléfono sin configurar</item>
-        <item>Configurar o vincular una cámara ya no falla en teléfonos con un Android System WebView antiguo</item>
+        <item>Propina en Bitcoin tiene una pantalla más limpia, igual al resto de Tawny: Abrir en la billetera primero y, en un teléfono sin billetera, un código para escanear desde otro que la tenga y un botón para pagar en strike.me</item>
     </string-array>
     <string name="whatsnew_changelog">Ver el registro de cambios</string>
     <string name="whatsnew_thanks">Gracias por apoyar Tawny. Sigue siendo gratis para todos gracias a personas como tú.</string>

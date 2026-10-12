@@ -160,6 +160,8 @@ dependencies {
     // stranger's QR code is judged by can be tested on a plain JVM — no
     // emulator, no Robolectric, and it runs in a second. `./gradlew test`.
     testImplementation("junit:junit:4.13.2")
+    // TipZapTest parses relay events; android.jar's org.json is only a stub on the JVM.
+    testImplementation("org.json:json:20240303")
 }
 
 // The native shell serves the web app from the APK, so there is no address to
