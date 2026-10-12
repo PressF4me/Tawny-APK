@@ -2,6 +2,20 @@
 
 Newest first. Linux AppImage and Flatpak.
 
+## 0.1.10
+
+Changes since 0.1.9. Same web client as Tawny for Android 1.0.3 (build 46).
+
+**Changed**
+- Tip in Bitcoin opens a sheet instead of the strike.me page: pick $2, $5,
+  $10 or type your own amount, and Tawny asks the tip address for an invoice
+  of exactly that. Scan its QR code with any wallet on your phone, copy it, or
+  pay on strike.me instead. When the payment lands, the sheet turns into a
+  thank-you. Tawny hears about it from the signed receipt the tip service
+  publishes on public Nostr relays (it checks the signature and the invoice),
+  and never holds a key or a satoshi. Nothing is contacted until you open the
+  sheet.
+
 ## 0.1.9
 
 Changes since 0.1.8. Same web client as Tawny for Android 1.0.2 (build 45).
