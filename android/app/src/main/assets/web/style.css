@@ -2590,6 +2590,8 @@ body:has(#live:not([hidden])) #theme-toggle {
 /* ========================= TIP IN BITCOIN =========================
    tip.js. Calm on purpose: the app's own sheet, sky for Lightning (as on the
    footer button), one berry check when the tip lands. */
+/* above the update board (.whatsnew, 45), which has its own Tip button */
+#tip.sheet { z-index: 46; }
 .tip-card { gap: 12px; }
 .tip-head { display: flex; align-items: center; gap: 12px; }
 .tip-head h2 { margin: 0 0 2px; }
