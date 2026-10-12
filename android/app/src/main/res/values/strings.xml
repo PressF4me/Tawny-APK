@@ -195,15 +195,36 @@
     <string name="about_email_chooser">Tawny support email</string>
 
     <!-- ============================ lightning tip =================== -->
-    <string name="tip_title">Lightning tip</string>
     <string name="tip_copy_address">Copy address</string>
     <string name="tip_copied">Copied <xliff:g id="address">%1$s</xliff:g></string>
-    <string name="tip_open_strike">Open strike.me in a browser</string>
     <string name="tip_body">Tipping unlocks nothing — no badge, no features, nothing. It goes towards the relay that lets you watch from outside the house.</string>
     <string name="tip_open_wallet">Open in wallet</string>
     <string name="tip_wallet_body">Opens your Lightning wallet. No account, and the sats go straight to Tawny.</string>
     <string name="tip_no_wallet_body">No Lightning wallet on this phone. Copy the address into one, or scan this from a phone that has one.</string>
     <string name="tip_no_wallet_open_failed">Couldn’t open a wallet — address copied</string>
+    <!-- Tip in Bitcoin, full flow (GitHub/F-Droid builds; TipZap.kt) -->
+    <string name="tip_full_title">Tip in Bitcoin</string>
+    <string name="tip_full_sub">Over Lightning, with any wallet. Tawny stays free either way.</string>
+    <string name="tip_other">Other</string>
+    <string name="tip_any">any amount</string>
+    <string name="tip_amount_hint">Amount</string>
+    <string name="tip_create">Create code</string>
+    <string name="tip_type_amount">Type an amount, then “Create code”.</string>
+    <string name="tip_making">Creating your code…</string>
+    <string name="tip_error">Couldn’t reach the tip service.</string>
+    <string name="tip_retry">Try again</string>
+    <string name="tip_scan">Scan with any Bitcoin wallet, or open one on this phone</string>
+    <string name="tip_waiting">Waiting for payment…</string>
+    <string name="tip_pay_strike">Pay on strike.me</string>
+    <string name="tip_copy_invoice">Copy invoice</string>
+    <string name="tip_invoice_copied">Invoice copied</string>
+    <string name="tip_not_now">Not now</string>
+    <string name="tip_sats"><xliff:g id="sats">%1$s</xliff:g> sats</string>
+    <string name="tip_thanks_title">Thank you!</string>
+    <string name="tip_thanks_got">Your <xliff:g id="usd">%1$s</xliff:g> tip arrived · <xliff:g id="sats">%2$s</xliff:g></string>
+    <string name="tip_thanks_got_sats">Your tip arrived · <xliff:g id="sats">%1$s</xliff:g></string>
+    <string name="tip_thanks_body">You’re making Tawny better for everyone.</string>
+    <string name="tip_done">Done</string>
 
     <!-- ============================== misc / links ================= -->
     <string name="no_browser_copied">No browser to open <xliff:g id="url">%1$s</xliff:g> — copied instead</string>
@@ -398,8 +419,8 @@
     <string name="whatsnew_eyebrow">Updated to v%1$s</string>
     <string name="whatsnew_title">Tawny just got better</string>
     <string-array name="whatsnew_notes">
-        <item>With Announce viewers on, everyone already watching now hears the sound when someone new joins, not just the Monitor</item>
-        <item>The first-call tour shows where to tap to see who\'s here</item>
+        <item>Tip in Bitcoin, redone: pick $2, $5, $10 or your own amount, then scan the code or open your wallet</item>
+        <item>When your tip arrives, Tawny says thank you right away</item>
     </string-array>
     <string name="whatsnew_changelog">Read the full changelog</string>
     <string name="whatsnew_thanks">Thank you for supporting Tawny. It stays free for everyone because of people like you.</string>

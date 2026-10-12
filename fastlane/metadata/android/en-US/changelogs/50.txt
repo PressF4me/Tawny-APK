@@ -1,0 +1,3 @@
+• Tip in Bitcoin, redone: pick $2, $5, $10 or your own amount, then scan the code or open your wallet.
+• When your tip arrives, Tawny says thank you right away. It hears about it from the signed receipt the tip service posts on public Nostr relays.
+• The tip screen only contacts strike.me, Coinbase (for the price) and the relays once you open it.

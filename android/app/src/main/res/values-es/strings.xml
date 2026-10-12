@@ -196,15 +196,36 @@
     <string name="about_email_chooser">Correo de soporte de Tawny</string>
 
     <!-- ============================ propina Lightning =========== -->
-    <string name="tip_title">Propina Lightning</string>
     <string name="tip_copy_address">Copiar dirección</string>
     <string name="tip_copied">Copiado: <xliff:g id="address">%1$s</xliff:g></string>
-    <string name="tip_open_strike">Abrir strike.me en el navegador</string>
     <string name="tip_body">Dar propina no desbloquea nada: sin insignias, sin funciones, nada. Va para el relé que te deja ver desde fuera de la casa.</string>
     <string name="tip_open_wallet">Abrir en la billetera</string>
     <string name="tip_wallet_body">Abre tu billetera Lightning. Sin cuenta, y los sats van directo a Tawny.</string>
     <string name="tip_no_wallet_body">No hay billetera Lightning en este teléfono. Copia la dirección en una, o escanea esto desde un teléfono que tenga una.</string>
     <string name="tip_no_wallet_open_failed">No se pudo abrir una billetera; se copió la dirección</string>
+    <!-- Propina en Bitcoin, flujo completo (GitHub/F-Droid; TipZap.kt) -->
+    <string name="tip_full_title">Propina en Bitcoin</string>
+    <string name="tip_full_sub">Por Lightning, con cualquier billetera. Tawny sigue siendo gratis igual.</string>
+    <string name="tip_other">Otro</string>
+    <string name="tip_any">el que quieras</string>
+    <string name="tip_amount_hint">Monto</string>
+    <string name="tip_create">Crear código</string>
+    <string name="tip_type_amount">Escribe un monto y toca “Crear código”.</string>
+    <string name="tip_making">Creando tu código…</string>
+    <string name="tip_error">No se pudo conectar con el servicio de propinas.</string>
+    <string name="tip_retry">Intentar de nuevo</string>
+    <string name="tip_scan">Escanéalo con cualquier billetera de Bitcoin, o abre una en este teléfono</string>
+    <string name="tip_waiting">Esperando el pago…</string>
+    <string name="tip_pay_strike">Pagar en strike.me</string>
+    <string name="tip_copy_invoice">Copiar factura</string>
+    <string name="tip_invoice_copied">Factura copiada</string>
+    <string name="tip_not_now">Ahora no</string>
+    <string name="tip_sats"><xliff:g id="sats">%1$s</xliff:g> sats</string>
+    <string name="tip_thanks_title">¡Gracias!</string>
+    <string name="tip_thanks_got">Llegó tu propina de <xliff:g id="usd">%1$s</xliff:g> · <xliff:g id="sats">%2$s</xliff:g></string>
+    <string name="tip_thanks_got_sats">Llegó tu propina · <xliff:g id="sats">%1$s</xliff:g></string>
+    <string name="tip_thanks_body">Haces Tawny mejor para todos.</string>
+    <string name="tip_done">Listo</string>
 
     <!-- ============================== varios / enlaces ========== -->
     <string name="no_browser_copied">No hay navegador para abrir <xliff:g id="url">%1$s</xliff:g>; se copió</string>
@@ -399,8 +420,8 @@
     <string name="whatsnew_eyebrow">Actualizado a v%1$s</string>
     <string name="whatsnew_title">Tawny ahora es mejor</string>
     <string-array name="whatsnew_notes">
-        <item>Con Avisar al mirar activado, todos los que ya están mirando oyen el sonido cuando alguien nuevo se une, no solo el Monitor</item>
-        <item>El recorrido de la primera llamada muestra dónde tocar para ver quién está</item>
+        <item>Propina en Bitcoin, renovada: elige $2, $5, $10 o tu propio monto, y escanea el código o abre tu billetera</item>
+        <item>Cuando llega tu propina, Tawny te da las gracias al instante</item>
     </string-array>
     <string name="whatsnew_changelog">Ver el registro de cambios</string>
     <string name="whatsnew_thanks">Gracias por apoyar Tawny. Sigue siendo gratis para todos gracias a personas como tú.</string>

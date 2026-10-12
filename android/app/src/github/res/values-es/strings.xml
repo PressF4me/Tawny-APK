@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="whatsnew_notes">
+        <item>Propina en Bitcoin, renovada: elige $2, $5, $10 o tu propio monto, y escanea el código o abre tu billetera</item>
+        <item>Cuando llega tu propina, Tawny te da las gracias al instante</item>
+    </string-array>
+</resources>
