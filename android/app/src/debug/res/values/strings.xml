@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Debug builds install as com.tawny.monitor.debug, beside the Play
+         app on the same phone; the name keeps the two icons apart. -->
+    <string name="app_name" translatable="false">Tawny Test</string>
+</resources>

@@ -107,6 +107,7 @@
     <!-- ========================= support / meta rows =================== -->
     <string name="meta_support">Support Tawny</string>
     <string name="meta_tip_bitcoin">Tip in Bitcoin</string>
+    <string name="support_row_sub">Buy a coffee, or tip in Bitcoin</string>
     <string name="meta_about">About Tawny</string>
     <string name="meta_email_us">Email us</string>
 

@@ -108,6 +108,7 @@
     <!-- ========================= apoyo / filas meta =============== -->
     <string name="meta_support">Apoya a Tawny</string>
     <string name="meta_tip_bitcoin">Dar propina en Bitcoin</string>
+    <string name="support_row_sub">Invita un café o da una propina en Bitcoin</string>
     <string name="meta_about">Acerca de Tawny</string>
     <string name="meta_email_us">Escríbenos</string>
 
