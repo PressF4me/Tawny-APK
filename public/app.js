@@ -139,9 +139,7 @@ const expiredMessage = () => TawnyT.t('w_msg_expired');
 // page's own origin, or one of the two rendezvous addresses it was configured
 // with. Anything else is dropped rather than obeyed, and this is what the user
 // is told, because the pairing will otherwise fail with no explanation at all.
-const RELAY_MISMATCH_MESSAGE =
-  'That link names a server this app is not set up for, so it was ignored. If '
-  + 'the phones cannot find each other, set the same server address on both.';
+const relayMismatchMessage = () => TawnyT.t('w_pair_relay_mismatch');
 
 // Candidates buffered before setRemoteDescription. A real negotiation sends a
 // couple of dozen; anything past this is a peer filling memory.
@@ -729,13 +727,13 @@ function renderChannels() {
     const cue = document.createElement('span');
     cue.className = 'ch-cue';
     const remembered = roleFor(ch);
-    cue.textContent = remembered === 'station' ? 'Resume as Monitor'
-      : remembered === 'viewer' ? 'Resume as Viewer'
-      : 'Choose Monitor or Viewer';
+    cue.textContent = TawnyT.t(remembered === 'station' ? 'w_ch_cue_monitor'
+      : remembered === 'viewer' ? 'w_ch_cue_viewer'
+      : 'w_ch_cue_choose');
 
     const fp = document.createElement('span');
     fp.className = 'ch-fp';
-    fp.textContent = `key ${ch.key.slice(0, 6)}…`;
+    fp.textContent = TawnyT.t('w_ch_key', ch.key.slice(0, 6));
 
     const chev = document.createElement('span');
     chev.className = 'ch-chev';
@@ -748,8 +746,8 @@ function renderChannels() {
     const more = document.createElement('button');
     more.type = 'button';
     more.className = 'ch-more';
-    more.title = `Options for ${ch.name}`;
-    more.setAttribute('aria-label', `Options for ${ch.name}`);
+    more.title = TawnyT.t('w_ch_options', shownName(ch.name));
+    more.setAttribute('aria-label', more.title);
     more.innerHTML = ICON.more;
     more.addEventListener('click', () => openRowMenu(ch));
 
@@ -777,7 +775,7 @@ function deleteChannel(ch) {
     localStorage.removeItem(`tawny.role.${ch.id}`);
   } catch {}
   renderChannels();
-  toast('Channel deleted');
+  toast(TawnyT.t('w_del_done'));
 }
 
 // The channel row's overflow sheet. One channel at a time; the buttons are
@@ -812,7 +810,7 @@ $('#row-delete').addEventListener('click', () => {
   closeRowMenu();
   if (!ch) return;
   deleting = ch;
-  $('#del-title').textContent = `Delete \u201c${shownName(ch.name)}\u201d?`;
+  $('#del-title').textContent = TawnyT.t('w_del_title', shownName(ch.name));
   openSheet(el.delConfirm);
   $('#del-cancel').focus({ preventScroll: true });
 });
@@ -832,25 +830,23 @@ $('#del-go').addEventListener('click', () => {
 
 function openEditor(ch) {
   S.editing = ch || null;
-  el.editorTitle.textContent = ch ? 'Rename channel' : 'New channel';
+  el.editorTitle.textContent = TawnyT.t(ch ? 'w_editor_rename' : 'w_ch_new');
   el.editorName.value = ch ? ch.name : '';
-  el.editorHint.textContent = ch
-    ? 'The key stays the same, so paired devices keep working.'
-    : 'A fresh key is generated for this channel. Only devices you pair can join it.';
+  el.editorHint.textContent = TawnyT.t(ch ? 'w_editor_hint_rename' : 'w_editor_hint_new');
   openSheet(el.editor);
   el.editorName.focus();
 }
 
 function saveEditor() {
   const name = el.editorName.value.trim();
-  if (!name) return toast('Give this monitor a name.');
+  if (!name) return toast(TawnyT.t('w_editor_need_name'));
   const list = getChannels();
   let fresh = null;
   if (S.editing) {
     const found = list.find((c) => c.id === S.editing.id);
     if (found) found.name = name;
   } else {
-    if (list.length >= 12) return toast('That is as many monitors as Tawny keeps.');
+    if (list.length >= 12) return toast(TawnyT.t('w_editor_too_many'));
     fresh = { id: newId(), name, key: newKey() };
     list.push(fresh);
   }
@@ -918,13 +914,12 @@ function refreshWatchPair() {
     drawQR(url, el.wpQr);
     note(el.wpWarn, '');
   } catch {
-    note(el.wpWarn, 'This address is too long to fit in a pairing code. Use a shorter hostname.');
+    note(el.wpWarn, TawnyT.t('w_pair_too_long'));
   }
   const insecure = url.startsWith('http://') &&
     !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(url);
   if (insecure) {
-    note(el.wpWarn, 'This is a plain http address. The Viewer will load but the ' +
-      'browser will refuse it the microphone. Serve Tawny over https.');
+    note(el.wpWarn, TawnyT.t('w_pair_plain_http'));
   }
   fillRelayHint(el.wpRelay, el.wpRelayAddr);
 }
@@ -957,7 +952,7 @@ async function openWatchPair() {
   // the ticket in the QR has to be the same secret start() then registers as
   // hashT, or the Viewer would present a `t` the relay has never hashed.
   refreshWatchPair();
-  el.wpStatus.textContent = 'Waiting for the Viewer';
+  el.wpStatus.textContent = TawnyT.t('w_wp_waiting');
   show(el.watchPair);
   clearInterval(wpTicker);
   wpTicker = setInterval(tickWatchPair, 1000);
@@ -1027,7 +1022,7 @@ el.wpCopy.addEventListener('click', async () => {
     await navigator.clipboard.writeText(pairLink());
     toast(TawnyT.t('w_toast_link_copied'));
   } catch {
-    toast('Copy failed — select the link text instead.');
+    toast(TawnyT.t('w_copy_failed_link'));
   }
 });
 // The app bar's back affordance and the quiet "Set up later" underneath it
@@ -1049,8 +1044,8 @@ function getProfiles() {
 function baseCandidates() {
   const here = location.origin + location.pathname.replace(/[^/]*$/, '');
   return [
-    { id: 'origin', label: `This address — ${location.host}`, url: here },
-    { id: 'custom', label: 'Another address (domain or tailnet name)…', url: '' }
+    { id: 'origin', label: TawnyT.t('w_pair_this_address', location.host), url: here },
+    { id: 'custom', label: TawnyT.t('w_pair_other_address'), url: '' }
   ];
 }
 
@@ -1301,12 +1296,11 @@ function refreshPair() {
     drawQR(url);
     note(el.pairWarn, '');
   } catch {
-    note(el.pairWarn, 'That address is too long to fit in a pairing code. Use a shorter hostname.');
+    note(el.pairWarn, TawnyT.t('w_pair_too_long'));
   }
   const insecure = url.startsWith('http://') && !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(url);
   if (insecure) {
-    note(el.pairWarn, 'This is a plain http address. The handset will load but browsers ' +
-      'will refuse it the microphone. Use an https address instead.');
+    note(el.pairWarn, TawnyT.t('w_pair_plain_http'));
   }
 }
 
@@ -1322,9 +1316,8 @@ function tickPairSheet() {
     return;
   }
   const s = Math.ceil(pairCodeLeft() / 1000);
-  el.pairExpiry.textContent =
-    `This code works for another ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}. `
-    + 'A fresh one appears here when it runs out.';
+  el.pairExpiry.textContent = TawnyT.t('w_pair_expiry',
+    `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
 }
 
 function openPair() {
@@ -1367,9 +1360,9 @@ async function copyRelay() {
   if (!addr) return;
   try {
     await navigator.clipboard.writeText(addr);
-    toast('Server address copied.');
+    toast(TawnyT.t('w_relay_copied'));
   } catch {
-    toast('Copy failed — select the address instead.');
+    toast(TawnyT.t('w_copy_failed_address'));
   }
 }
 for (const id of ['#wp-relay-copy', '#pair-relay-copy']) {
@@ -1382,7 +1375,7 @@ $('#pair-copy').addEventListener('click', async () => {
     await navigator.clipboard.writeText(pairLink());
     toast(TawnyT.t('w_toast_link_copied'));
   } catch {
-    toast('Copy failed — select the link text instead.');
+    toast(TawnyT.t('w_copy_failed_link'));
   }
 });
 
@@ -1418,7 +1411,7 @@ async function openScanner() {
   const take = (raw) => {
     if (!raw) return false;
     if (adopt(raw)) { S.scanStop(); return true; }
-    el.scanHint.textContent = lastPairError || 'That code is not a Tawny pairing code.';
+    el.scanHint.textContent = lastPairError || TawnyT.t('w_scan_not_tawny');
     return false;
   };
 
@@ -1460,10 +1453,10 @@ async function openScanner() {
 
 // Manual escape hatch — camera denied, or a link someone sent by message.
 function promptPasteLink() {
-  const link = prompt('Paste the pairing link shown on the monitor:');
+  const link = prompt(TawnyT.t('w_paste_prompt'));
   if (link == null) return;
   if (!adopt(link.trim())) {
-    toast(lastPairError || 'That was not a Tawny pairing link.');
+    toast(lastPairError || TawnyT.t('w_paste_bad'));
   }
 }
 
@@ -1578,7 +1571,7 @@ function adopt(raw) {
       ok = (r.protocol === 'https:' || r.protocol === 'wss:') && allowed.includes(r.host);
       if (ok) S.linkRelay = wsBase(r.origin);
     } catch {}
-    if (!ok) lastRelayNote = RELAY_MISMATCH_MESSAGE;
+    if (!ok) lastRelayNote = relayMismatchMessage();
   }
 
   const list = getChannels();
@@ -2800,8 +2793,8 @@ function updatePeerChip() {
   const full = n >= MAX_VIEWERS;
   el.peercount.hidden = n === 0;
   if (el.peercountN) el.peercountN.textContent = String(n);
-  el.peercount.setAttribute('aria-label',
-    `${n} phone${n === 1 ? '' : 's'} watching${full ? ', full' : ''}`);
+  el.peercount.setAttribute('aria-label', TawnyT.t(full ? 'w_aria_watching_full'
+    : n === 1 ? 'w_aria_watching_one' : 'w_aria_watching_many', n));
   el.peercount.classList.toggle('is-busy', full);
 
   // Exactly one phone watching: name it. More than one, or none: no room for a
@@ -3763,7 +3756,7 @@ function updateBatteryUI() {
   el.battchip.classList.toggle('is-charging', charging === true);
   el.battchip.classList.toggle('is-low', charging !== true && level <= 15);
   el.battchip.setAttribute('aria-label',
-    `Monitor battery ${level}%${charging === true ? ', charging' : ''}`);
+    TawnyT.t(charging === true ? 'w_aria_battery_charging' : 'w_aria_battery', level));
   bumpRail();
 }
 
@@ -5381,7 +5374,7 @@ window.tawnyPairCode = function (code, expMs) {
     // Clear the key out of the address bar before anything else can see it.
     history.replaceState(null, '', location.pathname + location.search);
     if (adopt(raw)) landed = true;            // adopt() shows the join screen
-    else note(el.chNote, lastPairError || 'That pairing link was not valid.');
+    else note(el.chNote, lastPairError || TawnyT.t('w_link_bad'));
   }
 
   if (!landed) {
