@@ -108,6 +108,7 @@
     <!-- ========================= apoyo / filas meta =============== -->
     <string name="meta_support">Apoya a Tawny</string>
     <string name="meta_tip_bitcoin">Dar propina en Bitcoin</string>
+    <string name="support_row_sub">Invita un café o da una propina en Bitcoin</string>
     <string name="meta_about">Acerca de Tawny</string>
     <string name="meta_email_us">Escríbenos</string>
 
@@ -420,8 +421,9 @@
     <string name="whatsnew_eyebrow">Actualizado a v%1$s</string>
     <string name="whatsnew_title">Tawny ahora es mejor</string>
     <string-array name="whatsnew_notes">
-        <item>Propina en Bitcoin, renovada: elige $2, $5, $10 o tu propio monto, y escanea el código o abre tu billetera</item>
-        <item>Cuando llega tu propina, Tawny te da las gracias al instante</item>
+        <item>Apoya a Tawny es una pantalla nueva con el gato, la lechucita y el perro: invita un café en Ko-fi o da una propina en Bitcoin: elige $2, $5, $10 o tu propio monto y escanea el código</item>
+        <item>Cuando llega tu propina, los tres lo celebran y Tawny te da las gracias</item>
+        <item>La pantalla en vivo funciona mejor con lectores de pantalla: se anuncian los cambios de conexión, y Quién está y la pantalla atenuada son botones de verdad</item>
     </string-array>
     <string name="whatsnew_changelog">Ver el registro de cambios</string>
     <string name="whatsnew_thanks">Gracias por apoyar Tawny. Sigue siendo gratis para todos gracias a personas como tú.</string>

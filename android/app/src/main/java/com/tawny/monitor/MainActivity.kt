@@ -238,6 +238,9 @@ object Radius {
  * accent. Mirrors public/style.css. Call [load] before building any UI.
  * (Field names are roles, not literal hues — BERRY is bronze in dark mode.)
  */
+/** The heart on Support Tawny: red on every palette, not the accent (brass in the dark). */
+val HEART_RED = 0xFFE0344F.toInt()
+
 object Hue {
     var BG = 0; var PANEL = 0; var RAISE = 0; var LINE = 0
     var TEXT = 0; var DIM = 0; var BERRY = 0; var SKY = 0
@@ -598,7 +601,7 @@ class MainActivity : AppCompatActivity() {
             "diag" -> showDiagnostics()
             "servers" -> showServers()
             "about" -> showAbout()
-            "lntip" -> showLightningTip()
+            "lntip", "support" -> showSupport()
             "tour" -> showTour(tourStep)
             "help" -> showHelp()
             // Only if there is still something to list, else fall through to the
@@ -944,6 +947,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun clearScreen() {
         stopTipListener()
+        closeSupportWeb()
         scene?.stop(); scene = null
         playScene?.stop(); playScene = null
         scannerStop?.invoke(); scannerStop = null
@@ -1574,6 +1578,72 @@ class MainActivity : AppCompatActivity() {
      * animations"), which also leaves alpha at 1 so nothing can strand
      * invisible.
      */
+    /**
+     * The one way in to Support Tawny, as a button of its own rather than a row
+     * in the settings list, where it read like "Rate Tawny" and went unseen.
+     * It stands out by inverting the page: an ink card with paper-coloured
+     * text (TEXT on BG flipped — dark on the light palette, light on the dark
+     * one, ~11:1 either way), so it needs no accent fill. The heart is always
+     * red, whatever the palette's accent, and beats softly every few seconds;
+     * a press gives it the full double beat. Compact: one line of title, one
+     * of subtitle.
+     */
+    private fun supportButton(onClick: () -> Unit): LinearLayout {
+        val fill = Hue.TEXT
+        val ink = Hue.BG
+        val soft = androidx.core.graphics.ColorUtils.setAlphaComponent(ink, 0x1F)
+        val heart = IconView(this, "heart", behind = fill, tint = HEART_RED).apply {
+            layoutParams = FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER)
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = pressable(roundRect(fill, fill, Radius.CARD), Radius.CARD,
+                androidx.core.graphics.ColorUtils.blendARGB(fill, ink, 0.12f))
+            setPadding(dp(10), dp(9), dp(14), dp(9))
+            minimumHeight = dp(58)
+            layoutParams = lp(topMargin = 28)
+            contentDescription = getString(R.string.meta_support)
+            addView(FrameLayout(this@MainActivity).apply {
+                background = roundRect(soft, soft, 18)
+                layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
+                addView(heart)
+            })
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(12) }
+                addView(TextView(this@MainActivity).apply {
+                    text = getString(R.string.meta_support)
+                    setTextColor(ink); textSize = 15.5f; typeface = uiFontSemi; maxLines = 1
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = getString(R.string.support_row_sub)
+                    setTextColor(androidx.core.graphics.ColorUtils.setAlphaComponent(ink, 0xD9))
+                    textSize = 12.5f; typeface = uiFont; maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = "›"; setTextColor(ink); textSize = 20f; typeface = uiFontSemi
+                setPadding(dp(8), 0, 0, dp(2))
+            })
+            tapFeedback {
+                heart.beat(strong = true, scale = animScale)
+                postDelayed(onClick, (180 * animScale).toLong().coerceAtMost(220))
+            }
+            // A soft beat every few seconds while it is on screen: alive, not a
+            // flashing badge. Off with Animations off.
+            val idle = object : Runnable {
+                override fun run() {
+                    if (!isAttachedToWindow) return
+                    heart.beat(strong = false, scale = animScale)
+                    postDelayed(this, 2800)
+                }
+            }
+            if (animScale > 0f) postDelayed(idle, 1200)
+        }
+    }
+
     private fun metaPanel(vararg rows: View) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = roundRect(Hue.PANEL, Hue.LINE, Radius.CARD)
@@ -3096,14 +3166,9 @@ class MainActivity : AppCompatActivity() {
         // or pairing: an ask inside the setup funnel reads as a paywall, which
         // is the exact complaint the whole category earns (docs/DIRECTION.md,
         // part 2). Nothing here unlocks anything — see [showAbout].
-        col.addView(metaPanel(
-            metaRow("heart", getString(R.string.meta_support), Hue.BERRY, "↗", reveal = "ko-fi.com") {
-                openExternal(SUPPORT_URL)
-            },
-            metaRow("bolt", getString(R.string.meta_tip_bitcoin), Hue.SKY, "›") {
-                lnFromAbout = false; showLightningTip()
-            },
-        ))
+        // One way in to the Support sheet (public/tip.js): Ko-fi and Bitcoin
+        // live inside it, the same on every platform.
+        col.addView(supportButton { lnFromAbout = false; showSupport() })
         // Settings and help, apart from the asks above: a change of subject.
         col.addView(metaPanel(
             themeRow { showSessionsHome() },
@@ -3242,13 +3307,8 @@ class MainActivity : AppCompatActivity() {
         col.addView(aboutBody(
             getString(R.string.about_keeping_body)
         ))
+        col.addView(supportButton { lnFromAbout = true; showSupport() })
         col.addView(metaPanel(
-            metaRow("heart", getString(R.string.meta_support), Hue.BERRY, "↗", sub = "ko-fi.com/tawnyone") {
-                openExternal(SUPPORT_URL)
-            },
-            metaRow("bolt", getString(R.string.meta_tip_bitcoin), Hue.SKY, "›", sub = LN_ADDRESS) {
-                lnFromAbout = true; showLightningTip()
-            },
             metaRow("mail", getString(R.string.meta_email_us), Hue.TEXT, "↗", sub = SUPPORT_EMAIL) {
                 try {
                     startActivity(
@@ -3409,6 +3469,149 @@ class MainActivity : AppCompatActivity() {
         tipTicket++
         tipListener?.stop()
         tipListener = null
+    }
+
+    // ----------------------------------------------------- Support Tawny (web)
+
+    /**
+     * "Support Tawny": the same sheet Desktop, Docker and the browser show
+     * (public/tip.js — the trio, Buy a coffee, Tip in Bitcoin, the QR with the
+     * owlet on it, the thank-you), drawn in a WebView of its own over the
+     * bundled page, so there is one design on every platform.
+     *
+     * The page's CSP stays as narrow as the live view's: it never talks to
+     * Strike, the price API or the relays itself. On the GitHub/FOSS-style
+     * builds (FULL_TIP_FLOW) it asks [SupportBridge], which runs TipZap here.
+     * The Play build passes tip:"handoff" — the address as a QR, Open wallet
+     * and strike.me, no amounts and no invoice (Play Payments policy).
+     */
+    private var supportWeb: WebView? = null
+
+    private fun closeSupportWeb() {
+        supportWeb?.let {
+            (it.parent as? ViewGroup)?.removeView(it)
+            it.loadUrl("about:blank")
+            it.destroy()
+        }
+        supportWeb = null
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun showSupport() {
+        clearScreen()
+        screen = "support"
+        val back = { stopTipListener(); if (lnFromAbout) showAbout() else afterSession() }
+        swipeNav(back = back, forward = null)
+        versionView?.visibility = View.GONE
+
+        val port = ensureAssetServer()
+        val host = "127.0.0.1"
+        val view = WebView(this)
+        supportWeb = view
+        view.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            mediaPlaybackRequiresUserGesture = false   // the thank-you bell
+            safeBrowsingEnabled = !strictPrivacy()
+        }
+        view.setBackgroundColor(Hue.BG)
+        // Same invariants as the live view's bridge (see showWeb): bundled page,
+        // loopback only, no iframes, default-src 'none'. Its own name, so the
+        // live view's Bridge never sees Support's calls or the other way round.
+        view.addJavascriptInterface(SupportBridge(back), "TawnySupport")
+        view.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                Log.d("Tawny", "support: ${m.message()} @${m.lineNumber()}")
+                return true
+            }
+        }
+        view.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(v: WebView, req: WebResourceRequest): Boolean {
+                val target = req.url
+                if (target.host == host && target.scheme == "http") return false
+                when (target.scheme) {
+                    // Ko-fi, strike.me, the changelog: the browser.
+                    "http", "https" -> try {
+                        startActivity(Intent(Intent.ACTION_VIEW, target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    } catch (e: Exception) { toast(getString(R.string.err_no_app_for_link)) }
+                    // Open wallet: whichever app claims lightning:. None → the
+                    // page drops the button and says to scan or use strike.me.
+                    "lightning" -> try {
+                        startActivity(Intent(Intent.ACTION_VIEW, target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    } catch (e: android.content.ActivityNotFoundException) {
+                        Diag.log("shell", "support: no wallet for lightning:")
+                        v.evaluateJavascript("window.tawnyNoWallet && window.tawnyNoWallet()", null)
+                    } catch (e: Exception) { }
+                    // Anything else (intent:, file:, …) stays put.
+                }
+                return true
+            }
+
+            override fun onPageFinished(v: WebView, u: String) {
+                v.evaluateJavascript(
+                    "window.tawnySupport && window.tawnySupport({" +
+                        "theme:${jsStr(themeMode())},systemTheme:${jsStr(systemTheme())}," +
+                        "motion:${jsStr(if (stillMode()) "off" else "on")}," +
+                        "lang:${jsStr(currentLang())}," +
+                        "tip:${jsStr(if (FULL_TIP_FLOW) "native" else "handoff")}})",
+                    null
+                )
+            }
+        }
+        root.addView(view, FrameLayout.LayoutParams(MP, MP))
+        view.loadUrl("http://$host:$port/#native")
+    }
+
+    /** What the Support page may ask of the app. Called on a binder thread. */
+    inner class SupportBridge(private val back: () -> Unit) {
+        private fun js(code: String) = runOnUiThread { supportWeb?.evaluateJavascript(code, null) }
+
+        /** The sheet was closed (Not now, Done, Escape, the scrim). */
+        @JavascriptInterface
+        fun close() = runOnUiThread { back() }
+
+        @JavascriptInterface
+        fun copy(text: String) = runOnUiThread { copyToClipboard("Tawny", text.take(2000)) }
+
+        /** Dollars per bitcoin, answered through window.tawnyTipPrice(id, usd|null). */
+        @JavascriptInterface
+        fun price(id: Int) {
+            if (!FULL_TIP_FLOW) return
+            Thread {
+                val p = TipZap.btcUsd()
+                js("window.tawnyTipPrice && window.tawnyTipPrice($id,${p ?: "null"})")
+            }.apply { isDaemon = true }.start()
+        }
+
+        /**
+         * An invoice for [sats], answered through window.tawnyTipInvoice(id, pr, err);
+         * when it is a zap, the receipt is awaited here and reported through
+         * window.tawnyTipPaid(id). A newer request or [stop] drops the old one.
+         */
+        @JavascriptInterface
+        fun invoice(id: Int, sats: Int) {
+            if (!FULL_TIP_FLOW || sats <= 0) return
+            runOnUiThread { stopTipListener() }
+            Thread {
+                try {
+                    val inv = TipZap.invoice(sats.toLong())
+                    js("window.tawnyTipInvoice && window.tawnyTipInvoice($id,${jsStr(inv.pr)},null)")
+                    inv.watch?.let { w ->
+                        runOnUiThread {
+                            tipListener = TipZap.Listener(w, { Diag.log("shell", it) }) {
+                                js("window.tawnyTipPaid && window.tawnyTipPaid($id)")
+                            }.start()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Diag.log("shell", "support: invoice failed: ${e.message}")
+                    js("window.tawnyTipInvoice && window.tawnyTipInvoice($id,null,${jsStr(e.message ?: "error")})")
+                }
+            }.apply { isDaemon = true }.start()
+        }
+
+        @JavascriptInterface
+        fun stop() = runOnUiThread { stopTipListener() }
     }
 
     private fun tipSats(n: Long) = getString(R.string.tip_sats, java.text.NumberFormat.getIntegerInstance().format(n))
@@ -4242,15 +4445,7 @@ class MainActivity : AppCompatActivity() {
             setLineSpacing(0f, 1.05f)
             setPadding(dp(4), dp(6), dp(4), 0)
         })
-        card.addView(metaPanel(
-            metaRow("heart", getString(R.string.meta_support), Hue.BERRY, "↗", sub = "ko-fi.com/tawnyone") {
-                openExternal(SUPPORT_URL)
-            },
-            metaRow("bolt", getString(R.string.meta_tip_bitcoin), Hue.SKY, "›", sub = LN_ADDRESS) {
-                whatsNewDialog?.dismiss(); lnFromAbout = false; showLightningTip()
-            },
-        ).apply {
-            background = roundRect(Hue.BG, Hue.LINE, Radius.CARD)
+        card.addView(supportButton { whatsNewDialog?.dismiss(); lnFromAbout = false; showSupport() }.apply {
             layoutParams = LinearLayout.LayoutParams(MP, WC).also { it.topMargin = dp(14) }
         })
         card.addView(primary(getString(R.string.whatsnew_done)) { whatsNewDialog?.dismiss() }.apply {
