@@ -876,7 +876,9 @@ function saveEditor() {
 el.chAdd.addEventListener('click', () => openEditor(null));
 $('#editor-save').addEventListener('click', saveEditor);
 $('#editor-cancel').addEventListener('click', () => { closeSheet(el.editor); S.editing = null; });
-el.editorName.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveEditor(); });
+// preventDefault: saving hands focus back to the + button while Enter is still
+// down, and the browser would then press that button with the same key.
+el.editorName.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveEditor(); } });
 
 /**
  * `force` skips the remembered role — the "Switch role" row-menu action uses
@@ -2995,7 +2997,7 @@ $('#myname-skip')?.addEventListener('click', () => {
   try { localStorage.setItem('tawny.nameAsked', '1'); } catch {}
   closeSheet(el.myname);
 });
-el.mynameInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveMyName(); });
+el.mynameInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveMyName(); } });
 
 // ------------------------------------------------------------- dispatch
 
