@@ -367,6 +367,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
      soft   → --raise       accent (the only one) → --berry
    Radii: 8 buttons · 14 plates and cards · full for pills and orbs. */
 :root {
+  --sup-cta: #ac3d59;  --sup-cta-ink: #ffffff;   /* deepened berry: white at 5.9:1 */
   --sup-lift: 0 0 0 1px rgba(0, 0, 0, .02), 0 2px 6px rgba(0, 0, 0, .04), 0 4px 8px rgba(0, 0, 0, .1);
   --sup-plate: color-mix(in srgb, var(--berry) 9%, var(--raise));
 }
@@ -383,12 +384,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
   90% { transform: scale(1.22); } 92% { transform: scale(1.02); } 94% { transform: scale(1.14); } 96% { transform: scale(1); }
 }
 
-/* ---- the card under the channel list: picture plate (the owlet), title, one line */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --sup-cta: var(--berry); --sup-cta-ink: var(--on-accent); }
+}
+:root[data-theme="dark"] { --sup-cta: var(--berry); --sup-cta-ink: var(--on-accent); }
+
+/* ---- the card under the channel list: a solid accent button, so it is seen.
+   The owlet on a lighter plate, a white heart badge, title, one line, chevron. */
 .support-card {
   display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0 16px;
   width: 100%; margin-top: 16px; padding: 12px 16px 12px 12px; min-height: 80px;
-  text-align: left; font: inherit; color: var(--fg);
-  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  text-align: left; font: inherit; color: var(--sup-cta-ink);
+  background: var(--sup-cta); border: 0; border-radius: 14px;
   -webkit-tap-highlight-color: transparent;
   transition: box-shadow .2s ease, transform .2s cubic-bezier(.2, .8, .3, 1);
 }
@@ -396,21 +403,22 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .support-card:active { transform: scale(.985); }
 .support-card-ico {
   position: relative; display: grid; place-items: center;
-  width: 56px; height: 56px; border-radius: 14px; background: var(--sup-plate);
+  width: 56px; height: 56px; border-radius: 14px; background: color-mix(in srgb, var(--sup-cta-ink) 18%, transparent);
 }
 .support-card-ico canvas { width: 52px; height: 46px; }
 .support-card-heart {
-  position: absolute; right: -5px; bottom: -4px; width: 22px; height: 22px; fill: var(--berry);
+  position: absolute; right: -5px; bottom: -4px; width: 22px; height: 22px; fill: var(--sup-cta-ink);
   transform-origin: 50% 55%; animation: heart-idle 7s 1.5s ease-in-out infinite;
 }
 .support-card-tt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.support-card-tt b { font-size: 16px; font-weight: 600; line-height: 1.25; }
-.support-card-tt span { font-size: 14px; line-height: 1.43; color: var(--dim); }
+.support-card-tt b { font-size: 17px; font-weight: 600; line-height: 1.25; }
+.support-card-tt span { font-size: 14px; line-height: 1.43; opacity: .92; }
 .support-card-go svg {
   width: 20px; height: 20px; display: block;
   fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
 }
-.support-card-go { color: var(--fg); transition: transform .14s ease; }
+.support-card-go { color: var(--sup-cta-ink); transition: transform .14s ease; }
+.support-card:active { background: color-mix(in srgb, var(--sup-cta) 88%, #000); }
 .support-card:hover .support-card-go { transform: translateX(3px); }
 
 /* ---- the update board's way in: the accent pill */

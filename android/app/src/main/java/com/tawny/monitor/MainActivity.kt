@@ -1587,6 +1587,71 @@ class MainActivity : AppCompatActivity() {
      * animations"), which also leaves alpha at 1 so nothing can strand
      * invisible.
      */
+    /**
+     * The one way in to Support Tawny, as a button of its own rather than a row
+     * in the settings list, where it read like "Rate Tawny" and went unseen.
+     * A solid berry card: the heart in a lighter circle (beating now and then),
+     * the title in bold, one line beneath, a chevron. On the light palette the
+     * berry is deepened so white text clears 5.5:1; the dark palette's brass
+     * already carries dark text at 7:1.
+     */
+    private fun supportButton(onClick: () -> Unit): LinearLayout {
+        val fill = if (currentTheme() == "dark") Hue.BERRY
+                   else androidx.core.graphics.ColorUtils.blendARGB(Hue.BERRY, Color.BLACK, 0.18f)
+        val ink = Hue.ON_ACCENT
+        val soft = androidx.core.graphics.ColorUtils.setAlphaComponent(ink, 0x2E)
+        val heart = IconView(this, "heart", behind = soft, tint = ink).apply {
+            layoutParams = FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER)
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = pressable(roundRect(fill, fill, Radius.CARD), Radius.CARD,
+                androidx.core.graphics.ColorUtils.blendARGB(fill, Color.BLACK, 0.12f))
+            setPadding(dp(14), dp(14), dp(16), dp(14))
+            minimumHeight = dp(76)
+            layoutParams = lp(topMargin = 30)
+            contentDescription = getString(R.string.meta_support)
+            addView(FrameLayout(this@MainActivity).apply {
+                background = roundRect(soft, soft, 24)
+                layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+                addView(heart)
+            })
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(14) }
+                addView(TextView(this@MainActivity).apply {
+                    text = getString(R.string.meta_support)
+                    setTextColor(ink); textSize = 18f; typeface = uiFontSemi; maxLines = 1
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = getString(R.string.support_row_sub)
+                    setTextColor(androidx.core.graphics.ColorUtils.setAlphaComponent(ink, 0xE6))
+                    textSize = 13.5f; typeface = uiFont; maxLines = 2
+                    setPadding(0, dp(2), 0, 0)
+                })
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = "›"; setTextColor(ink); textSize = 24f; typeface = uiFontSemi
+                setPadding(dp(8), 0, 0, dp(2))
+            })
+            tapFeedback {
+                heart.beat(strong = true, scale = animScale)
+                postDelayed(onClick, (180 * animScale).toLong().coerceAtMost(220))
+            }
+            // A double beat every few seconds while it is on screen: enough to
+            // catch the eye, never a flashing badge. Off with Animations off.
+            val idle = object : Runnable {
+                override fun run() {
+                    if (!isAttachedToWindow) return
+                    heart.beat(strong = true, scale = animScale)
+                    postDelayed(this, 6500)
+                }
+            }
+            if (animScale > 0f) postDelayed(idle, 2200)
+        }
+    }
+
     private fun metaPanel(vararg rows: View) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = roundRect(Hue.PANEL, Hue.LINE, Radius.CARD)
@@ -3109,12 +3174,10 @@ class MainActivity : AppCompatActivity() {
         // or pairing: an ask inside the setup funnel reads as a paywall, which
         // is the exact complaint the whole category earns (docs/DIRECTION.md,
         // part 2). Nothing here unlocks anything — see [showAbout].
+        // One way in to the Support sheet (public/tip.js): Ko-fi and Bitcoin
+        // live inside it, the same on every platform.
+        col.addView(supportButton { lnFromAbout = false; showSupport() })
         col.addView(metaPanel(
-            // One way in to the Support sheet (public/tip.js): Ko-fi and Bitcoin
-            // live inside it, the same on every platform.
-            metaRow("heart", getString(R.string.meta_support), Hue.BERRY, "›", sub = getString(R.string.support_row_sub)) {
-                lnFromAbout = false; showSupport()
-            },
             metaRow("star", getString(R.string.meta_rate), Hue.TEXT, "↗") { openStoreListing() },
         ))
         // Settings and help, apart from the asks above: a change of subject.
@@ -3256,10 +3319,8 @@ class MainActivity : AppCompatActivity() {
         col.addView(aboutBody(
             getString(R.string.about_keeping_body)
         ))
+        col.addView(supportButton { lnFromAbout = true; showSupport() })
         col.addView(metaPanel(
-            metaRow("heart", getString(R.string.meta_support), Hue.BERRY, "›", sub = getString(R.string.support_row_sub)) {
-                lnFromAbout = true; showSupport()
-            },
             metaRow("mail", getString(R.string.meta_email_us), Hue.TEXT, "↗", sub = SUPPORT_EMAIL) {
                 try {
                     startActivity(
@@ -4455,12 +4516,7 @@ class MainActivity : AppCompatActivity() {
             setLineSpacing(0f, 1.05f)
             setPadding(dp(4), dp(6), dp(4), 0)
         })
-        card.addView(metaPanel(
-            metaRow("heart", getString(R.string.meta_support), Hue.BERRY, "›", sub = getString(R.string.support_row_sub)) {
-                whatsNewDialog?.dismiss(); lnFromAbout = false; showSupport()
-            },
-        ).apply {
-            background = roundRect(Hue.BG, Hue.LINE, Radius.CARD)
+        card.addView(supportButton { whatsNewDialog?.dismiss(); lnFromAbout = false; showSupport() }.apply {
             layoutParams = LinearLayout.LayoutParams(MP, WC).also { it.topMargin = dp(14) }
         })
         card.addView(primary(getString(R.string.whatsnew_done)) { whatsNewDialog?.dismiss() }.apply {
