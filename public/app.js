@@ -32,7 +32,8 @@ const el = {
   stageNoteBody: $('#stage-note-body'),
   dot: $('#dot'), statusline: $('#statusline'), channel: $('#channel'),
   meter: $('#meter'), dimMeter: $('#dim-meter'), dimmer: $('#dimmer'),
-  talkflag: $('#talkflag'), chimes: $('#chimes'), toast: $('#toast'),
+  talkflag: $('#talkflag'), chimes: $('#chimes'), toast: $('#toast'), announcer: $('#announcer'),
+  delConfirm: $('#del-confirm'), dimWake: $('#dim-wake'),
   cViewer: $('#controls-viewer'), cStation: $('#controls-station'),
   pair: $('#pair'), pairName: $('#pair-name'), qr: $('#qr'),
   pairProfile: $('#pair-profile'), pairCustomWrap: $('#pair-custom-wrap'),
@@ -283,7 +284,17 @@ async function roomIdFor(key) {
 
 // --------------------------------------------------------------- helpers
 
+/** Say something to a screen reader. Cleared first, so the same words twice
+ *  are read twice. */
+function announce(msg) {
+  if (!el.announcer) return;
+  el.announcer.textContent = '';
+  clearTimeout(announce._t);
+  announce._t = setTimeout(() => { el.announcer.textContent = msg; }, 60);
+}
+
 function toast(msg, ms = 2600) {
+  announce(msg);
   el.toast.textContent = msg;
   el.toast.hidden = false;
   clearTimeout(toast._t);
@@ -435,10 +446,53 @@ window.addEventListener('resize', () => {
 
 const SHEET_MS = 300;
 
+// Focus goes into a sheet when it opens, stays inside while it is up, and
+// returns to whatever opened it. A sheet opened from inside another sheet
+// (Rename, from the row menu) hands back to the first sheet's opener, since
+// the button that opened it is about to disappear.
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
+function sheetFocusables(node) {
+  return [...node.querySelectorAll(FOCUSABLE)].filter((n) => !n.closest('[hidden]'));
+}
+
+function topSheet() {
+  let top = null;
+  for (const n of document.querySelectorAll('.sheet:not([hidden])')) {
+    if (n.classList.contains('is-closing')) continue;
+    if (!top || (+getComputedStyle(n).zIndex || 0) >= (+getComputedStyle(top).zIndex || 0)) top = n;
+  }
+  return top;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const sheet = topSheet();
+  if (!sheet) return;
+  const list = sheetFocusables(sheet);
+  if (!list.length) return;
+  const first = list[0], last = list[list.length - 1];
+  const inside = sheet.contains(document.activeElement);
+  if (e.shiftKey && (!inside || document.activeElement === first)) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (!inside || document.activeElement === last)) { e.preventDefault(); first.focus(); }
+});
+
 function openSheet(node) {
   if (!node) return;
   clearTimeout(node._sheetT);
+  node.classList.remove('is-closing');
+  if (node.hidden) {
+    let opener = document.activeElement;
+    const host = opener?.closest?.('.sheet');
+    if (host && host !== node) opener = host._opener || null;
+    node._opener = opener && opener !== document.body ? opener : null;
+  }
   node.hidden = false;
+  const card = node.querySelector('.sheet-card');
+  if (card && !card.contains(document.activeElement)) {
+    card.tabIndex = -1;
+    card.focus({ preventScroll: true });
+  }
   if (motionOff()) { node.classList.add('is-open'); return; }
   // One frame at the resting transform, so the transition has somewhere to
   // come from — adding the class in the same tick as `hidden = false` skips it.
@@ -450,8 +504,15 @@ function closeSheet(node) {
   if (!node || node.hidden) { node?.classList.remove('is-open'); return; }
   clearTimeout(node._sheetT);
   node.classList.remove('is-open');
-  if (motionOff()) { node.hidden = true; return; }
-  node._sheetT = setTimeout(() => { node.hidden = true; }, SHEET_MS);
+  node.classList.add('is-closing');
+  const opener = node._opener;
+  node._opener = null;
+  if (node.contains(document.activeElement) || document.activeElement === document.body) {
+    if (opener?.isConnected && !opener.closest('[hidden]')) opener.focus({ preventScroll: true });
+    else document.activeElement?.blur?.();
+  }
+  if (motionOff()) { node.hidden = true; node.classList.remove('is-closing'); return; }
+  node._sheetT = setTimeout(() => { node.hidden = true; node.classList.remove('is-closing'); }, SHEET_MS);
 }
 
 /**
@@ -466,22 +527,24 @@ function dismissSheet(node) {
   if (node === el.editor) { closeSheet(node); S.editing = null; return; }
   if (node === el.rowMenu) { closeRowMenu(); return; }
   if (node === el.tip) { closeTip(); return; }
+  if (node === el.delConfirm) { closeDelete(); return; }
   closeSheet(node);
 }
 
-for (const sheet of [el.pair, el.editor, el.rowMenu, el.scanner, el.who, el.myname, el.tip]) {
+for (const sheet of [el.pair, el.editor, el.rowMenu, el.scanner, el.who, el.myname, el.tip, el.delConfirm]) {
   if (!sheet) continue;
   sheet.addEventListener('click', (e) => { if (e.target === sheet) dismissSheet(sheet); });
 }
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  for (const sheet of [el.tip, el.myname, el.who, el.rowMenu, el.editor, el.scanner, el.pair]) {
+  for (const sheet of [el.delConfirm, el.tip, el.myname, el.who, el.rowMenu, el.editor, el.scanner, el.pair]) {
     if (sheet && !sheet.hidden) { e.preventDefault(); dismissSheet(sheet); return; }
   }
 });
 
 function status(text, kind) {
+  if (text !== el.statusline.textContent) announce(text);
   el.statusline.textContent = text;
   el.dot.className = 'dot' + (kind ? ' ' + kind : '');
   // A nominal state (live, or a connection still coming up) collapses to just
@@ -714,7 +777,7 @@ function deleteChannel(ch) {
     localStorage.removeItem(`tawny.role.${ch.id}`);
   } catch {}
   renderChannels();
-  toast('Monitor removed');
+  toast('Channel deleted');
 }
 
 // The channel row's overflow sheet. One channel at a time; the buttons are
@@ -740,12 +803,31 @@ $('#row-switch-role')?.addEventListener('click', () => {
   closeRowMenu();
   if (ch) openRole(ch, true);
 });
+// Deleting asks first, in a sheet of its own rather than the browser's
+// confirm() box, which looks like nothing else in Tawny.
+let deleting = null;
+
 $('#row-delete').addEventListener('click', () => {
   const ch = menuChannel;
   closeRowMenu();
   if (!ch) return;
-  if (!confirm(`Delete "${ch.name}"? Devices paired to it will stop connecting.`)) return;
+  deleting = ch;
+  $('#del-title').textContent = `Delete \u201c${shownName(ch.name)}\u201d?`;
+  openSheet(el.delConfirm);
+  $('#del-cancel').focus({ preventScroll: true });
+});
+
+function closeDelete() { closeSheet(el.delConfirm); deleting = null; }
+
+$('#del-cancel').addEventListener('click', closeDelete);
+$('#del-go').addEventListener('click', () => {
+  const ch = deleting;
+  closeDelete();
+  if (!ch) return;
   deleteChannel(ch);
+  // The row (and its ⋯ button, where focus just went back to) is gone.
+  if (!document.activeElement || document.activeElement === document.body
+      || !document.activeElement.isConnected) $('#ch-add')?.focus({ preventScroll: true });
 });
 
 function openEditor(ch) {
@@ -2899,9 +2981,6 @@ function maybeAskMyName() {
 
 if (el.peercount) {
   el.peercount.addEventListener('click', openWho);
-  el.peercount.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openWho(); }
-  });
 }
 $('#who-close')?.addEventListener('click', () => closeSheet(el.who));
 $('#who-rename')?.addEventListener('click', () => { closeSheet(el.who); openMyName(); });
@@ -4874,6 +4953,8 @@ async function setDim(on) {
   S.dimmed = on;
   el.dimmer.hidden = !on;
   document.body.classList.toggle('dimmed', on);
+  if (on) el.dimWake?.focus({ preventScroll: true });
+  else if (el.dimmer.contains(document.activeElement)) $('#btn-dim')?.focus({ preventScroll: true });
   try { androidNative?.setDimmed?.(on); } catch {}
 
   // The self-preview is a second, full-rate video sink for a stream this phone

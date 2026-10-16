@@ -344,6 +344,7 @@
     has(l) { return Object.prototype.hasOwnProperty.call(DICT, l); },
     set(l) {
       if (l && T.has(l)) T.lang = l;
+      document.documentElement.lang = T.lang;
       T.applyStatic();
     },
     t(key) {
@@ -366,11 +367,23 @@
     },
   };
 
+  // A browser (Docker, Desktop) starts in the first language its user lists
+  // that we have. The Android shell always passes its own choice through
+  // tawnyStart(), which calls set() and overrides this.
+  try {
+    const want = navigator.languages && navigator.languages.length
+      ? navigator.languages : [navigator.language];
+    for (const tag of want) {
+      const base = String(tag || '').toLowerCase().split('-')[0];
+      if (T.has(base)) { T.lang = base; break; }
+    }
+  } catch (e) {}
+
   window.TawnyT = T;
   window.t = function () { return T.t.apply(T, arguments); };
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function () { T.applyStatic(); });
+    document.addEventListener('DOMContentLoaded', function () { T.set(T.lang); });
   } else {
-    T.applyStatic();
+    T.set(T.lang);
   }
 })();
