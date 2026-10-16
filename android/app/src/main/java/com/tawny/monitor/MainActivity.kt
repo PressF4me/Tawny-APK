@@ -238,6 +238,9 @@ object Radius {
  * accent. Mirrors public/style.css. Call [load] before building any UI.
  * (Field names are roles, not literal hues — BERRY is bronze in dark mode.)
  */
+/** The heart on Support Tawny: red on every palette, not the accent (brass in the dark). */
+val HEART_RED = 0xFFE0344F.toInt()
+
 object Hue {
     var BG = 0; var PANEL = 0; var RAISE = 0; var LINE = 0
     var TEXT = 0; var DIM = 0; var BERRY = 0; var SKY = 0
@@ -1590,65 +1593,66 @@ class MainActivity : AppCompatActivity() {
     /**
      * The one way in to Support Tawny, as a button of its own rather than a row
      * in the settings list, where it read like "Rate Tawny" and went unseen.
-     * A solid berry card: the heart in a lighter circle (beating now and then),
-     * the title in bold, one line beneath, a chevron. On the light palette the
-     * berry is deepened so white text clears 5.5:1; the dark palette's brass
-     * already carries dark text at 7:1.
+     * It stands out by inverting the page: an ink card with paper-coloured
+     * text (TEXT on BG flipped — dark on the light palette, light on the dark
+     * one, ~11:1 either way), so it needs no accent fill. The heart is always
+     * red, whatever the palette's accent, and beats softly every few seconds;
+     * a press gives it the full double beat. Compact: one line of title, one
+     * of subtitle.
      */
     private fun supportButton(onClick: () -> Unit): LinearLayout {
-        val fill = if (currentTheme() == "dark") Hue.BERRY
-                   else androidx.core.graphics.ColorUtils.blendARGB(Hue.BERRY, Color.BLACK, 0.18f)
-        val ink = Hue.ON_ACCENT
-        val soft = androidx.core.graphics.ColorUtils.setAlphaComponent(ink, 0x2E)
-        val heart = IconView(this, "heart", behind = soft, tint = ink).apply {
-            layoutParams = FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER)
+        val fill = Hue.TEXT
+        val ink = Hue.BG
+        val soft = androidx.core.graphics.ColorUtils.setAlphaComponent(ink, 0x1F)
+        val heart = IconView(this, "heart", behind = fill, tint = HEART_RED).apply {
+            layoutParams = FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER)
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = pressable(roundRect(fill, fill, Radius.CARD), Radius.CARD,
-                androidx.core.graphics.ColorUtils.blendARGB(fill, Color.BLACK, 0.12f))
-            setPadding(dp(14), dp(14), dp(16), dp(14))
-            minimumHeight = dp(76)
-            layoutParams = lp(topMargin = 30)
+                androidx.core.graphics.ColorUtils.blendARGB(fill, ink, 0.12f))
+            setPadding(dp(10), dp(9), dp(14), dp(9))
+            minimumHeight = dp(58)
+            layoutParams = lp(topMargin = 28)
             contentDescription = getString(R.string.meta_support)
             addView(FrameLayout(this@MainActivity).apply {
-                background = roundRect(soft, soft, 24)
-                layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+                background = roundRect(soft, soft, 18)
+                layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
                 addView(heart)
             })
             addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(14) }
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f).also { it.leftMargin = dp(12) }
                 addView(TextView(this@MainActivity).apply {
                     text = getString(R.string.meta_support)
-                    setTextColor(ink); textSize = 18f; typeface = uiFontSemi; maxLines = 1
+                    setTextColor(ink); textSize = 15.5f; typeface = uiFontSemi; maxLines = 1
                 })
                 addView(TextView(this@MainActivity).apply {
                     text = getString(R.string.support_row_sub)
-                    setTextColor(androidx.core.graphics.ColorUtils.setAlphaComponent(ink, 0xE6))
-                    textSize = 13.5f; typeface = uiFont; maxLines = 2
-                    setPadding(0, dp(2), 0, 0)
+                    setTextColor(androidx.core.graphics.ColorUtils.setAlphaComponent(ink, 0xD9))
+                    textSize = 12.5f; typeface = uiFont; maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                 })
             })
             addView(TextView(this@MainActivity).apply {
-                text = "›"; setTextColor(ink); textSize = 24f; typeface = uiFontSemi
+                text = "›"; setTextColor(ink); textSize = 20f; typeface = uiFontSemi
                 setPadding(dp(8), 0, 0, dp(2))
             })
             tapFeedback {
                 heart.beat(strong = true, scale = animScale)
                 postDelayed(onClick, (180 * animScale).toLong().coerceAtMost(220))
             }
-            // A double beat every few seconds while it is on screen: enough to
-            // catch the eye, never a flashing badge. Off with Animations off.
+            // A soft beat every few seconds while it is on screen: alive, not a
+            // flashing badge. Off with Animations off.
             val idle = object : Runnable {
                 override fun run() {
                     if (!isAttachedToWindow) return
-                    heart.beat(strong = true, scale = animScale)
-                    postDelayed(this, 6500)
+                    heart.beat(strong = false, scale = animScale)
+                    postDelayed(this, 2800)
                 }
             }
-            if (animScale > 0f) postDelayed(idle, 2200)
+            if (animScale > 0f) postDelayed(idle, 1200)
         }
     }
 
