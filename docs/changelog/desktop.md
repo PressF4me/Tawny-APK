@@ -2,6 +2,28 @@
 
 Newest first. Linux AppImage and Flatpak.
 
+## 0.1.11
+
+Changes since 0.1.10. Same web client as Tawny for Android 1.0.3 (build 46, rebuilt from 5908d90).
+
+**New**
+- Support Tawny: one sheet from a red heart in the Channels bar, a card under
+  the channel list and a button on the update board. Tawny's cat, owlet and
+  dog, Buy a coffee (Ko-fi) and Tip in Bitcoin, with a hand-drawn QR code the
+  owlet perches on and the amount set large when the tip lands. `…/#support`
+  opens it directly.
+- Spanish for every screen before the call, picked from this computer's
+  language.
+
+**Changed**
+- Screen readers hear toasts and connection changes; the viewer count and
+  the dimmed screen's wake label are real buttons; sheets hold focus and give
+  it back. After a tap no focus ring is drawn; after a key it is.
+- Deleting a channel asks in a Tawny sheet instead of the browser's dialog.
+
+**Fixed**
+- Enter in the name field no longer re-presses the button focus returns to.
+
 ## 0.1.10
 
 Changes since 0.1.9. Same web client as Tawny for Android 1.0.3 (build 46).
