@@ -422,7 +422,8 @@
     <string name="whatsnew_eyebrow">Updated to v%1$s</string>
     <string name="whatsnew_title">Tawny just got better</string>
     <string-array name="whatsnew_notes">
-        <item>Tip in Bitcoin has a cleaner screen that matches the rest of Tawny: Open wallet up front, and on a phone without a wallet, a code to scan from one that has it and a button to pay on strike.me</item>
+        <item>Support Tawny is one new screen with the cat, the owlet and the dog: buy a coffee on Ko-fi, or tip in Bitcoin with Open wallet and your Lightning address as a code to scan</item>
+        <item>The live screen works better with screen readers: connection changes are read out, and Who\'s here and the dimmed screen are proper buttons</item>
     </string-array>
     <string name="whatsnew_changelog">Read the full changelog</string>
     <string name="whatsnew_thanks">Thank you for supporting Tawny. It stays free for everyone because of people like you.</string>

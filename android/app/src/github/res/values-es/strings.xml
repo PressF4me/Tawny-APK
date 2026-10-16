@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string-array name="whatsnew_notes">
-        <item>Propina en Bitcoin, renovada: elige $2, $5, $10 o tu propio monto, y escanea el código o abre tu billetera</item>
-        <item>Cuando llega tu propina, Tawny te da las gracias al instante</item>
+        <item>Apoya a Tawny es una pantalla nueva con el gato, la lechucita y el perro: invita un café en Ko-fi o da una propina en Bitcoin: elige $2, $5, $10 o tu propio monto y escanea el código</item>
+        <item>Cuando llega tu propina, los tres lo celebran y Tawny te da las gracias</item>
+        <item>La pantalla en vivo funciona mejor con lectores de pantalla: se anuncian los cambios de conexión, y Quién está y la pantalla atenuada son botones de verdad</item>
     </string-array>
 </resources>

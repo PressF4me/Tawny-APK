@@ -4,7 +4,8 @@
     <string name="app_name" translatable="false">Tawny (GitHub)</string>
     <!-- This build's own update notes (it has the full tip flow; Play keeps the hand-off). -->
     <string-array name="whatsnew_notes">
-        <item>Tip in Bitcoin, redone: pick $2, $5, $10 or your own amount, then scan the code or open your wallet</item>
-        <item>When your tip arrives, Tawny says thank you right away</item>
+        <item>Support Tawny is one new screen with the cat, the owlet and the dog: buy a coffee on Ko-fi, or tip in Bitcoin: pick $2, $5, $10 or your own amount and scan the code</item>
+        <item>When your tip arrives, the three of them celebrate and Tawny says thank you</item>
+        <item>The live screen works better with screen readers: connection changes are read out, and Who\'s here and the dimmed screen are proper buttons</item>
     </string-array>
 </resources>

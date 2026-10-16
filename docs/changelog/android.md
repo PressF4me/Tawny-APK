@@ -6,18 +6,27 @@ Newest first. Google Play builds.
 
 Changes since 1.0.2.
 
+**New**
+- Support Tawny: one screen, the same on every platform, opened from the
+  Support row on the home screen, in About and on the update board. Tawny's
+  cat, owlet and dog sit at the top (tap one and it reacts), then two choices:
+  Buy a coffee on Ko-fi, or Tip in Bitcoin. On Google Play, Tip in Bitcoin
+  shows Open wallet, the Lightning address as a QR code to scan from another
+  phone, a Copy button and Pay on strike.me; your wallet asks for the amount.
+- The GitHub APK gets the full tip flow on the same screen: pick $2, $5, $10
+  or type your own amount, and Tawny asks the tip address for an invoice of
+  exactly that, shown as a QR code with Open wallet. The owlet perched on the
+  code hops once per amount step. When the payment lands, the three of them
+  celebrate and the amount is shown large. Tawny hears about it from the
+  signed receipt the tip service publishes on public Nostr relays, and never
+  holds a key or a satoshi.
+
 **Changed**
-- Tip in Bitcoin has a cleaner screen that matches the rest of Tawny: the bolt
-  and title at the top, Open wallet as the main button, and the Lightning
-  address with a Copy button. On a phone with no wallet, the screen shows the
-  address as a QR code to scan from a phone that has one, and a button to pay
-  on strike.me instead.
-- The GitHub APK gets the full tip flow (Google Play keeps the plain hand-off
-  above): pick $2, $5, $10 or type your own amount, and Tawny asks the tip
-  address for an invoice of exactly that, shown as a QR code with an Open
-  wallet button. When the payment lands, the screen turns into a thank-you.
-  Tawny hears about it from the signed receipt the tip service publishes on
-  public Nostr relays, and never holds a key or a satoshi.
+- The live screen works better with screen readers and keyboards: connection
+  changes and short messages are read out, the phone count (which opens Who's
+  here) and the dimmed screen's wake label are proper buttons, and the Who's
+  here and name sheets keep focus inside while open and give it back when
+  closed.
 
 ## 1.0.2 (build 45)
 

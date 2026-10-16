@@ -423,7 +423,8 @@
     <string name="whatsnew_eyebrow">Actualizado a v%1$s</string>
     <string name="whatsnew_title">Tawny ahora es mejor</string>
     <string-array name="whatsnew_notes">
-        <item>Propina en Bitcoin tiene una pantalla más limpia, igual al resto de Tawny: Abrir en la billetera primero y, en un teléfono sin billetera, un código para escanear desde otro que la tenga y un botón para pagar en strike.me</item>
+        <item>Apoya a Tawny es una pantalla nueva con el gato, la lechucita y el perro: invita un café en Ko-fi o da una propina en Bitcoin con Abrir billetera y tu dirección Lightning como código para escanear</item>
+        <item>La pantalla en vivo funciona mejor con lectores de pantalla: se anuncian los cambios de conexión, y Quién está y la pantalla atenuada son botones de verdad</item>
     </string-array>
     <string name="whatsnew_changelog">Ver el registro de cambios</string>
     <string name="whatsnew_thanks">Gracias por apoyar Tawny. Sigue siendo gratis para todos gracias a personas como tú.</string>
