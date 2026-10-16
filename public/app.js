@@ -444,6 +444,19 @@ window.addEventListener('resize', () => {
 
 const SHEET_MS = 300;
 
+// Where a script moves focus, the ring follows the last input: shown after a
+// key, never after a tap. Chrome otherwise carries a ring over from whatever
+// was focused before, which on a phone means a bright outline on a screen
+// that was just touched — or on the dimmed black one.
+let keyboardLast = false;
+addEventListener('keydown', (e) => { if (!e.isComposing) keyboardLast = true; }, true);
+addEventListener('pointerdown', () => { keyboardLast = false; }, true);
+function moveFocus(node) {
+  if (!node) return;
+  try { node.focus({ preventScroll: true, focusVisible: keyboardLast }); }
+  catch { node.focus(); }
+}
+
 // Focus goes into a sheet when it opens, stays inside while it is up, and
 // returns to whatever opened it. A sheet opened from inside another sheet
 // (Rename, from the row menu) hands back to the first sheet's opener, since
@@ -489,7 +502,7 @@ function openSheet(node) {
   const card = node.querySelector('.sheet-card');
   if (card && !card.contains(document.activeElement)) {
     card.tabIndex = -1;
-    card.focus({ preventScroll: true });
+    moveFocus(card);
   }
   if (motionOff()) { node.classList.add('is-open'); return; }
   // One frame at the resting transform, so the transition has somewhere to
@@ -506,7 +519,7 @@ function closeSheet(node) {
   const opener = node._opener;
   node._opener = null;
   if (node.contains(document.activeElement) || document.activeElement === document.body) {
-    if (opener?.isConnected && !opener.closest('[hidden]')) opener.focus({ preventScroll: true });
+    if (opener?.isConnected && !opener.closest('[hidden]')) moveFocus(opener);
     else document.activeElement?.blur?.();
   }
   if (motionOff()) { node.hidden = true; node.classList.remove('is-closing'); return; }
@@ -812,7 +825,7 @@ $('#row-delete').addEventListener('click', () => {
   deleting = ch;
   $('#del-title').textContent = TawnyT.t('w_del_title', shownName(ch.name));
   openSheet(el.delConfirm);
-  $('#del-cancel').focus({ preventScroll: true });
+  moveFocus($('#del-cancel'));
 });
 
 function closeDelete() { closeSheet(el.delConfirm); deleting = null; }
@@ -825,7 +838,7 @@ $('#del-go').addEventListener('click', () => {
   deleteChannel(ch);
   // The row (and its ⋯ button, where focus just went back to) is gone.
   if (!document.activeElement || document.activeElement === document.body
-      || !document.activeElement.isConnected) $('#ch-add')?.focus({ preventScroll: true });
+      || !document.activeElement.isConnected) moveFocus($('#ch-add'));
 });
 
 function openEditor(ch) {
@@ -4946,8 +4959,8 @@ async function setDim(on) {
   S.dimmed = on;
   el.dimmer.hidden = !on;
   document.body.classList.toggle('dimmed', on);
-  if (on) el.dimWake?.focus({ preventScroll: true });
-  else if (el.dimmer.contains(document.activeElement)) $('#btn-dim')?.focus({ preventScroll: true });
+  if (on) moveFocus(el.dimWake);
+  else if (el.dimmer.contains(document.activeElement)) moveFocus($('#btn-dim'));
   try { androidNative?.setDimmed?.(on); } catch {}
 
   // The self-preview is a second, full-rate video sink for a stream this phone
