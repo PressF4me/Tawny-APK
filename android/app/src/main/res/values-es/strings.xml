@@ -423,8 +423,9 @@
     <string name="whatsnew_eyebrow">Actualizado a v%1$s</string>
     <string name="whatsnew_title">Tawny ahora es mejor</string>
     <string-array name="whatsnew_notes">
-        <item>Apoya a Tawny es una pantalla nueva con el gato, la lechucita y el perro: invita un café en Ko-fi o da una propina en Bitcoin con Abrir billetera y tu dirección Lightning como código para escanear</item>
-        <item>La pantalla en vivo funciona mejor con lectores de pantalla: se anuncian los cambios de conexión, y Quién está y la pantalla atenuada son botones de verdad</item>
+        <item>Actualización de seguridad: los enlaces de emparejamiento se revisan con más rigor, así que un enlace no puede mostrar un nombre engañoso cuando pide conectarse</item>
+        <item>Corregido: un enlace de emparejamiento con caracteres inusuales en el nombre podía dejar en blanco la pantalla en vivo</item>
+        <item>Tawny ahora se compila con herramientas actualizadas y parcheadas tras una revisión de seguridad completa</item>
     </string-array>
     <string name="whatsnew_changelog">Ver el registro de cambios</string>
     <string name="whatsnew_thanks">Gracias por apoyar Tawny. Sigue siendo gratis para todos gracias a personas como tú.</string>

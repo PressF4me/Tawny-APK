@@ -2,6 +2,29 @@
 
 Newest first. Google Play builds.
 
+## 1.0.4 (build 47)
+
+Changes since 1.0.3. A security update, after a review of the app, its
+libraries and the tools it is built with. Nothing here was known to have been
+used against anyone.
+
+**Security**
+- Pairing links are checked more strictly. The channel name a link carries
+  loses control characters and the invisible characters that reverse text
+  direction, so a link cannot make the "Connect to …?" prompt read as
+  something other than what it is.
+- The app is built with patched tools: the Kotlin build plugin had a known
+  vulnerability (CVE-2026-53914), and moving off it brought the Android build
+  tools up to date as well. The download of the build tool itself is now
+  checked against its published checksum.
+- No vulnerable libraries were found in the app. The review also covered the
+  project's history for leaked keys and its GitHub repositories for tampering,
+  and found neither.
+
+**Fixed**
+- A pairing link whose channel name contained a line break could leave the
+  live screen blank instead of starting.
+
 ## 1.0.3 (build 46)
 
 Changes since 1.0.2.

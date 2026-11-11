@@ -4,8 +4,8 @@
     <string name="app_name" translatable="false">Tawny (GitHub)</string>
     <!-- This build's own update notes (it has the full tip flow; Play keeps the hand-off). -->
     <string-array name="whatsnew_notes">
-        <item>Support Tawny is one new screen with the cat, the owlet and the dog: buy a coffee on Ko-fi, or tip in Bitcoin: pick $2, $5, $10 or your own amount and scan the code</item>
-        <item>When your tip arrives, the three of them celebrate and Tawny says thank you</item>
-        <item>The live screen works better with screen readers: connection changes are read out, and Who\'s here and the dimmed screen are proper buttons</item>
+        <item>Security update: pairing links are checked more strictly, so a link cannot show a misleading name when it asks to connect</item>
+        <item>Fixed: a pairing link with unusual characters in its name could leave the live screen blank</item>
+        <item>Tawny is now built with up-to-date, patched tools after a full security review</item>
     </string-array>
 </resources>
