@@ -6275,8 +6275,16 @@ class MainActivity : AppCompatActivity() {
         if (currentTheme() == before) rebuild?.invoke()
     }
 
+    /**
+     * A Kotlin string as a JavaScript string literal, for evaluateJavascript.
+     * JSONObject.quote escapes quotes, backslashes and every control character;
+     * a bare carriage return (a pairing link can put one in a channel name) is
+     * a line break inside a JS literal, which made the whole call a syntax
+     * error and left the page unstarted. U+2028/U+2029 were line breaks in
+     * older JavaScript too, so they are escaped as well.
+     */
     private fun jsStr(s: String) =
-        "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""
+        org.json.JSONObject.quote(s).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
     private fun has(p: String) =
         ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED

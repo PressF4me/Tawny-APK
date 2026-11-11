@@ -78,6 +78,15 @@ class PairLinkTest {
     }
 
     @Test
+    fun `control and bidi-override characters are dropped from the name`() {
+        val k = "0123456789abcdef0123456789abcdef"
+        val p = parse("tawny://pair?k=$k&h=192.168.1.20:8080&n=Re%0Dx%0A%E2%80%AEtoR%E2%80%A8%00!")
+        assertEquals("RextoR!", p?.name)
+        // Nothing left once they are gone: the default, not an empty title.
+        assertEquals("Pet camera", parse("tawny://pair?k=$k&h=192.168.1.20:8080&n=%0D%E2%80%AE")?.name)
+    }
+
+    @Test
     fun `a public IP in h is dropped, not dialled`() {
         // 8.8.8.8 is not a home LAN. With no relay and no rendezvous there is
         // then nothing left to dial, so the link is refused outright.
