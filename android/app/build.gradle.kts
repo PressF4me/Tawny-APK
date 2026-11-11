@@ -125,8 +125,13 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
+}
+
+// The Kotlin plugin's own block: `android { kotlinOptions { … } }` is an error
+// from Kotlin 2.2 on.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -161,7 +166,7 @@ dependencies {
     // emulator, no Robolectric, and it runs in a second. `./gradlew test`.
     testImplementation("junit:junit:4.13.2")
     // TipZapTest parses relay events; android.jar's org.json is only a stub on the JVM.
-    testImplementation("org.json:json:20240303")
+    testImplementation("org.json:json:20260814")
 }
 
 // The native shell serves the web app from the APK, so there is no address to

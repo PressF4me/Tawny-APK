@@ -141,11 +141,21 @@ object PairLink {
 
         // `n=` present but empty would otherwise put an empty string in the
         // "Connect to …?" dialog's title.
-        val name = q["n"]?.takeIf { it.isNotBlank() }?.take(40) ?: "Pet camera"
+        // The name is shown in the "Connect to …?" dialog and handed to the
+        // page, and it is whatever the link says. Control characters have no
+        // business in it, and the bidirectional overrides can make a dialog
+        // read as something other than what it is, so both are dropped.
+        val name = q["n"]?.filterNot { nameUnsafe(it) }?.takeIf { it.isNotBlank() }?.take(40)
+            ?: "Pet camera"
         val code = q["c"]?.takeIf { CODE_RE.matches(it) }
         val exp = q["e"]?.toLongOrNull()?.takeIf { it > 0 }?.times(1000) ?: 0L
         return Pairing(h?.let { "ws://$it" }, key, name, token, code, exp, relay, trusted)
     }
+
+    /** Control characters, line/paragraph separators, and bidi overrides/isolates. */
+    private fun nameUnsafe(c: Char): Boolean =
+        c.isISOControl() || c == '\u2028' || c == '\u2029' ||
+            c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069'
 
     /**
      * May a relay named by a link be written into this phone's settings without
