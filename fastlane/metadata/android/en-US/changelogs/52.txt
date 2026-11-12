@@ -1,0 +1,3 @@
+• Security update: pairing links are checked more strictly, so a link cannot show a misleading name when it asks to connect.
+• Fixed: a pairing link with unusual characters in its name could leave the live screen blank.
+• Built with up-to-date, patched tools after a full security review. No vulnerable libraries were found.
