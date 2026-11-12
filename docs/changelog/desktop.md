@@ -2,6 +2,17 @@
 
 Newest first. Linux AppImage and Flatpak.
 
+## 0.1.12
+
+Changes since 0.1.11. A security update. Same web client as 0.1.11.
+
+**Security**
+- Patched Rust components: rustls, rustls-webpki and webpki-roots (six
+  advisories, RUSTSEC-2026-0346 to -0349, -0381, -0382; used when the build
+  downloads its browser engine), tokio and rustix.
+- The release builds use exact, reviewed versions of every GitHub Action they
+  run, instead of tags that could be moved to different code.
+
 ## 0.1.11
 
 Changes since 0.1.10. Same web client as Tawny for Android 1.0.3 (build 46, rebuilt from 5908d90).

@@ -2,6 +2,25 @@
 
 Newest first. The self-hosted server image (`ghcr.io/pressf4me/tawny`).
 
+## 2.2.12
+
+Changes since 2.2.11. A security update. Same web client as 2.2.11.
+
+**Security**
+- The /setup actions (joining a tailnet, resetting the Tailscale identity,
+  advertising or withdrawing the home-network route, privacy settings and
+  restart) only accept a request that comes from the setup page itself, from
+  your own network, on a name that belongs to this server. Before, a page on
+  any website open in a browser on your network could send them, and behind a
+  public reverse proxy every visitor counted as being on your network.
+- If you open /setup through your own domain, add it to
+  `TAWNY_ALLOWED_HOSTS`. IP addresses, `.ts.net` names and home-network names
+  work as before.
+- "Reset Tailscale identity" is refused on a server that is already joined
+  and running, like "join" already was.
+- The image's release build uses exact, reviewed versions of every GitHub
+  Action it runs.
+
 ## 2.2.11
 
 Changes since 2.2.10. Same web client as Tawny for Android 1.0.3 (build 46, rebuilt from 5908d90).
